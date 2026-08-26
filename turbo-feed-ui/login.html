@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TurboFeed · 登录</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #2d3646;
+    --text: #e6edf3;
+    --text-dim: #8b98ab;
+    --brand: #ff4d5e;
+    --brand-2: #ff7a45;
+    --accent: #3d7eff;
+    --ok: #2ecc8f;
+  }
+
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* 背景动效：Feed 流光带 */
+  .bg-stream {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    gap: 90px;
+    transform: rotate(-18deg) scale(1.4);
+    opacity: .35;
+    pointer-events: none;
+  }
+  .bg-stream .lane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    animation: flow 14s linear infinite;
+  }
+  .bg-stream .lane:nth-child(2) { animation-duration: 19s; }
+  .bg-stream .lane:nth-child(3) { animation-duration: 11s; }
+  .bg-stream .card {
+    height: 64px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(61,126,255,.10), rgba(255,77,94,.08));
+    border: 1px solid rgba(61,126,255,.14);
+  }
+  @keyframes flow {
+    from { transform: translateY(-45%); }
+    to   { transform: translateY(45%); }
+  }
+
+  .login-wrap {
+    position: relative;
+    z-index: 2;
+    width: 400px;
+    background: rgba(22, 27, 34, .92);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 42px 38px 34px;
+    box-shadow: 0 24px 64px rgba(0,0,0,.5);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .logo-mark {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 22px; color: #fff;
+    letter-spacing: -1px;
+  }
+  .logo-name { font-size: 26px; font-weight: 700; letter-spacing: .5px; }
+  .logo-name em { font-style: normal; color: var(--brand); }
+
+  .slogan { color: var(--text-dim); font-size: 13px; margin-bottom: 30px; }
+
+  .field { margin-bottom: 18px; }
+  .field label {
+    display: block;
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 7px;
+  }
+  .field .input {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0 14px;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .field .input:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(61,126,255,.18);
+  }
+  .field .input svg { flex: 0 0 18px; opacity: .55; }
+  .field input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-size: 15px;
+    height: 46px;
+  }
+  .field input::placeholder { color: #55617a; }
+
+  .row-between {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    color: var(--text-dim);
+    margin: 4px 0 22px;
+  }
+  .row-between a { color: var(--accent); text-decoration: none; }
+  .row-between a:hover { text-decoration: underline; }
+  .remember { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+  .remember input { accent-color: var(--accent); }
+
+  .btn-login {
+    width: 100%;
+    height: 48px;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 4px;
+    transition: transform .15s, filter .2s;
+  }
+  .btn-login:hover { filter: brightness(1.1); }
+  .btn-login:active { transform: scale(.98); }
+
+  .demo-tip {
+    margin-top: 20px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: rgba(61,126,255,.08);
+    border: 1px dashed rgba(61,126,255,.35);
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+  .demo-tip b { color: var(--accent); font-weight: 600; }
+
+  .msg {
+    display: none;
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    background: rgba(255,77,94,.10);
+    border: 1px solid rgba(255,77,94,.4);
+    color: #ff8b96;
+  }
+  .msg.show { display: block; }
+
+  .footer {
+    position: absolute;
+    bottom: 22px;
+    width: 100%;
+    text-align: center;
+    color: #55617a;
+    font-size: 12px;
+    z-index: 2;
+  }
+  .footer span { color: #6b7a94; }
+</style>
+</head>
+<body>
+
+<div class="bg-stream" aria-hidden="true">
+  <div class="lane">
+    <div class="card"></div><div class="card"></div><div class="card"></div>
+    <div class="card"></div><div class="card"></div><div class="card"></div>
+  </div>
+  <div class="lane">
+    <div class="card"></div><div class="card"></div><div class="card"></div>
+    <div class="card"></div><div class="card"></div><div class="card"></div>
+  </div>
+  <div class="lane">
+    <div class="card"></div><div class="card"></div><div class="card"></div>
+    <div class="card"></div><div class="card"></div><div class="card"></div>
+  </div>
+</div>
+
+<div class="login-wrap">
+  <div class="logo">
+    <div class="logo-mark">T</div>
+    <div class="logo-name">Turbo<em>Feed</em></div>
+  </div>
+  <div class="slogan">短视频 Feed 核心系统 · 推拉结合 / 分布式计数 / 热点治理</div>
+
+  <div class="msg" id="msg"></div>
+
+  <form id="loginForm" novalidate>
+    <div class="field">
+      <label>用户名</label>
+      <div class="input">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#8b98ab" stroke-width="2">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+        </svg>
+        <input type="text" id="username" placeholder="请输入用户名" autocomplete="username" value="admin">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>密码</label>
+      <div class="input">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#8b98ab" stroke-width="2">
+          <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        <input type="password" id="password" placeholder="请输入密码" autocomplete="current-password" value="123456">
+      </div>
+    </div>
+
+    <div class="row-between">
+      <label class="remember">
+        <input type="checkbox" checked> 记住我
+      </label>
+      <a href="javascript:void(0)" onclick="showMsg('请联系系统管理员重置密码（演示页面）')">忘记密码？</a>
+    </div>
+
+    <button type="submit" class="btn-login">登 录</button>
+  </form>
+
+  <div class="demo-tip">
+    <b>演示说明</b>：当前为静态 UI 预览版，后端逻辑未接入。<br>
+    任意输入点击登录即可跳转管理后台（前端假校验：用户名/密码非空）。
+  </div>
+</div>
+
+<div class="footer">
+  TurboFeed Open Source · <span>Java 17 + Spring Boot 3.4.3</span> · Apache-2.0 License
+</div>
+
+<script>
+  function showMsg(text) {
+    var el = document.getElementById('msg');
+    el.textContent = text;
+    el.classList.add('show');
+  }
+
+  document.getElementById('loginForm').addEventListener('submit', function (e) {
+    e.preventDefault(); // 后端逻辑暂不接入，仅做前端假校验
+    var u = document.getElementById('username').value.trim();
+    var p = document.getElementById('password').value.trim();
+    if (!u) return showMsg('请输入用户名');
+    if (!p) return showMsg('请输入密码');
+    // TODO: 接入后端 POST /api/auth/login
+    window.location.href = 'admin.html';
+  });
+</script>
+
+</body>
+</html>
