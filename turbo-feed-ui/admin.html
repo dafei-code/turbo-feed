@@ -292,9 +292,124 @@
   .dot.g::before { background: var(--ok); box-shadow: 0 0 8px rgba(46,204,143,.6); }
   .dot.w::before { background: var(--warn); box-shadow: 0 0 8px rgba(240,180,41,.6); }
 
+  /* ========== 轮播图管理 ========== */
+  .banner-layout {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr;
+    gap: 18px;
+  }
+  .carousel-box {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .carousel-box img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: none;
+  }
+  .carousel-box img.show { display: block; }
+  .carousel-empty {
+    color: var(--text-dim);
+    font-size: 13px;
+    letter-spacing: 1px;
+  }
+  .carousel-count {
+    position: absolute;
+    right: 10px; bottom: 10px;
+    background: rgba(13,17,23,.75);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 9px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .car-dots {
+    display: flex;
+    justify-content: center;
+    gap: 7px;
+    margin-top: 12px;
+    min-height: 8px;
+  }
+  .car-dots i {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--border);
+    cursor: pointer;
+    transition: background .15s, transform .15s;
+  }
+  .car-dots i.on {
+    background: var(--brand);
+    transform: scale(1.25);
+  }
+  .upload-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 11px 0;
+    border: 1px dashed var(--border);
+    border-radius: 9px;
+    background: rgba(61,126,255,.06);
+    color: var(--text);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .upload-btn:hover {
+    border-color: var(--brand);
+    background: rgba(255,77,94,.08);
+    color: var(--brand);
+  }
+  .upload-tip {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin: 10px 2px 12px;
+    line-height: 1.6;
+  }
+  .thumb-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .thumb {
+    position: relative;
+    width: 76px; height: 52px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .thumb img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .thumb .del {
+    position: absolute;
+    top: 2px; right: 2px;
+    width: 17px; height: 17px;
+    border-radius: 5px;
+    background: rgba(13,17,23,.8);
+    border: none;
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 17px;
+    text-align: center;
+    cursor: pointer;
+  }
+  .thumb .del:hover { color: var(--brand); }
+
   @media (max-width: 1100px) {
     .stat-grid { grid-template-columns: repeat(2, 1fr); }
-    .chart-row, .two-col { grid-template-columns: 1fr; }
+    .chart-row, .two-col, .banner-layout { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -346,9 +461,9 @@
   </nav>
 
   <div class="side-user">
-    <div class="avatar">A</div>
+    <div class="avatar" id="sideUserAvatar">A</div>
     <div class="info">
-      <div class="n">admin</div>
+      <div class="n" id="sideUserName">admin</div>
       <div class="r">超级管理员</div>
     </div>
     <button class="logout-btn" onclick="location.href='login.html'">退出</button>
@@ -488,6 +603,31 @@
       </div>
     </div>
 
+    <!-- 轮播图管理 -->
+    <div class="panel" style="margin-top:20px">
+      <div class="p-head">
+        <div class="title">轮播图管理（当前用户：<span id="bannerUser">-</span>）</div>
+        <div class="legend"><span><i style="background:#8b98ab"></i>轮播间隔固定 10s（暂不支持自定义）· 每个用户只展示自己上传的图片</span></div>
+      </div>
+      <div class="banner-layout">
+        <div>
+          <div class="carousel-box" id="carouselBox">
+            <div class="carousel-empty" id="carouselEmpty">暂无图片，请先上传</div>
+          </div>
+          <div class="car-dots" id="carDots"></div>
+        </div>
+        <div>
+          <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            上传图片（支持多选）
+          </button>
+          <input type="file" id="fileInput" accept="image/*" multiple hidden>
+          <div class="upload-tip">支持 jpg / png / gif / webp，一次可选择多张；上传后自动进入轮播，每张展示 10s。</div>
+          <div class="thumb-strip" id="thumbStrip"></div>
+        </div>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -508,6 +648,161 @@
       this.classList.add('on');
     });
   });
+
+  // ================= 轮播图：多图上传 + 固定 10s 轮播（按登录用户隔离） =================
+  var CAROUSEL_INTERVAL = 10 * 1000; // 固定 10s，暂不支持自定义
+
+  // 当前登录用户（由 login.html 登录成功后写入；未登录直接打开时回退为 admin）
+  var currentUser = localStorage.getItem('turbofeed:user') || 'admin';
+  // 每个用户独立的存储 key：只读写自己的图片
+  var STORE_KEY = 'turbofeed:banner:' + currentUser;
+
+  document.getElementById('sideUserName').textContent = currentUser;
+  document.getElementById('sideUserAvatar').textContent = currentUser.charAt(0).toUpperCase();
+  var bannerUserEl = document.getElementById('bannerUser');
+  if (bannerUserEl) bannerUserEl.textContent = currentUser;
+
+  var carouselImages = loadUserImages(); // [{ url, name }]，url 为 dataURL（可持久化）
+  var carIndex = 0;
+  var carTimer = null;
+
+  // 持久化当前用户的图片列表（localStorage 容量约 5MB，超限会抛异常）
+  function saveUserImages() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(carouselImages));
+    } catch (e) {
+      alert('本地存储空间不足，最新图片未持久化（仅本次会话可见）。接入后端后由服务端按用户存储。');
+    }
+  }
+
+  function loadUserImages() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // TODO: 后端上传接口 —— 具体逻辑自行实现（当前仅生成本地预览 dataURL）
+  // 建议接口：POST /api/banner/upload（multipart/form-data，字段名 files，请求头 X-User-Id 携带当前用户）
+  // 后端统一返回结构：{ code: 0, message: '成功', data: [...图片URL], timestamp: ... }
+  // 实现后把下方 FileReader 本地读取替换为真实请求，取 Result.data 作为 URL 数组即可。
+  function uploadImages(files) {
+    // 示例（实现后放开）：
+    // var fd = new FormData();
+    // Array.prototype.forEach.call(files, function (f) { fd.append('files', f); });
+    // return fetch('/api/banner/upload', {
+    //   method: 'POST',
+    //   headers: { 'X-User-Id': currentUser },
+    //   body: fd
+    // }).then(function (r) { return r.json(); })
+    //   .then(function (res) { return res.code === 0 ? res.data : Promise.reject(res.message); });
+    return Promise.all(Array.prototype.map.call(files, function (f) {
+      return new Promise(function (resolve) {
+        var reader = new FileReader();
+        reader.onload = function () { resolve(reader.result); }; // dataURL
+        reader.readAsDataURL(f);
+      });
+    }));
+  }
+
+  document.getElementById('fileInput').addEventListener('change', function () {
+    var files = Array.prototype.slice.call(this.files || []);
+    if (!files.length) return;
+    uploadImages(files).then(function (urls) {
+      urls.forEach(function (u, i) {
+        carouselImages.push({
+          url: u,
+          name: files[i] ? files[i].name : ('image-' + (carouselImages.length + 1))
+        });
+      });
+      saveUserImages();
+      renderCarousel();
+      renderThumbs();
+      startCarousel();
+    });
+    this.value = ''; // 清空选择，允许再次选择同一文件
+  });
+
+  function renderCarousel() {
+    var box = document.getElementById('carouselBox');
+    var empty = document.getElementById('carouselEmpty');
+    var dots = document.getElementById('carDots');
+    // 移除旧 img / 计数，保留 empty 占位
+    box.querySelectorAll('img, .carousel-count').forEach(function (el) { el.remove(); });
+    dots.innerHTML = '';
+    if (!carouselImages.length) {
+      empty.style.display = 'flex';
+      stopCarousel();
+      return;
+    }
+    empty.style.display = 'none';
+    if (carIndex >= carouselImages.length) carIndex = 0;
+    carouselImages.forEach(function (img, i) {
+      var el = document.createElement('img');
+      el.src = img.url;
+      if (i === carIndex) el.classList.add('show');
+      box.appendChild(el);
+      var dot = document.createElement('i');
+      if (i === carIndex) dot.classList.add('on');
+      dot.addEventListener('click', function () {
+        carIndex = i;
+        renderCarousel();
+        startCarousel(); // 手动切换后重置计时
+      });
+      dots.appendChild(dot);
+    });
+    var count = document.createElement('div');
+    count.className = 'carousel-count';
+    count.textContent = (carIndex + 1) + ' / ' + carouselImages.length + ' · 10s/张';
+    box.appendChild(count);
+  }
+
+  function renderThumbs() {
+    var strip = document.getElementById('thumbStrip');
+    strip.innerHTML = '';
+    carouselImages.forEach(function (img, i) {
+      var t = document.createElement('div');
+      t.className = 'thumb';
+      var el = document.createElement('img');
+      el.src = img.url;
+      el.title = img.name;
+      t.appendChild(el);
+      var del = document.createElement('button');
+      del.className = 'del';
+      del.textContent = '✕';
+      del.title = '移除';
+      del.addEventListener('click', function () {
+        carouselImages.splice(i, 1);
+        if (carIndex >= carouselImages.length) carIndex = Math.max(0, carouselImages.length - 1);
+        saveUserImages();
+        renderCarousel();
+        renderThumbs();
+        startCarousel();
+      });
+      t.appendChild(del);
+      strip.appendChild(t);
+    });
+  }
+
+  function startCarousel() {
+    stopCarousel();
+    if (carouselImages.length < 2) return;
+    carTimer = setInterval(function () {
+      carIndex = (carIndex + 1) % carouselImages.length;
+      renderCarousel();
+    }, CAROUSEL_INTERVAL);
+  }
+
+  function stopCarousel() {
+    if (carTimer) { clearInterval(carTimer); carTimer = null; }
+  }
+
+  // 初始渲染当前用户自己的图片
+  renderCarousel();
+  renderThumbs();
+  startCarousel();
 </script>
 
 </body>

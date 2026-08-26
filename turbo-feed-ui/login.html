@@ -271,7 +271,9 @@
     var p = document.getElementById('password').value.trim();
     if (!u) return showMsg('请输入用户名');
     if (!p) return showMsg('请输入密码');
-    // TODO: 接入后端 POST /api/auth/login
+    // TODO: 接入后端 POST /api/auth/login（成功后应改为存储后端返回的 token）
+    // 记录当前登录用户，后台页面按用户隔离各自上传的轮播图
+    localStorage.setItem('turbofeed:user', u);
     window.location.href = 'admin.html';
   });
 </script>
