@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.turbofeed</groupId>
+        <artifactId>turbo-feed</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>tf-feed-engine</artifactId>
+    <name>tf-feed-engine</name>
+    <description>Feed 推拉结合核心：收件箱（Redis List + LTRIM）/ 大 V outbox（ZSET）/ 活跃度分层 / 扇出 Worker / 多路归并聚合</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.turbofeed</groupId>
+            <artifactId>tf-shared</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.turbofeed</groupId>
+            <artifactId>tf-hotspot</artifactId>
+        </dependency>
+        <!-- Redis 客户端（收件箱 List / outbox ZSET / 活跃度 ZSET） -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson-spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+    </dependencies>
+</project>

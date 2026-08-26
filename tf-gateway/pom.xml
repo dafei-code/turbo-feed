@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.turbofeed</groupId>
+        <artifactId>turbo-feed</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>tf-gateway</artifactId>
+    <name>tf-gateway</name>
+    <description>HTTP 接入层：聚合 Feed / 计数 / 热点三大引擎的对外 API（可执行 jar，默认端口 8080）+ Sentinel 流量防护</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.turbofeed</groupId>
+            <artifactId>tf-shared</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.turbofeed</groupId>
+            <artifactId>tf-hotspot</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.turbofeed</groupId>
+            <artifactId>tf-feed-engine</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.turbofeed</groupId>
+            <artifactId>tf-counter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <!-- Sentinel：timeline QPS 限流 + 点赞热点参数限流 + 依赖熔断 + 系统自适应保护 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

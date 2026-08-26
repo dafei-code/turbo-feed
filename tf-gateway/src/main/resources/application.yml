@@ -1,0 +1,36 @@
+# turbo-feed 网关配置骨架（参数按设计文档逐模块填充）
+spring:
+  application:
+    name: turbo-feed-gateway
+  # H2 兜底（克隆即跑）；生产切 MySQL 8
+  datasource:
+    url: jdbc:h2:mem:turbofeed;MODE=MySQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+server:
+  port: 8080
+
+# ---- 以下为设计文档中的核心参数骨架，实现对应模块时启用 ----
+turbofeed:
+  fanout:
+    push-threshold: 1000        # 大 V 判定：粉丝数阈值
+    inbox-max-size: 2000        # 收件箱 LTRIM 定长
+    inbox-read-size: 500        # 首屏读取条数
+    outbox-retain-days: 7       # 大 V outbox 保留天数
+    inactive-days: 7            # 活跃度分层：N 日未登录跳过推送
+  counter:
+    bucket-count: 64            # 热点计数分桶数
+    batch-flush-interval-ms: 2000  # 批量落库周期
+  hotspot:
+    window-seconds: 10          # 滑动窗口长度
+    hot-threshold: 1000         # 热 Key 判定阈值（窗口内访问次数）
+    l1-ttl-seconds: 3           # L1 本地缓存 TTL
+
+# Sentinel：默认本地 JSON 规则（克隆即跑），可选 Nacos push
+# sentinel:
+#   datasource:
+#     flow:
+#       file:
+#         file: classpath:sentinel/rules.json
