@@ -8,12 +8,30 @@ spring:
     driver-class-name: org.h2.Driver
     username: sa
     password:
+  # multipart 框架层限额（业务层 turbofeed.media.* 之外的前置兜底，略高于业务限额）
+  servlet:
+    multipart:
+      max-file-size: 6MB
+      max-request-size: 60MB
 
 server:
   port: 8080
 
-# ---- 以下为设计文档中的核心参数骨架，实现对应模块时启用 ----
 turbofeed:
+  # JWT 签发配置；secret 生产必须替换为密钥管理注入的高熵值
+  jwt:
+    secret: turbofeed-demo-secret-change-me
+    expire-seconds: 86400
+  # 演示登录账号；生产改数据库 + 哈希存储
+  auth:
+    demo-users:
+      admin: "123456"
+  # 媒体上传限额：调整阈值只改配置不发版
+  media:
+    key-prefix: media
+    max-file-size: 5MB
+    max-batch-count: 9
+    public-url-base: https://oss.turbofeed.com/
   fanout:
     push-threshold: 1000        # 大 V 判定：粉丝数阈值
     inbox-max-size: 2000        # 收件箱 LTRIM 定长

@@ -292,7 +292,7 @@
   .dot.g::before { background: var(--ok); box-shadow: 0 0 8px rgba(46,204,143,.6); }
   .dot.w::before { background: var(--warn); box-shadow: 0 0 8px rgba(240,180,41,.6); }
 
-  /* ========== 轮播图管理 ========== */
+  /* ========== 内容图片管理 ========== */
   .banner-layout {
     display: grid;
     grid-template-columns: 1.6fr 1fr;
@@ -603,11 +603,11 @@
       </div>
     </div>
 
-    <!-- 轮播图管理 -->
+    <!-- 内容图片管理 -->
     <div class="panel" style="margin-top:20px">
       <div class="p-head">
-        <div class="title">轮播图管理（当前用户：<span id="bannerUser">-</span>）</div>
-        <div class="legend"><span><i style="background:#8b98ab"></i>轮播间隔固定 10s（暂不支持自定义）· 每个用户只展示自己上传的图片</span></div>
+        <div class="title">内容图片管理（当前用户：<span id="bannerUser">-</span>）</div>
+        <div class="legend"><span><i style="background:#8b98ab"></i>上传后进入待审核，审核通过后前端展示 · 每个用户只展示自己上传的图片</span></div>
       </div>
       <div class="banner-layout">
         <div>
@@ -622,7 +622,7 @@
             上传图片（支持多选）
           </button>
           <input type="file" id="fileInput" accept="image/*" multiple hidden>
-          <div class="upload-tip">支持 jpg / png / gif / webp，一次可选择多张；上传后自动进入轮播，每张展示 10s。</div>
+          <div class="upload-tip">支持 jpg / png / gif / webp，单张 ≤5MB，一次可选择多张；上传后进入待审核，审核通过后前端展示。</div>
           <div class="thumb-strip" id="thumbStrip"></div>
         </div>
       </div>
@@ -649,7 +649,7 @@
     });
   });
 
-  // ================= 轮播图：多图上传 + 固定 10s 轮播（按登录用户隔离） =================
+  // ================= 内容图片：多图上传 + 预览轮播（按登录用户隔离；审核口径见接口注释） =================
   var CAROUSEL_INTERVAL = 10 * 1000; // 固定 10s，暂不支持自定义
 
   // 当前登录用户（由 login.html 登录成功后写入；未登录直接打开时回退为 admin）
@@ -685,16 +685,17 @@
   }
 
   // TODO: 后端上传接口 —— 具体逻辑自行实现（当前仅生成本地预览 dataURL）
-  // 建议接口：POST /api/banner/upload（multipart/form-data，字段名 files，请求头 X-User-Id 携带当前用户）
+  // 建议接口：POST /api/media/upload（multipart/form-data，字段名 files，Authorization: Bearer <token> 携带登录凭证）
   // 后端统一返回结构：{ code: 0, message: '成功', data: [...图片URL], timestamp: ... }
+  // 注意：UGC 口径下上传成功仅代表受理（进入待审核态），审核通过后内容才会在前端展示。
   // 实现后把下方 FileReader 本地读取替换为真实请求，取 Result.data 作为 URL 数组即可。
   function uploadImages(files) {
     // 示例（实现后放开）：
     // var fd = new FormData();
     // Array.prototype.forEach.call(files, function (f) { fd.append('files', f); });
-    // return fetch('/api/banner/upload', {
+    // return fetch('/api/media/upload', {
     //   method: 'POST',
-    //   headers: { 'X-User-Id': currentUser },
+    //   headers: { 'Authorization': 'Bearer ' + token }, // token 来自 POST /api/auth/login
     //   body: fd
     // }).then(function (r) { return r.json(); })
     //   .then(function (res) { return res.code === 0 ? res.data : Promise.reject(res.message); });

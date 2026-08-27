@@ -1,0 +1,39 @@
+package com.turbofeed.gateway.controller;
+
+import com.turbofeed.gateway.service.AuthService;
+import com.turbofeed.shared.result.Result;
+
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * 鉴权接口：登录换取 JWT。
+ *
+ * <p>登录成功后返回 JWT，前端存入 localStorage，后续请求在 Authorization 头携带
+ * {@code Bearer <token>}。演示账号来自配置（turbofeed.auth.demo-users，默认 admin/123456）；
+ * 生产改为查库 + 密码加盐哈希校验，并支持 refresh token。</p>
+ */
+@RestController
+@RequestMapping("/api/auth")
+public class AuthController {
+
+    private final AuthService authService;
+
+    public AuthController(AuthService authService) {
+        this.authService = authService;
+    }
+
+    /**
+     * 登录换取 JWT。
+     *
+     * @param username 用户名
+     * @param password 密码
+     * @return 统一返回结构，data 为 JWT
+     */
+    @PostMapping("/login")
+    public Result<String> login(@RequestParam String username, @RequestParam String password) {
+        return Result.ok(authService.login(username, password));
+    }
+}
