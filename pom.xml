@@ -28,7 +28,13 @@
 
         <!-- 版本统一在父 POM 管理 -->
         <spring-boot.version>3.4.3</spring-boot.version>
-        <spring-cloud-alibaba.version>2023.0.3.2</spring-cloud-alibaba.version>
+        <!-- Spring Cloud 版本：必须与 spring-cloud-alibaba 对齐。
+             Sentinel starter 内部有 Spring Cloud release train 兼容检查，启动 fail-fast。
+             SCA 2023.0.3.4 的 parent 是 spring-cloud-dependencies-parent:4.1.0，对应 Spring Cloud 2024.0.x。
+             Spring Cloud 2024.0.2 (2025-07) 与 SCA 2023.0.3.4 (2025-10) 发布时间窗最接近，社区最稳。
+             Spring Cloud 2024.0.x 对应 Spring Boot 3.4.x，2023.0.x 仅对应 Boot 3.2/3.3。 -->
+        <spring-cloud.version>2024.0.2</spring-cloud.version>
+        <spring-cloud-alibaba.version>2023.0.3.4</spring-cloud-alibaba.version>
         <redisson.version>3.27.2</redisson.version>
         <!-- caffeine / h2 / mysql-connector-j 由 spring-boot-dependencies BOM 托管，无需声明版本 -->
     </properties>
@@ -40,6 +46,15 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
                 <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Spring Cloud BOM（必须早于 spring-cloud-alibaba-dependencies import，
+                 SCA 的 BOM 只管理自身版本，Spring Cloud 本身版本由本 BOM 锁定） -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>

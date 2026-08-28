@@ -26,10 +26,25 @@
         <dependency>
             <groupId>com.turbofeed</groupId>
             <artifactId>tf-feed-engine</artifactId>
+            <!-- tf-gateway 为 HTTP 接入层，不消费 Redis；排除 Redisson 传递依赖，
+                 避免 RedissonAutoConfiguration 在本进程自动激活（连不上 Redis 启动失败）。
+                 tf-feed-engine / tf-counter 独立成服务时各自 pom 仍持有 Redisson，不受影响 -->
+            <exclusions>
+                <exclusion>
+                    <groupId>org.redisson</groupId>
+                    <artifactId>redisson-spring-boot-starter</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>com.turbofeed</groupId>
             <artifactId>tf-counter</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.redisson</groupId>
+                    <artifactId>redisson-spring-boot-starter</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
