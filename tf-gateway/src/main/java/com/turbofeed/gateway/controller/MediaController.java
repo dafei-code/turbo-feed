@@ -3,7 +3,9 @@ package com.turbofeed.gateway.controller;
 import com.turbofeed.gateway.service.MediaUploadService;
 import com.turbofeed.shared.result.Result;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -81,13 +83,10 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/media")
+@RequiredArgsConstructor
 public class MediaController {
 
     private final MediaUploadService mediaUploadService;
-
-    public MediaController(MediaUploadService mediaUploadService) {
-        this.mediaUploadService = mediaUploadService;
-    }
 
     /**
      * 内容图片上传（UGC，审核后展示）。
@@ -96,11 +95,14 @@ public class MediaController {
      * 身份不经过方法签名：Filter 已将 JWT 解析的 userId 绑定到线程上下文，
      * 由 Service 层 {@code UserContextHolder.requireUserId()} 取用。</p>
      *
-     * @param files  多个图片文件
+     * @param files     多个图片文件
+     * @param requestId 客户端幂等键（可选，请求头 X-Request-Id；幂等去重落地时使用）
      * @return 统一返回结构，data 为上传成功后的图片 URL 列表（审核通过后生效）
      */
     @PostMapping("/upload")
-    public Result<List<String>> upload(@RequestParam("files") MultipartFile[] files) {
-        return Result.ok(mediaUploadService.upload(files));
+    public Result<List<String>> upload(
+            @RequestParam("files") MultipartFile[] files,
+            @RequestHeader(value = "X-Request-Id", required = false) String requestId) {
+        return Result.ok(mediaUploadService.upload(files, requestId));
     }
 }

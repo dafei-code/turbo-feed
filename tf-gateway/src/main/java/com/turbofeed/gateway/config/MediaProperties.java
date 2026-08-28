@@ -25,6 +25,29 @@ public class MediaProperties {
     /** 占位存储返回的公网 URL 前缀，MinIO/COS 接入后由存储实现自行拼装替代。 */
     private String publicUrlBase = "https://oss.turbofeed.com/";
 
+    /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
+     *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
+    private boolean processingEnabled = false;
+
+    /** 缩略图长边上限（px），超过则等比缩放（turbofeed.media.thumbnail-max-dimension）。 */
+    private long thumbnailMaxDimension = 2048;
+
+    public boolean isProcessingEnabled() {
+        return processingEnabled;
+    }
+
+    public void setProcessingEnabled(boolean processingEnabled) {
+        this.processingEnabled = processingEnabled;
+    }
+
+    public long getThumbnailMaxDimension() {
+        return thumbnailMaxDimension;
+    }
+
+    public void setThumbnailMaxDimension(long thumbnailMaxDimension) {
+        this.thumbnailMaxDimension = thumbnailMaxDimension;
+    }
+
     public String getKeyPrefix() {
         return keyPrefix;
     }

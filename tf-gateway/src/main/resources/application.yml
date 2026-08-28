@@ -32,6 +32,14 @@ turbofeed:
     max-file-size: 5MB
     max-batch-count: 9
     public-url-base: https://oss.turbofeed.com/
+    # 图片处理链（Decorator：缩略图缩放）。默认关闭保持流式零内存路径；
+    # 开启后经 ImageIO 解码重编码（12MP ARGB ≈ 48MB/张），需评估上传 QPS 与堆内存
+    processing-enabled: false
+    thumbnail-max-dimension: 2048
+  # MQ（RocketMQ）事件总线：默认本地 Spring 事件（克隆即跑）；
+  # enabled=true 切换 RocketMQ 跨进程投递，需同时放开下方 rocketmq.* 配置
+  mq:
+    enabled: false
   fanout:
     push-threshold: 1000        # 大 V 判定：粉丝数阈值
     inbox-max-size: 2000        # 收件箱 LTRIM 定长
@@ -52,3 +60,9 @@ turbofeed:
 #     flow:
 #       file:
 #         file: classpath:sentinel/rules.json
+
+# RocketMQ 启用示例（turbofeed.mq.enabled=true 时生效，并同时放开本块配置）：
+# rocketmq:
+#   name-server: 127.0.0.1:9876
+#   producer:
+#     group: turbofeed-media-producer-group

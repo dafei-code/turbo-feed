@@ -5,6 +5,7 @@ import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.security.JwtUtil;
 import com.turbofeed.shared.result.ErrorCode;
 
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -19,17 +20,13 @@ import java.security.MessageDigest;
  * （BCrypt/Argon2）校验并接入 refresh token，本类仅改校验实现，令牌签发契约不变。</p>
  */
 @Service
+@RequiredArgsConstructor
 public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
     private final AuthProperties properties;
     private final JwtUtil jwtUtil;
-
-    public AuthService(AuthProperties properties, JwtUtil jwtUtil) {
-        this.properties = properties;
-        this.jwtUtil = jwtUtil;
-    }
 
     /**
      * 校验账号并签发 JWT。

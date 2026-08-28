@@ -15,7 +15,7 @@ import java.io.InputStream;
 public interface MediaStorageClient {
 
     /**
-     * 存储一份已通过校验的上传内容，返回 key 与可访问 URL。
+     * 存储一份已通过校验的上传内容，返回唯一标识与可访问 URL。
      *
      * @param userId  归属用户（来自 JWT 解析，存储 key 按用户隔离，客户端无法指定他人）
      * @param format  已校验的真实图片格式（Magic Number 判定）
@@ -27,9 +27,9 @@ public interface MediaStorageClient {
     /**
      * 存储结果。
      *
-     * @param key 对象存储 key，形如 media/{userId}/{uuid}.{ext}
-     * @param url 可访问 URL（UGC 场景建议审核通过前不暴露公网直链）
+     * @param mediaId 内容唯一标识（形如 media/{userId}/{uuid}.{ext}），审核与查询的主键
+     * @param url     可访问 URL（UGC 场景建议审核通过前不暴露公网直链）
      */
-    record StoredMedia(String key, String url) {
+    record StoredMedia(String mediaId, String url) {
     }
 }
