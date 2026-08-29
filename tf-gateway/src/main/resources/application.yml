@@ -13,6 +13,23 @@ spring:
     multipart:
       max-file-size: 6MB
       max-request-size: 60MB
+  # Redis（Lettuce，懒连接）：上传用户级限流等轻量 KV；本地未启动 Redis 不影响应用启动，
+  # 但 /actuator/health 中 redis 组件会显示 DOWN（整体状态默认不受其拉低，management 如需忽略可排除）
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 500ms
+      lettuce:
+        pool:
+          enabled: false  # 网关仅同步命令，不需要连接池；true 需 commons-pool2
+
+# Redis 就绪前关闭其健康指示器，避免 /actuator/health 整体被拉成 DOWN（克隆即跑）；
+# 本地启动 Redis 后改为 true（或直接删除此段）
+management:
+  health:
+    redis:
+      enabled: false
 
 server:
   port: 8080
@@ -36,6 +53,14 @@ turbofeed:
     # 开启后经 ImageIO 解码重编码（12MP ARGB ≈ 48MB/张），需评估上传 QPS 与堆内存
     processing-enabled: false
     thumbnail-max-dimension: 2048
+    # 上传限流分工：thread/qps 走 Sentinel 注解（机器维度，@SentinelResource 埋点于 MediaUploadService#upload）；
+    # per-user 走 Redis UploadRateLimiter（用户维度，注解热点参数取不到 ThreadLocal 的 userId，跨实例计数）
+    rate-limit:
+      thread: 20
+      qps: 100
+      per-user: 10
+      # 同用户上传并发占位 TTL（秒）：进程崩溃 / 释放失败时的兜底过期时间（ConcurrentUploadValidator 消费）
+      inflight-ttl-seconds: 30
   # MQ（RocketMQ）事件总线：默认本地 Spring 事件（克隆即跑）；
   # enabled=true 切换 RocketMQ 跨进程投递，需同时放开下方 rocketmq.* 配置
   mq:

@@ -12,16 +12,27 @@
 
     <artifactId>tf-counter</artifactId>
     <name>tf-counter</name>
-    <description>分布式计数服务：Redis 分桶计数（HINCRBY）+ MQ 削峰 + 批量落库（最终一致）+ 三级读缓存（Caffeine L1 / Redis L2 / DB L3）</description>
+    <description>分布式计数服务（独立部署单元，默认端口 8081）：Redis 分桶计数（HINCRBY）+ MQ 削峰
+        + 批量落库（最终一致）+ 三级读缓存（Caffeine L1 / Redis L2 / DB L3）</description>
 
     <dependencies>
         <dependency>
             <groupId>com.turbofeed</groupId>
             <artifactId>tf-shared</artifactId>
         </dependency>
+        <!-- 热点治理为进程内 SDK（本地 L1 缓存 + 热点广播），以库形式嵌入本服务，非独立部署单元 -->
         <dependency>
             <groupId>com.turbofeed</groupId>
             <artifactId>tf-hotspot</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <!-- 健康检查（K8s 探活 / 未来 Prometheus 指标入口） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
         <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>
@@ -51,4 +62,23 @@
             <artifactId>spring-boot-starter</artifactId>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.turbofeed.counter.CounterApplication</mainClass>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

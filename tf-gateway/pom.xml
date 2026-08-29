@@ -12,7 +12,9 @@
 
     <artifactId>tf-gateway</artifactId>
     <name>tf-gateway</name>
-    <description>HTTP 接入层：聚合 Feed / 计数 / 热点三大引擎的对外 API（可执行 jar，默认端口 8080）+ Sentinel 流量防护</description>
+    <description>HTTP 接入层：对外 API 聚合入口 + 认证 + 媒体上传（可执行 jar，默认端口 8080）+ Sentinel 流量防护。
+        微服务拆分后为独立部署单元：与 tf-counter / tf-feed-engine 通过 HTTP（同步）与 RocketMQ（异步）通信，
+        不再以 Maven 依赖方式内嵌引擎模块。</description>
 
     <dependencies>
         <dependency>
@@ -20,40 +22,26 @@
             <artifactId>tf-shared</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.turbofeed</groupId>
-            <artifactId>tf-hotspot</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.turbofeed</groupId>
-            <artifactId>tf-feed-engine</artifactId>
-            <!-- tf-gateway 为 HTTP 接入层，不消费 Redis；排除 Redisson 传递依赖，
-                 避免 RedissonAutoConfiguration 在本进程自动激活（连不上 Redis 启动失败）。
-                 tf-feed-engine / tf-counter 独立成服务时各自 pom 仍持有 Redisson，不受影响 -->
-            <exclusions>
-                <exclusion>
-                    <groupId>org.redisson</groupId>
-                    <artifactId>redisson-spring-boot-starter</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>com.turbofeed</groupId>
-            <artifactId>tf-counter</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.redisson</groupId>
-                    <artifactId>redisson-spring-boot-starter</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <!-- 健康检查（K8s 探活 / 未来 Prometheus 指标入口），与 tf-counter / tf-feed-engine 对齐 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
         <!-- Sentinel：timeline QPS 限流 + 点赞热点参数限流 + 依赖熔断 + 系统自适应保护 -->
         <dependency>
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+        </dependency>
+        <!-- Redis（Lettuce）：上传接口用户级限流等轻量 KV 用途（版本由 Boot BOM 托管）。
+             与 tf-counter / tf-feed-engine 的 Redisson 是不同选型：网关只需 RedisTemplate 级
+             原子命令（INCR/EXPIRE），不需要分布式锁与丰富数据结构，避免重依赖。
+             Lettuce 连接懒建立：本地未启动 Redis 不影响应用启动 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
         <!-- RocketMQ：媒体上传事件异步化（Observer 事件总线的跨进程实现）。
              2.3.x 兼容 Spring Boot 3.x（2.3.4 已修复 MessageModel 包路径冲突）。

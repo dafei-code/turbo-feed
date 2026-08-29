@@ -1,0 +1,26 @@
+# tf-counter 服务配置骨架（参数随实现逐模块填充）
+spring:
+  application:
+    name: tf-counter
+  # Redisson 自动配置暂排除：Redis 环境就绪后删除本段（并补 spring.data.redis.* 连接配置）
+  # 不排除时，starter 默认连 localhost:6379，无 Redis 环境下启动即失败
+  autoconfigure:
+    exclude:
+      - org.redisson.spring.starter.RedissonAutoConfigurationV2
+      - org.redisson.spring.starter.RedissonAutoConfiguration
+  # H2 兜底（克隆即跑）；生产切 MySQL 8
+  datasource:
+    url: jdbc:h2:mem:tf-counter;MODE=MySQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+server:
+  port: 8081
+
+# 健康检查仅暴露基础端点（K8s 探活）；接 Prometheus 时再开放 prometheus 端点
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

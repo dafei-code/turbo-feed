@@ -32,6 +32,73 @@ public class MediaProperties {
     /** 缩略图长边上限（px），超过则等比缩放（turbofeed.media.thumbnail-max-dimension）。 */
     private long thumbnailMaxDimension = 2048;
 
+    /** 上传限流阈值（turbofeed.media.rate-limit.*；机器维度 Sentinel + 用户维度 Redis 分工）。 */
+    private RateLimit rateLimit = new RateLimit();
+
+    /**
+     * 上传接口限流阈值（机器维度与用户维度分工）。
+     *
+     * <p>上传是 IO 型接口：单靠 QPS 只能防频次，防不了体积与线程堆积，故并发与 QPS 双维度
+     * 并用——两条均为 Sentinel 资源级规则，注解埋点于 MediaUploadService#upload
+     * （@SentinelResource）。用户级阈值 per-user 由 Redis UploadRateLimiter 消费：
+     * 注解模式的热点参数只能取方法签名参数，取不到 ThreadLocal 的 userId，
+     * 用户维度限流不走 Sentinel，由 Redis 跨实例统一计数。</p>
+     */
+    public static class RateLimit {
+
+        /** 单机并发执行数上限（FLOW_GRADE_THREAD）：防慢存储（MinIO 抖动）导致线程堆积拖垮进程。 */
+        private int thread = 20;
+
+        /** 单机 QPS 上限（FLOW_GRADE_QPS）：防总量刷爆磁盘带宽。 */
+        private int qps = 100;
+
+        /** 单用户限流阈值（Redis UploadRateLimiter 消费）：防单用户持续刷接口；时间窗口径由限流器实现决定。 */
+        private int perUser = 10;
+
+        /** 上传并发占位 TTL（秒，ConcurrentUploadValidator）：进程崩溃 / 释放失败时的兜底过期时间。 */
+        private int inflightTtlSeconds = 30;
+
+        public int getInflightTtlSeconds() {
+            return inflightTtlSeconds;
+        }
+
+        public void setInflightTtlSeconds(int inflightTtlSeconds) {
+            this.inflightTtlSeconds = inflightTtlSeconds;
+        }
+
+        public int getThread() {
+            return thread;
+        }
+
+        public void setThread(int thread) {
+            this.thread = thread;
+        }
+
+        public int getQps() {
+            return qps;
+        }
+
+        public void setQps(int qps) {
+            this.qps = qps;
+        }
+
+        public int getPerUser() {
+            return perUser;
+        }
+
+        public void setPerUser(int perUser) {
+            this.perUser = perUser;
+        }
+    }
+
+    public RateLimit getRateLimit() {
+        return rateLimit;
+    }
+
+    public void setRateLimit(RateLimit rateLimit) {
+        this.rateLimit = rateLimit;
+    }
+
     public boolean isProcessingEnabled() {
         return processingEnabled;
     }

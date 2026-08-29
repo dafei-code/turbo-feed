@@ -12,16 +12,27 @@
 
     <artifactId>tf-feed-engine</artifactId>
     <name>tf-feed-engine</name>
-    <description>Feed 推拉结合核心：收件箱（Redis List + LTRIM）/ 大 V outbox（ZSET）/ 活跃度分层 / 扇出 Worker / 多路归并聚合</description>
+    <description>Feed 推拉结合核心（独立部署单元，默认端口 8082）：收件箱（Redis List + LTRIM）
+        / 大 V outbox（ZSET）/ 活跃度分层 / 扇出 Worker / 多路归并聚合</description>
 
     <dependencies>
         <dependency>
             <groupId>com.turbofeed</groupId>
             <artifactId>tf-shared</artifactId>
         </dependency>
+        <!-- 热点治理为进程内 SDK（本地 L1 缓存 + 热点广播），以库形式嵌入本服务，非独立部署单元 -->
         <dependency>
             <groupId>com.turbofeed</groupId>
             <artifactId>tf-hotspot</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <!-- 健康检查（K8s 探活 / 未来 Prometheus 指标入口） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
         <!-- Redis 客户端（收件箱 List / outbox ZSET / 活跃度 ZSET） -->
         <dependency>
@@ -33,4 +44,23 @@
             <artifactId>spring-boot-starter</artifactId>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.turbofeed.feedengine.FeedEngineApplication</mainClass>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

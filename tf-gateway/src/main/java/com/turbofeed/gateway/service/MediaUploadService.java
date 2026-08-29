@@ -1,11 +1,18 @@
 package com.turbofeed.gateway.service;
 
+import com.alibaba.csp.sentinel.EntryType;
+import com.alibaba.csp.sentinel.annotation.SentinelResource;
+import com.alibaba.csp.sentinel.slots.block.BlockException;
 import com.turbofeed.gateway.config.MediaProperties;
+import com.turbofeed.gateway.config.SentinelRateLimitConfig;
 import com.turbofeed.gateway.exception.BizException;
+import com.turbofeed.gateway.security.UserContext;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.event.MediaEventPublisher;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
 import com.turbofeed.gateway.service.processing.ImageProcessingChain;
+import com.turbofeed.gateway.service.validation.UploadValidation;
+import com.turbofeed.gateway.service.validation.UploadValidationChain;
 import com.turbofeed.gateway.storage.MediaStorageClient;
 import com.turbofeed.shared.result.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -22,15 +29,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 内容图片上传服务：批量校验 -&gt; 逐文件处理 -&gt; 存储端口写入 -&gt; 发布上传事件。
+ * 内容图片上传服务：责任链校验 -&gt; 逐文件「处理 -&gt; 存储 -&gt; 发事件」。
  *
- * <p>主链路只有四个薄方法，职责单一：{@link #upload} 编排批量、{@link #validateBatch}
- * 批量级校验、{@link #validate} 单文件校验（含 Magic Number 真实格式识别）、
- * {@link #storeOne} 单文件「处理 -&gt; 存储 -&gt; 发事件」。</p>
+ * <p>校验整体外移至 {@code service/validation} 责任链
+ * （{@link UploadValidationChain}）：批量数 / 空文件 / 大小 / Magic Number /
+ * 用户级并发护栏——新增校验规则只需增加链环节，本类零改动。校验产出的真实格式
+ * 经 {@link UploadValidation#format(int)} 写回，存储阶段不二次读文件头。</p>
  *
- * <p>校验任一失败抛 {@link BizException}(UPLOAD_INVALID)，由全局异常处理器统一响应；
- * 文件头嗅探采用<b>流式读取固定 16 字节</b>，默认路径杜绝 {@code getBytes()} 全量加载
- * 进内存，仅当处理链启用（{@code processing-enabled: true}）时才全量读取交给 ImageIO。</p>
+ * <p>校验任一失败抛 {@link BizException}（UPLOAD_INVALID / UPLOAD_IN_PROGRESS），
+ * 由全局异常处理器统一响应。{@code storeOne} 保持流式路径：默认不
+ * {@code getBytes()} 全量加载，仅处理链启用时全量读取交给 ImageIO。</p>
  *
  * <p>UGC 口径下上传成功仅代表受理，进入待审核态（PENDING），审核通过后才对前端可见。</p>
  */
@@ -40,13 +48,11 @@ public class MediaUploadService {
 
     private static final Logger log = LoggerFactory.getLogger(MediaUploadService.class);
 
-    /** 文件头嗅探长度：覆盖全部白名单格式 Magic Number 的最大偏移（RIFF....WEBP 需 12 字节）。 */
-    private static final int HEADER_SNIFF_SIZE = 16;
-
     private final MediaProperties properties;
     private final MediaStorageClient storageClient;
     private final MediaEventPublisher eventPublisher;
     private final ImageProcessingChain processingChain;
+    private final UploadValidationChain validationChain;
 
     /**
      * 批量上传图片，返回可访问 URL 列表。
@@ -56,35 +62,68 @@ public class MediaUploadService {
      * 未携带有效令牌即 UNAUTHORIZED）。单测可通过 {@code UserContextHolder.set/clear}
      * 构造身份。</p>
      *
+     * <p><b>Sentinel 机器维度限流（注解驱动）</b>：{@link SentinelResource} 由
+     * SentinelResourceAspect（SCA starter 自动装配，{@code spring.cloud.sentinel.annotation.enabled}
+     * 默认 true）代理本方法——规则命中即回调 {@link #uploadBlocked} 转
+     * {@link BizException}(RATE_LIMITED)，entry/exit 由切面成对管理（业务抛异常时也保证
+     * exit，无泄漏）。资源名复用 {@link SentinelRateLimitConfig#UPLOAD_RESOURCE} 单一事实源，
+     * {@code entryType = IN}（Web 入口流量；注解默认为 OUT，须显式声明）。</p>
+     *
+     * <p><b>校验链</b>：{@link UploadValidationChain#validate(String, MultipartFile[])}
+     * 在 {@code try} 块内执行，{@code finally} 统一触发完成回调——无论成功、校验失败
+     * （{@code UPLOAD_INVALID / UPLOAD_IN_PROGRESS}）还是业务异常（{@code storeOne} 抛错），
+     * 用户级上传占位（{@code rl:upload:inflight:{userId}}）都被立即释放；TTL 仅兜底进程崩溃
+     * / 释放失败场景（{@code inflight-ttl-seconds}）。若 {@code validate()} 置于 try 之外，
+     * 校验失败时占位 key 会滞留 TTL 期内，同用户重试会被 42903 误拒——见 changelog 0009。</p>
+     *
+     * <p><b>限流分工</b>：机器维度（并发线程数 / 单机 QPS）走 Sentinel 注解；用户维度
+     * 配额限流属 Redis
+     * {@code com.turbofeed.gateway.service.ratelimit.UploadRateLimiter}
+     * （阈值 {@code turbofeed.media.rate-limit.per-user}，实现于该类 tryAcquire）。
+     * 接线位置：方法开头、责任链之前。</p>
+     *
      * @param files     multipart 字段 files 的上传文件数组
      * @param requestId 客户端幂等键（可选，X-Request-Id 请求头；幂等去重落地时使用）
      * @return 上传成功后的图片 URL 列表（审核通过后对前端生效）
      */
+    @SentinelResource(value = SentinelRateLimitConfig.UPLOAD_RESOURCE,
+            entryType = EntryType.IN, blockHandler = "uploadBlocked")
     public List<String> upload(MultipartFile[] files, String requestId) {
         String userId = UserContextHolder.requireUserId();
-        validateBatch(files);
-        List<String> urls = new ArrayList<>(files.length);
-        for (MultipartFile file : files) {
-            urls.add(storeOne(userId, file, requestId));
-        }
-        log.info("媒体上传受理: userId={}, count={}, requestId={}", userId, urls.size(), requestId);
-        return urls;
-    }
-
-    /** 批量级校验：非空且不超过单次张数上限。 */
-    private void validateBatch(MultipartFile[] files) {
-        if (files == null || files.length == 0) {
-            throw new BizException(ErrorCode.UPLOAD_INVALID, "请选择至少一张图片");
-        }
-        if (files.length > properties.getMaxBatchCount()) {
-            throw new BizException(ErrorCode.UPLOAD_INVALID,
-                    "单次最多上传 " + properties.getMaxBatchCount() + " 张");
+        UploadValidation context = null;
+        try {
+            context = validationChain.validate(userId, files);
+            List<String> urls = new ArrayList<>(files.length);
+            for (int i = 0; i < files.length; i++) {
+                urls.add(storeOne(userId, files[i], context.format(i), requestId));
+            }
+            log.info("媒体上传受理: userId={}, count={}, requestId={}", userId, urls.size(), requestId);
+            return urls;
+        } finally {
+            // 覆盖 validate() 抛 UPLOAD_INVALID/UPLOAD_IN_PROGRESS 与 storeOne 异常：
+            // 占位 key 必须释放，否则 TTL 兜底期内同用户重试会被 42903 误拒。
+            if (context != null) {
+                context.runCompletionCallbacks();
+            }
         }
     }
 
-    /** 单文件：校验 -&gt; 可选处理 -&gt; 存储 -&gt; 发布事件，返回 URL。 */
-    private String storeOne(String userId, MultipartFile file, String requestId) {
-        ImageFormat format = validate(file);
+    /**
+     * Sentinel 限流回调（blockHandler）：规则命中时替代 {@link #upload} 执行。
+     *
+     * <p>签名契约（SentinelResourceAspect 约束）：与原方法同参 + 末尾 {@link BlockException}、
+     * 同返回类型、同类 public 实例方法。不吞 BlockException 而是转成统一业务异常
+     * {@link BizException}(RATE_LIMITED)，由全局异常处理器输出标准错误响应。</p>
+     */
+    public List<String> uploadBlocked(MultipartFile[] files, String requestId, BlockException e) {
+        UserContext context = UserContextHolder.get();
+        String userId = context != null ? context.userId() : "anonymous";
+        log.warn("上传限流触发: userId={}, requestId={}, rule={}", userId, requestId, e.getClass().getSimpleName());
+        throw new BizException(ErrorCode.RATE_LIMITED, "上传过于频繁，请稍后再试");
+    }
+
+    /** 单文件：可选处理 -&gt; 存储 -&gt; 发布事件，返回 URL（格式由校验链产出，不再重复嗅探）。 */
+    private String storeOne(String userId, MultipartFile file, ImageFormat format, String requestId) {
         byte[] processed = maybeProcess(file, format);
         try (InputStream content = processed != null
                 ? new ByteArrayInputStream(processed)
@@ -99,18 +138,6 @@ public class MediaUploadService {
             log.error("读取上传内容失败: userId={}, size={}", userId, file.getSize(), e);
             throw new BizException(ErrorCode.INTERNAL_ERROR, "读取上传内容失败");
         }
-    }
-
-    /** 单文件级校验：空文件 -&gt; 大小上限 -&gt; 真实格式（Magic Number），全部通过返回格式。 */
-    private ImageFormat validate(MultipartFile file) {
-        if (file.isEmpty()) {
-            throw new BizException(ErrorCode.UPLOAD_INVALID, "存在空文件");
-        }
-        if (file.getSize() > properties.getMaxFileSize().toBytes()) {
-            throw new BizException(ErrorCode.UPLOAD_INVALID,
-                    "单文件不得超过 " + properties.getMaxFileSize().toMegabytes() + "MB");
-        }
-        return detectFormat(file);
     }
 
     /**
@@ -132,26 +159,5 @@ public class MediaUploadService {
             log.warn("图片处理失败，降级使用原图: format={}", format, e);
             return null;
         }
-    }
-
-    /** 流式嗅探文件头判定真实格式；SVG / 伪造扩展名 / 非白名单一律拒绝。 */
-    private ImageFormat detectFormat(MultipartFile file) {
-        byte[] header = new byte[HEADER_SNIFF_SIZE];
-        int read;
-        try (InputStream in = file.getInputStream()) {
-            read = in.readNBytes(header, 0, header.length);
-        } catch (IOException e) {
-            log.error("读取文件头失败: size={}", file.getSize(), e);
-            throw new BizException(ErrorCode.INTERNAL_ERROR, "读取上传内容失败");
-        }
-        // 正常图片不可能小于 16 字节；不足即判定为非法内容
-        if (read < HEADER_SNIFF_SIZE) {
-            throw new BizException(ErrorCode.UPLOAD_INVALID, "仅支持 jpg/png/gif/webp");
-        }
-        ImageFormat format = ImageFormat.detect(header);
-        if (format == null) {
-            throw new BizException(ErrorCode.UPLOAD_INVALID, "仅支持 jpg/png/gif/webp");
-        }
-        return format;
     }
 }
