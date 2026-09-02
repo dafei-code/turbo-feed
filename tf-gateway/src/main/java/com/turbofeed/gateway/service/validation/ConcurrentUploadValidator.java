@@ -60,9 +60,11 @@ public class ConcurrentUploadValidator extends UploadValidator {
         try {
             Boolean acquired = redisTemplate.opsForValue().setIfAbsent(key, "1", ttl);
             if (!Boolean.TRUE.equals(acquired)) {
+//                “快速失败”策略，快速反馈用户，避免无谓等待。
                 throw new BizException(ErrorCode.UPLOAD_IN_PROGRESS, "已有上传任务进行中，请等待完成后再试");
             }
         } catch (RedisConnectionFailureException e) {
+//            Redis 不可用时的降级处理（容灾设计）
             log.warn("Redis 不可用，并发护栏降级放行（fail-open）: userId={}", context.userId(), e);
             return;
         }

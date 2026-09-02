@@ -43,6 +43,21 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
+        <!-- ShardingSphere JDBC 内核：分库分表原生驱动（驱动类 org.apache.shardingsphere.driver.ShardingSphereDriver，
+             由 application.yml 的 spring.datasource.url=jdbc:shardingsphere:classpath:shardingsphere-config.yaml 启用，
+             无需 spring-boot-starter）。当前仅网关元数据(user 表)分片使用；
+             实际分片算法用 Apache ShardingSphere 5.5.3 内置 HASH_MOD（type: HASH_MOD + props.sharding-count），
+             见 shardingsphere-config.yaml shardingAlgorithms 段；不需业务侧自定义算法类（曾自写但已于 0012 改回内置）。
+             ⚠️ artifactId 必须是 `shardingsphere-jdbc`（5.x 统一名称），不是 `shardingsphere-jdbc-core`，
+             后者在 Maven Central 不存在，会导致 import org.apache.shardingsphere.* 全军报红。
+             版本选择：5.5.3（2026-02-23 发布），相比 5.5.0 已修复 test-util 缺失发布的 release 缺陷，
+             详见 Apache PR #31143（"Removes test modules that are not deployed to Maven Central Repository"）与
+             GitHub issue #31128/#32256。 -->
+        <dependency>
+            <groupId>org.apache.shardingsphere</groupId>
+            <artifactId>shardingsphere-jdbc</artifactId>
+            <version>5.5.3</version>
+        </dependency>
         <!-- RocketMQ：媒体上传事件异步化（Observer 事件总线的跨进程实现）。
              2.3.x 兼容 Spring Boot 3.x（2.3.4 已修复 MessageModel 包路径冲突）。
              默认不激活：未配置 rocketmq.name-server 时 starter 自动配置不生效，

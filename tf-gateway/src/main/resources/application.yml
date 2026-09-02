@@ -2,12 +2,11 @@
 spring:
   application:
     name: turbo-feed-gateway
-  # H2 兜底（克隆即跑）；生产切 MySQL 8
+  # 数据源走 ShardingSphere 原生驱动：从 classpath 读取 shardingsphere-config.yaml，
+  # 由该文件定义真实数据源(ds_0/ds_1)与分片规则；真实账号密码在配置文件内，此处不再设置
   datasource:
-    url: jdbc:h2:mem:turbofeed;MODE=MySQL
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
+    driver-class-name: org.apache.shardingsphere.driver.ShardingSphereDriver
+    url: jdbc:shardingsphere:classpath:shardingsphere-config.yaml
   # multipart 框架层限额（业务层 turbofeed.media.* 之外的前置兜底，略高于业务限额）
   servlet:
     multipart:
@@ -39,10 +38,14 @@ turbofeed:
   jwt:
     secret: turbofeed-demo-secret-change-me
     expire-seconds: 86400
-  # 演示登录账号；生产改数据库 + 哈希存储
+  # 演示登录账号：键为手机号，值为账号信息（密码 + uid）；
+  # 对标抖音：令牌 sub 携带 uid（身份层），手机号仅作登录凭证（凭证层），不进入令牌、不参与分片。
+  # 生产改数据库 + user_phone_router(phone→uid) 映射 + 哈希存储
   auth:
     demo-users:
-      admin: "123456"
+      "13800138000":
+        password: "123456"
+        uid: 10001
   # 媒体上传限额：调整阈值只改配置不发版
   media:
     key-prefix: media

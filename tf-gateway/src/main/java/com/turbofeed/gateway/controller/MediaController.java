@@ -51,10 +51,10 @@ import java.util.List;
  *     过早分表是过度设计。</li>
  *
  *   <li><b>文件限流怎么做？</b><br>
- *     三层：① Sentinel 热点参数限流——按 userId 限单用户约 10 QPS，防单个用户刷接口；
- *     ② 单机全局兜底——总上传 QPS 上限（如 500），触发返回 {@code RATE_LIMITED(42901)}；
- *     ③ 洪峰削峰——高峰期把上传任务丢入队列（见第 2 点的异步化路径），消费端按存储
- *     写入能力匀速消费。multipart 大小上限在 application.yml 由框架层再兜底一道。</li>
+ *     两层：① 机器维度——Sentinel 注解限流（并发 20 + 单机 QPS 100，见 §3.1），
+ *     保护进程不被慢存储拖垮、防总量刷爆带宽；② 用户维度——Redis {@code UploadRateLimiter}
+ *     按 userId 时间窗限流（per-user=10，跨实例计数），避免单用户持续刷接口。
+ *     洪峰削峰见第 2 点的异步化路径；multipart 大小上限在 application.yml 由框架层再兜底。</li>
  *
  *   <li><b>文件校验怎么做？</b><br>
  *     三重校验：① 类型白名单 jpg/png/gif/webp（UGC 场景必须白名单，绝不放开任意类型）；

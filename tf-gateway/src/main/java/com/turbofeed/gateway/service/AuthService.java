@@ -16,8 +16,10 @@ import java.security.MessageDigest;
 /**
  * 登录服务：演示账号校验 + JWT 签发。
  *
- * <p>演示阶段账号来自配置（turbofeed.auth.demo-users）；生产替换为数据库 + 哈希
- * （BCrypt/Argon2）校验并接入 refresh token，本类仅改校验实现，令牌签发契约不变。</p>
+ * <p>登录账号即手机号（对标抖音：手机号是凭证层，仅用于登录入口定位 UID）；校验通过后
+ * 签发 JWT，令牌 sub 携带系统内部 {@code uid}（身份层 / 分片键），下游 UserContextHolder
+ * 透传 uid，业务层按 uid 精准命中分片。生产改为查库（user_phone_router 做 phone→uid 映射）
+ * + 哈希（BCrypt/Argon2）校验并接入 refresh token。</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -29,23 +31,24 @@ public class AuthService {
     private final JwtUtil jwtUtil;
 
     /**
-     * 校验账号并签发 JWT。
+     * 校验手机号 + 密码并签发 JWT。
      *
-     * @return JWT，前端后续以 Authorization: Bearer &lt;token&gt; 携带
-     * @throws BizException(UNAUTHORIZED) 用户名或密码错误
+     * @return JWT（sub 为 uid，非手机号），前端后续以 Authorization: Bearer &lt;token&gt; 携带
+     * @throws BizException 手机号或密码错误
      */
-    public String login(String username, String password) {
-        if (username == null || username.isBlank() || password == null || password.isBlank()) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "用户名与密码不能为空");
+    public String login(String phone, String password) {
+        if (phone == null || phone.isBlank() || password == null || password.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "手机号与密码不能为空");
         }
-        String expected = properties.getDemoUsers().get(username);
+        AuthProperties.DemoUser account = properties.getDemoUsers().get(phone);
         // 恒定时间比较，避免时序侧信道泄露"账号是否存在"
-        if (expected == null || !MessageDigest.isEqual(
-                expected.getBytes(StandardCharsets.UTF_8),
+        if (account == null || !MessageDigest.isEqual(
+                account.getPassword().getBytes(StandardCharsets.UTF_8),
                 password.getBytes(StandardCharsets.UTF_8))) {
-            log.warn("登录失败: username={}", username);
-            throw new BizException(ErrorCode.UNAUTHORIZED, "用户名或密码错误");
+            log.warn("登录失败: phone={}", phone);
+            throw new BizException(ErrorCode.UNAUTHORIZED, "手机号或密码错误");
         }
-        return jwtUtil.generateToken(username);
+        // 对标抖音：令牌内携带 UID 而非手机号；手机号仅在登录入口定位 UID，不进入令牌、不参与分片
+        return jwtUtil.generateToken(String.valueOf(account.getUid()));
     }
 }

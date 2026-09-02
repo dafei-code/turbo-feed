@@ -1,0 +1,78 @@
+# =============================================================================
+# ShardingSphere 分片配置（turbo-feed-gateway 元数据层）
+# -----------------------------------------------------------------------------
+# 作用：网关元数据（当前为 user 表）按 id 分库分表，路由对业务代码透明。
+# 启用方式：application.yml 中
+#           spring.datasource.url=jdbc:shardingsphere:classpath:shardingsphere-config.yaml
+#           + driver-class-name=org.apache.shardingsphere.driver.ShardingSphereDriver
+#
+# 算法选型：Apache ShardingSphere 5.5.3 内置 HASH_MOD 算法
+#   - 算法类：org.apache.shardingsphere.sharding.algorithm.sharding.mod.HashModShardingAlgorithm
+#   - 版本：5.5.3（5.5.0 带的 test-util 依赖未发布到 Maven Central，会导致解析失败；
+#     Apache PR #31143 已在 5.5.1+ 修复，5.5.3 为当前 5.5.x 最新稳定版）
+#   - 配套前置算法契约：actualDataNodes 必须按 `prefix${0..N-1}` 模式书写（如 ds_${0..1}.user_${0..1}），
+#     因内置算法按 DataNodeInfo.prefix + 哈希后填充下标拼接目标名，最后用 contains() 命中 availableTargetNames。
+#   - 由 props.sharding-count 显式指定该层候选目标数（不是按 availableTargetNames.size() 自动适配），
+#     扩容/缩容需同步改 sharding-count，避免分母失配。
+#
+# 真实数据源账号密码：本文件内配置仅供克隆即跑；生产请用环境变量/密钥管理注入，勿硬编码。
+# =============================================================================
+
+# 数据源集合：2 个库（ds_0 / ds_1），对应物理 MySQL 实例 turbo_feed_1 / turbo_feed_2
+dataSources:
+  ds_0:
+    dataSourceClassName: com.zaxxer.hikari.HikariDataSource
+    driverClassName: com.mysql.cj.jdbc.Driver
+    # TODO 生产替换为 ENV: TURBO_FEED_DS_0_URL（密钥管理/配置中心注入）
+    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai
+    username: root
+    password:
+  ds_1:
+    dataSourceClassName: com.zaxxer.hikari.HikariDataSource
+    driverClassName: com.mysql.cj.jdbc.Driver
+    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai
+    username: root
+    password:
+
+rules:
+  - !SHARDING
+    tables:
+      # 逻辑表 user（业务 SQL 只写 user，由 ShardingSphere 路由到物理表）
+      user:
+        # 2 库 × 2 表 = 4 物理表：ds_0.user_0 / ds_0.user_1 / ds_1.user_0 / ds_1.user_1
+        # prefix 写法（ds_ / user_）必须与下方的 HASH_MOD 内置算法前缀匹配逻辑对齐
+        actualDataNodes: ds_${0..1}.user_${0..1}
+        # 分库策略：按 id 分到 ds_0 / ds_1
+        databaseStrategy:
+          standard:
+            shardingColumn: id
+            shardingAlgorithmName: userDbSharding
+        # 分表策略：在已选定的库内按 id 分到 user_0 / user_1
+        tableStrategy:
+          standard:
+            shardingColumn: id
+            shardingAlgorithmName: userTableSharding
+        # 主键生成（雪花 ID，对接业务侧的 userId 生成策略，留待接入）
+        keyGenerateStrategy:
+          column: id
+          keyGeneratorName: snowflake
+    # 分片算法：库 / 表各一条，复用 SS 内置 HASH_MOD，由 sharding-count 显式指定候选数
+    shardingAlgorithms:
+      userDbSharding:
+        type: HASH_MOD
+        props:
+          # 库候选数 = 2（ds_0, ds_1），扩容需同步调整本值
+          sharding-count: 2
+      userTableSharding:
+        type: HASH_MOD
+        props:
+          # 表候选数 = 2（user_0, user_1），扩容需同步调整本值
+          sharding-count: 2
+    # 主键生成器：雪花 ID，与 userId 体系一致
+    keyGenerators:
+      snowflake:
+        type: SNOWFLAKE
+
+props:
+  # 开发期打印实际落到的物理库/表与 SQL，便于核对路由；生产可关闭
+  sql-show: true
