@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
@@ -44,6 +45,16 @@ public class GlobalExceptionHandler {
     public Result<Void> handleMissingParam(MissingServletRequestParameterException e) {
         log.warn("缺少请求参数: {}", e.getParameterName());
         return Result.fail(ErrorCode.PARAM_ERROR, "缺少必填参数: " + e.getParameterName());
+    }
+
+    /**
+     * 静态资源不存在（如浏览器自动请求的 /favicon.ico 项目未提供）。
+     * 属客户端 404，不应计入"未处理异常"，故不打 ERROR 堆栈，仅按 404 错误码返回。
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public Result<Void> handleNoResource(NoResourceFoundException e) {
+        log.debug("静态资源不存在(404): {}", e.getMessage());
+        return Result.fail(ErrorCode.NOT_FOUND);
     }
 
     /** 兜底：未知异常统一 50000，详细信息只进日志，不外泄给客户端。 */
