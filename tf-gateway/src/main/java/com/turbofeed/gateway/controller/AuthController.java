@@ -32,7 +32,8 @@ public class AuthController {
      * @return 统一返回结构，data 为 JWT
      */
     @PostMapping("/login")
-    public Result<String> login(@RequestParam String phone, @RequestParam String password) {
+    public Result<String> login(@RequestParam("phone") String phone,
+                                @RequestParam("password") String password) {
         return Result.ok(authService.login(phone, password));
     }
 }
