@@ -632,6 +632,16 @@
 </div>
 
 <script>
+  // 后端网关地址：静态页与后端不同源，故写全址。换端口 / 部署时只改这一处。
+  var API_BASE = 'http://localhost:8080';
+
+  // 登录守卫：/api/media/** 均校验 Bearer 令牌，无令牌直接回登录页，
+  // 避免用户绕过登录进来后上传才报 401（报错时机太晚、原因不明）。
+  var TOKEN = localStorage.getItem('turbofeed:token');
+  if (!TOKEN) {
+    window.location.href = 'login.html';
+  }
+
   // 静态演示版：仅侧边栏选中态交互，无后端逻辑
   document.querySelectorAll('.nav-item').forEach(function (item) {
     item.addEventListener('click', function () {
@@ -689,23 +699,17 @@
   // 后端统一返回结构：{ code: 0, message: '成功', data: [...图片URL], timestamp: ... }
   // 注意：UGC 口径下上传成功仅代表受理（进入待审核态），审核通过后内容才会在前端展示。
   // 实现后把下方 FileReader 本地读取替换为真实请求，取 Result.data 作为 URL 数组即可。
+  // 后端上传接口：POST /api/media/upload（multipart/form-data，字段名 files）
+  // 统一返回结构 { code:0, data:[图片URL], ... }，data 为可访问地址（/media/... 经本地存储映射）
   function uploadImages(files) {
-    // 示例（实现后放开）：
-    // var fd = new FormData();
-    // Array.prototype.forEach.call(files, function (f) { fd.append('files', f); });
-    // return fetch('/api/media/upload', {
-    //   method: 'POST',
-    //   headers: { 'Authorization': 'Bearer ' + token }, // token 来自 POST /api/auth/login
-    //   body: fd
-    // }).then(function (r) { return r.json(); })
-    //   .then(function (res) { return res.code === 0 ? res.data : Promise.reject(res.message); });
-    return Promise.all(Array.prototype.map.call(files, function (f) {
-      return new Promise(function (resolve) {
-        var reader = new FileReader();
-        reader.onload = function () { resolve(reader.result); }; // dataURL
-        reader.readAsDataURL(f);
-      });
-    }));
+    var fd = new FormData();
+    Array.prototype.forEach.call(files, function (f) { fd.append('files', f); });
+    return fetch(API_BASE + '/api/media/upload', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + TOKEN }, // TOKEN 来自 POST /api/auth/login（见顶部登录守卫）
+      body: fd
+    }).then(function (r) { return r.json(); })
+      .then(function (res) { return res.code === 0 ? res.data : Promise.reject(new Error(res.message)); });
   }
 
   document.getElementById('fileInput').addEventListener('change', function () {

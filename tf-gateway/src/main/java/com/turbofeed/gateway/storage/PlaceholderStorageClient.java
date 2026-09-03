@@ -6,19 +6,27 @@ import com.turbofeed.gateway.service.ImageFormat;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.io.InputStream;
 import java.util.UUID;
 
 /**
- * 占位存储实现：仅生成唯一标识与 URL，不写入真实存储（MinIO 本期暂缓接入）。
+ * 占位存储实现：仅生成唯一标识与 URL，不写入真实存储。
+ *
+ * <p><b>默认不激活</b>：本类与 {@link LocalDiskStorageClient} 均由
+ * {@code turbofeed.media.storage} 条件装配（{@code local} / {@code placeholder}），
+ * 严格互斥，避免同类型多实现导致注入歧义。默认值为 {@code local}（真实落盘，
+ * 保证"上传 → 展示"链路可跑通）；需要回到纯占位行为时配置
+ * {@code turbofeed.media.storage=placeholder}。</p>
  *
  * <p>接入 MinIO 时新增 {@code MinioStorageClient} 实现并通过配置切换激活，
  * 本类随之退役——{@link MediaStorageClient} 契约不变，Service 层零改动。</p>
  */
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "turbofeed.media.storage", havingValue = "placeholder")
 public class PlaceholderStorageClient implements MediaStorageClient {
 
     private static final Logger log = LoggerFactory.getLogger(PlaceholderStorageClient.class);

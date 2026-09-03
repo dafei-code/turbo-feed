@@ -51,7 +51,16 @@ turbofeed:
     key-prefix: media
     max-file-size: 5MB
     max-batch-count: 9
-    public-url-base: https://oss.turbofeed.com/
+    # 对外访问基址：存储实现拼装返回 URL 时的前缀。
+    # local 模式下须指向本服务（含端口），使返回的图片 URL 可被浏览器直接加载；
+    # 切到对象存储后改为其公网域名 / CDN 域名。
+    public-url-base: http://localhost:8080/
+    # 存储实现：local=本地磁盘真实落盘（默认，保证「上传→展示」链路可跑通）；
+    # placeholder=仅拼装 URL 不落盘（回归占位行为时用）
+    storage: local
+    # 本地落盘根目录（storage=local 时生效），与 WebConfig 的 /media/** 静态映射共享此值，
+    # 避免「写入目录」与「读取目录」两处配置漂移导致 404
+    local-dir: ./data/media
     # 图片处理链（Decorator：缩略图缩放）。默认关闭保持流式零内存路径；
     # 开启后经 ImageIO 解码重编码（12MP ARGB ≈ 48MB/张），需评估上传 QPS 与堆内存
     processing-enabled: false

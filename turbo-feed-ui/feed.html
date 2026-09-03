@@ -516,14 +516,33 @@
 
 <script>
   // ========== 模拟视频数据 ==========
-  const videos = [
-    { id: 'v1', author: 'forza_horizon', title: '《极限竞速：地平线 6》实机首曝！这一代开放世界有多大？', tags: '#地平线6 #赛车游戏 #Xbox', music: '极限竞速地平线 6 - 实机原声', like: 21000, comment: 734, fav: 4305, share: 105, color1: '#1f4e79', color2: '#ff4d5e' },
-    { id: 'v2', author: '编程小黑', title: 'TurboFeed 架构揭秘：Redis 收件箱 + 64 桶计数怎么扛 10 万 QPS', tags: '#Java #高并发 #TurboFeed', music: '键盘敲击白噪音', like: 5860, comment: 312, fav: 1890, share: 67, color1: '#2c3e50', color2: '#3d7eff' },
-    { id: 'v3', author: '旅行日记', title: '重庆出差 vlog｜火锅是真的辣，山城是真的绕', tags: '#重庆 #出差 #火锅', music: '赛博山城 - 原创音乐', like: 34200, comment: 1205, fav: 8900, share: 432, color1: '#4a148c', color2: '#ff7a45' },
-    { id: 'v4', author: '极客湾', title: '2026 年 M4 MacBook Pro 上手：编译 Java 项目快了多少？', tags: '#MacBook #M4 #评测', music: 'Geek BGM', like: 125000, comment: 5400, fav: 32000, share: 2100, color1: '#263238', color2: '#2ecc8f' },
-    { id: 'v5', author: '面试突击', title: 'Redis ZSET 命令级短板，15 分钟补齐 Skiplist + ZINCRBY 场景', tags: '#Redis #面试 #后端', music: 'Focus Lo-Fi', like: 8900, comment: 256, fav: 5600, share: 88, color1: '#0d3b66', color2: '#f0b429' },
-    { id: 'v6', author: '航拍中国', title: '无人机飞跃青藏高原，每一帧都是壁纸', tags: '#航拍 #风景 #旅行', music: '山河图 - 伴奏', like: 56700, comment: 1890, fav: 12400, share: 980, color1: '#1b5e20', color2: '#6c5ce7' }
-  ];
+  // ========== 真实内容数据（来自后端 /api/media/mine，仅展示 APPROVED） ==========
+  // 说明：当前无独立「公域 feed」接口，复用「我的上传」返回登录用户本人已过审的内容。
+  let videos = [];
+
+  function loadFeed() {
+    var TOKEN = localStorage.getItem('turbofeed:token');
+    if (!TOKEN) { location.href = 'login.html'; return; }
+    fetch('http://localhost:8080/api/media/mine', {
+      headers: { 'Authorization': 'Bearer ' + TOKEN }
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        var items = (res.data || []).filter(function (i) { return i.status === 'APPROVED'; });
+        videos = items.map(function (i) {
+          return {
+            id: i.mediaId,
+            author: '我',
+            title: i.mediaId.split('/').pop(),
+            tags: '#TurboFeed #UGC',
+            music: '—',
+            like: 0, comment: 0, fav: 0, share: 0,
+            cover: i.url
+          };
+        });
+        renderFeed();
+      })
+      .catch(function (e) { console.error('加载 feed 失败', e); renderFeed(); });
+  }
 
   // 当前状态
   let currentIdx = 0;
@@ -535,23 +554,37 @@
     return n.toString();
   }
 
-  // 生成视频 DOM
-  const feedList = document.getElementById('feedList');
-  videos.forEach((v, i) => {
-    const div = document.createElement('div');
-    div.className = 'feed-item';
-    div.dataset.idx = i;
-    const grad = `linear-gradient(135deg, ${v.color1}, ${v.color2})`;
-    div.innerHTML = `
-      <div class="video-wrap">
-        <div class="video-poster" style="background:${grad}"></div>
-        <video class="video-el" loop playsinline muted poster data-idx="${i}"></video>
-        <div class="play-mask" id="mask-${i}"><div class="big-play"><svg viewBox="0 0 24 24" width="34" height="34" fill="#fff"><polygon points="5 3 21 12 5 21 5 3"/></svg></div></div>
-        <div class="progress"><div class="progress-bar" id="bar-${i}"></div></div>
-      </div>
-    `;
-    feedList.appendChild(div);
-  });
+  // 生成 feed DOM（数据来自 loadFeed，仅渲染已有 videos）
+  function renderFeed() {
+    var feedList = document.getElementById('feedList');
+    feedList.innerHTML = '';
+    if (!videos.length) {
+      feedList.innerHTML = '<div style="padding:40px;text-align:center;color:#8b98ab">暂无已通过审核的内容，去后台上传图片吧</div>';
+      return;
+    }
+    videos.forEach(function (v, i) {
+      var div = document.createElement('div');
+      div.className = 'feed-item';
+      div.dataset.idx = i;
+      var posterStyle = v.cover
+        ? ("background-image:url('" + v.cover + "');background-size:cover;background-position:center;")
+        : 'background:#1f4e79;';
+      div.innerHTML = `
+        <div class="video-wrap">
+          <div class="video-poster" style="${posterStyle}"></div>
+          <video class="video-el" loop playsinline muted poster data-idx="${i}"></video>
+          <div class="play-mask" id="mask-${i}"><div class="big-play"><svg viewBox="0 0 24 24" width="34" height="34" fill="#fff"><polygon points="5 3 21 12 5 21 5 3"/></svg></div></div>
+          <div class="progress"><div class="progress-bar" id="bar-${i}"></div></div>
+        </div>
+      `;
+      feedList.appendChild(div);
+    });
+    currentIdx = 0;
+    updateInfo(0);
+    setPlay(0, true);
+  }
+
+  loadFeed();
 
   // ========== 视图更新 ==========
   function updateInfo(idx) {

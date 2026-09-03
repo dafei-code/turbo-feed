@@ -219,12 +219,12 @@
 
   <form id="loginForm" novalidate>
     <div class="field">
-      <label>用户名</label>
+      <label>手机号</label>
       <div class="input">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#8b98ab" stroke-width="2">
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
         </svg>
-        <input type="text" id="username" placeholder="请输入用户名" autocomplete="username" value="admin">
+        <input type="tel" id="phone" placeholder="请输入手机号" autocomplete="username" value="13800138000">
       </div>
     </div>
 
@@ -259,22 +259,49 @@
 </div>
 
 <script>
+  // 后端网关地址：静态页与后端不同源（file:// 或其它端口），故写全址。
+  // 换端口 / 部署到他处时，三个页面各改这一处即可。
+  var API_BASE = 'http://localhost:8080';
+
   function showMsg(text) {
     var el = document.getElementById('msg');
     el.textContent = text;
     el.classList.add('show');
   }
 
-  document.getElementById('loginForm').addEventListener('submit', function (e) {
-    e.preventDefault(); // 后端逻辑暂不接入，仅做前端假校验
-    var u = document.getElementById('username').value.trim();
-    var p = document.getElementById('password').value.trim();
-    if (!u) return showMsg('请输入用户名');
-    if (!p) return showMsg('请输入密码');
-    // TODO: 接入后端 POST /api/auth/login（成功后应改为存储后端返回的 token）
-    // 记录当前登录用户，后台页面按用户隔离各自上传的轮播图
-    localStorage.setItem('turbofeed:user', u);
-    window.location.href = 'admin.html';
+  document.getElementById('loginForm').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var phone = document.getElementById('phone').value.trim();
+    var password = document.getElementById('password').value.trim();
+    if (!phone) return showMsg('请输入手机号');
+    if (!password) return showMsg('请输入密码');
+
+    var btn = document.querySelector('.btn-login');
+    btn.disabled = true;
+    btn.textContent = '登录中...';
+    try {
+      // 登录接口为表单编码（后端 @RequestParam 接收）；JwtAuthenticationFilter
+      // 对未携带令牌的匿名请求放行，故此处无需 Authorization 头。
+      var resp = await fetch(API_BASE + '/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ phone: phone, password: password })
+      });
+      var result = await resp.json();
+      if (!result || result.code !== 0) {
+        return showMsg((result && result.message) || '登录失败');
+      }
+      // 存 JWT：后续 /api/media/** 均校验 Authorization: Bearer <token>，缺失即 401。
+      // 令牌里的 sub 是系统内部 uid（非手机号），身份判定以令牌为准，不由前端透传。
+      localStorage.setItem('turbofeed:token', result.data);
+      localStorage.setItem('turbofeed:user', phone);
+      window.location.href = 'admin.html';
+    } catch (err) {
+      showMsg('无法连接后端服务，请确认网关已启动：' + API_BASE);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '登 录';
+    }
   });
 </script>
 

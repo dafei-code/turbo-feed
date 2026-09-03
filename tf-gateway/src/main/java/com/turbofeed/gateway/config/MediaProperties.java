@@ -22,8 +22,29 @@ public class MediaProperties {
     /** 单次批量上传文件数上限。 */
     private int maxBatchCount = 9;
 
-    /** 占位存储返回的公网 URL 前缀，MinIO/COS 接入后由存储实现自行拼装替代。 */
+    /**
+     * 对外访问基址：存储实现拼装返回 URL 时使用的前缀。
+     *
+     * <p>本地磁盘存储（默认）下应指向本服务地址（如 {@code http://localhost:8080/}），
+     * 使返回的 URL 形如 {@code http://localhost:8080/media/{uid}/{uuid}.ext} 可直接被浏览器加载；
+     * MinIO/COS 接入后改为对象存储的公网域名或 CDN 域名，由存储实现自行拼装。</p>
+     */
     private String publicUrlBase = "https://oss.turbofeed.com/";
+
+    /**
+     * 本地磁盘存储根目录（仅 {@code turbofeed.media.storage=local} 时生效）。
+     *
+     * <p>落盘路径为 {@code {localDir}/{userId}/{uuid}.{ext}}，配合
+     * {@code WebConfig} 的 {@code /media/**} 静态映射对外提供访问。
+     * 相对路径以进程工作目录为基准，生产请改为绝对路径或挂载卷。</p>
+     */
+    private String localDir = "./data/media";
+
+    /**
+     * 存储实现选择：local（本地磁盘，默认，克隆即跑）/ placeholder（仅拼 URL 不落盘）。
+     * 两个实现均通过 {@code @ConditionalOnProperty} 与本值绑定，严格互斥。
+     */
+    private String storage = "local";
 
     /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
      *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
@@ -145,5 +166,21 @@ public class MediaProperties {
 
     public void setPublicUrlBase(String publicUrlBase) {
         this.publicUrlBase = publicUrlBase;
+    }
+
+    public String getLocalDir() {
+        return localDir;
+    }
+
+    public void setLocalDir(String localDir) {
+        this.localDir = localDir;
+    }
+
+    public String getStorage() {
+        return storage;
+    }
+
+    public void setStorage(String storage) {
+        this.storage = storage;
     }
 }

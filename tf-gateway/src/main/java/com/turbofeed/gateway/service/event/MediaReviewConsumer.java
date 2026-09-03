@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.service.event;
 
+import com.turbofeed.gateway.service.query.MediaQueryService;
 import com.turbofeed.gateway.service.review.MediaReviewService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,10 +30,14 @@ import org.springframework.stereotype.Component;
 public class MediaReviewConsumer implements RocketMQListener<MediaUploadedEvent> {
 
     private final MediaReviewService reviewService;
+    private final MediaQueryService mediaQueryService;
 
     @Override
     public void onMessage(MediaUploadedEvent event) {
         log.info("MQ 消费媒体上传事件: mediaId={}, userId={}", event.mediaId(), event.userId());
         reviewService.handleUploaded(event);
+        // 与 ReviewListener 侧的 MediaIndexListener 对齐：MQ 模式下本地事件不再发布，
+        // 查询索引须在此同步建立，否则"我的上传"列表在 MQ 模式下恒为空
+        mediaQueryService.index(event);
     }
 }

@@ -1,9 +1,14 @@
 package com.turbofeed.gateway.controller;
 
+import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.MediaUploadService;
+import com.turbofeed.gateway.service.query.MediaItem;
+import com.turbofeed.gateway.service.query.MediaQueryService;
+import com.turbofeed.gateway.service.review.MediaStatus;
 import com.turbofeed.shared.result.Result;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -87,6 +92,7 @@ import java.util.List;
 public class MediaController {
 
     private final MediaUploadService mediaUploadService;
+    private final MediaQueryService mediaQueryService;
 
     /**
      * 内容图片上传（UGC，审核后展示）。
@@ -104,5 +110,42 @@ public class MediaController {
             @RequestParam("files") MultipartFile[] files,
             @RequestHeader(value = "X-Request-Id", required = false) String requestId) {
         return Result.ok(mediaUploadService.upload(files, requestId));
+    }
+
+    /**
+     * 查询当前用户上传的内容列表（按上传时间倒序）。
+     *
+     * <p>补齐"只有写接口、没有读接口"的缺口：此前前端上传成功后无从得知自己传过什么，
+     * 列表页只能展示硬编码的假数据。本接口返回每条内容的
+     * {@link MediaItem#mediaId()}、{@link MediaItem#url()} 与
+     * {@link MediaItem#status()}，前端据此渲染并过滤
+     * （UGC 公域展示只呈现 {@link MediaStatus#APPROVED}）。</p>
+     *
+     * <p>身份来源同 {@link #upload}：从 {@link UserContextHolder#requireUserId()} 取，
+     * 不经方法签名，客户端无法传他人 ID 越权查看；未携带有效令牌直接 UNAUTHORIZED。</p>
+     *
+     * @return 当前用户的内容列表，从未上传过则返回空数组
+     */
+    @GetMapping("/mine")
+    public Result<List<MediaItem>> mine() {
+        String userId = UserContextHolder.requireUserId();
+        return Result.ok(mediaQueryService.listByUser(userId));
+    }
+
+    /**
+     * 查询单条内容的审核状态（客户端进度轮询用）。
+     *
+     * <p><b>为何用 query 参数而非路径参数</b>：{@code mediaId} 形如
+     * {@code media/{userId}/{uuid}.{ext}}，<b>本身含斜杠</b>。Spring Boot 3 的
+     * PathPattern 中 {@code {*mediaId}} 只能置于末尾，写成
+     * {@code /{mediaId}/status} 则匹配不到带斜杠的值，且默认不会把 {@code %2F}
+     * 解码为路径分隔符。改为 {@code ?mediaId=...} 可原样携带，客户端无需特殊处理。</p>
+     *
+     * @param mediaId 内容唯一标识（取自 {@link MediaItem#mediaId()}）
+     * @return 当前审核状态；内容已受理但审核事件未到时返回 PENDING（处理中）
+     */
+    @GetMapping("/status")
+    public Result<MediaStatus> status(@RequestParam("mediaId") String mediaId) {
+        return Result.ok(mediaQueryService.statusOf(mediaId));
     }
 }
