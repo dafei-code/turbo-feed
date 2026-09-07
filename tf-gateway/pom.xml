@@ -80,6 +80,14 @@
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- 对象存储客户端（MinIO / 兼容 S3）：百亿级媒体文件的存储落点。
+             仅 turbofeed.media.storage=minio 时由 MinioStorageClient 使用（ConditionalOnProperty），
+             默认 local 磁盘存储不会加载本依赖的任何类，不影响克隆即跑。Java 17 兼容（SDK 要求 11+）。 -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.5.7</version>
+        </dependency>
     </dependencies>
 
     <build>

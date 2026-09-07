@@ -1,0 +1,88 @@
+# =============================================================================
+# ShardingSphere 分片配置【扩容版】：媒体元数据 2 库 × 64 表 = 128 物理表
+# -----------------------------------------------------------------------------
+# 与 shardingsphere-config.yaml 同结构，仅把 media 表分表数从 2 扩到 64，
+# 以承载百亿级媒体行（单表约千万行，B+Tree 索引友好）。
+#
+# 启用方式：application.yml 中
+#   spring.datasource.url=jdbc:shardingsphere:classpath:shardingsphere-config-128.yaml
+#   + driver-class-name=org.apache.shardingsphere.driver.ShardingSphereDriver
+#
+# ⚠️ 切换前置（务必先执行 db/expand_media_tables_128.sql 建好 128 张物理表）：
+#   分片数变化（table 2 -> 64）会改变 hash 路由目标，直接切换会导致旧数据路由错乱。
+#   生产切换需做存量再平衡：双写/灰度迁移，而非停机硬切。详见 changelog 0019。
+#
+# 算法：Apache ShardingSphere 5.5.3 内置 HASH_MOD（type: HASH_MOD + props.sharding-count）。
+#   mediaDbSharding  sharding-count=2  （库候选 ds_0/ds_1）
+#   mediaTableSharding sharding-count=64（表候选 media_0..media_63）
+#   user 表维持 2 库 × 2 表（用户量远小于媒体量，无需扩容）。
+# =============================================================================
+
+dataSources:
+  ds_0:
+    dataSourceClassName: com.zaxxer.hikari.HikariDataSource
+    driverClassName: com.mysql.cj.jdbc.Driver
+    # TODO 生产替换为 ENV: TURBO_FEED_DS_0_URL（密钥管理/配置中心注入）
+    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai
+    username: root
+    password: ****REMOVED***     # 若本地 MySQL root 有密码，请在此填写；否则应用首次访问 media 表会认证失败
+  ds_1:
+    dataSourceClassName: com.zaxxer.hikari.HikariDataSource
+    driverClassName: com.mysql.cj.jdbc.Driver
+    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai
+    username: root
+    password:      # 若本地 MySQL root 有密码，请在此填写；否则应用首次访问 media 表会认证失败
+
+rules:
+  - !SHARDING
+    tables:
+      # 逻辑表 user（业务 SQL 只写 user，由 ShardingSphere 路由到物理表）—— 维持 2 库 × 2 表
+      user:
+        actualDataNodes: ds_${0..1}.user_${0..1}
+        databaseStrategy:
+          standard:
+            shardingColumn: id
+            shardingAlgorithmName: userDbSharding
+        tableStrategy:
+          standard:
+            shardingColumn: id
+            shardingAlgorithmName: userTableSharding
+        keyGenerateStrategy:
+          column: id
+          keyGeneratorName: snowflake
+      # 逻辑表 media（UGC 媒体元数据）：扩容到 2 库 × 64 表 = 128 物理表
+      # 分片键仍为 user_id，与 user 表同键同算法，保证「我的上传」精准命中单分片。
+      media:
+        actualDataNodes: ds_${0..1}.media_${0..63}
+        databaseStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: mediaDbSharding
+        tableStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: mediaTableSharding
+    # 分片算法：库 / 表各一条，复用 SS 内置 HASH_MOD，由 sharding-count 显式指定候选数
+    shardingAlgorithms:
+      userDbSharding:
+        type: HASH_MOD
+        props:
+          sharding-count: 2
+      userTableSharding:
+        type: HASH_MOD
+        props:
+          sharding-count: 2
+      mediaDbSharding:
+        type: HASH_MOD
+        props:
+          sharding-count: 2
+      mediaTableSharding:
+        type: HASH_MOD
+        props:
+          sharding-count: 64
+    keyGenerators:
+      snowflake:
+        type: SNOWFLAKE
+
+props:
+  sql-show: true

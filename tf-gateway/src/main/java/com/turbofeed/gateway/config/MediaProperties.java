@@ -41,17 +41,13 @@ public class MediaProperties {
     private String localDir = "./data/media";
 
     /**
-     * 存储实现选择：local（本地磁盘，默认，克隆即跑）/ placeholder（仅拼 URL 不落盘）。
-     * 两个实现均通过 {@code @ConditionalOnProperty} 与本值绑定，严格互斥。
+     * 存储实现选择：local（本地磁盘，默认，克隆即跑）/ placeholder（仅拼 URL 不落盘）/ minio（对象存储，百亿级）。
+     * 三个实现均通过 {@code @ConditionalOnProperty} 与本值绑定，严格互斥。
      */
     private String storage = "local";
 
-    /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
-     *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
-    private boolean processingEnabled = false;
-
-    /** 缩略图长边上限（px），超过则等比缩放（turbofeed.media.thumbnail-max-dimension）。 */
-    private long thumbnailMaxDimension = 2048;
+    /** 对象存储（MinIO/S3）连接配置：仅 {@code storage=minio} 时生效。 */
+    private Minio minio = new Minio();
 
     /** 上传限流阈值（turbofeed.media.rate-limit.*；机器维度 Sentinel + 用户维度 Redis 分工）。 */
     private RateLimit rateLimit = new RateLimit();
@@ -112,12 +108,70 @@ public class MediaProperties {
         }
     }
 
+    /**
+     * 对象存储连接配置（MinIO / 兼容 S3 协议）。
+     *
+     * <p>百亿级文件的唯一可行落点：对象存储天然横向扩容（MinIO Server Pool / 云 COS），
+     * 代码不动即可扩容量。本配置仅供本地/开发；生产用环境变量或密钥管理注入
+     * accessKey/secretKey，勿硬编码。</p>
+     */
+    public static class Minio {
+        /** MinIO 服务地址（含协议与端口），如 http://127.0.0.1:9000 */
+        private String endpoint = "http://127.0.0.1:9000";
+        /** Access Key（生产用环境变量/密钥管理注入，勿硬编码） */
+        private String accessKey = "";
+        /** Secret Key */
+        private String secretKey = "";
+        /** 媒体桶名（应用启动时会预检，不存在则尝试创建） */
+        private String bucket = "turbo-feed-media";
+
+        public String getEndpoint() {
+            return endpoint;
+        }
+
+        public void setEndpoint(String endpoint) {
+            this.endpoint = endpoint;
+        }
+
+        public String getAccessKey() {
+            return accessKey;
+        }
+
+        public void setAccessKey(String accessKey) {
+            this.accessKey = accessKey;
+        }
+
+        public String getSecretKey() {
+            return secretKey;
+        }
+
+        public void setSecretKey(String secretKey) {
+            this.secretKey = secretKey;
+        }
+
+        public String getBucket() {
+            return bucket;
+        }
+
+        public void setBucket(String bucket) {
+            this.bucket = bucket;
+        }
+    }
+
     public RateLimit getRateLimit() {
         return rateLimit;
     }
 
     public void setRateLimit(RateLimit rateLimit) {
         this.rateLimit = rateLimit;
+    }
+
+    public Minio getMinio() {
+        return minio;
+    }
+
+    public void setMinio(Minio minio) {
+        this.minio = minio;
     }
 
     public boolean isProcessingEnabled() {
@@ -183,4 +237,11 @@ public class MediaProperties {
     public void setStorage(String storage) {
         this.storage = storage;
     }
+
+    /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
+     *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
+    private boolean processingEnabled = false;
+
+    /** 缩略图长边上限（px），超过则等比缩放（turbofeed.media.thumbnail-max-dimension）。 */
+    private long thumbnailMaxDimension = 2048;
 }

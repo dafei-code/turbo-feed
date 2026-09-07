@@ -8,10 +8,10 @@ package com.turbofeed.gateway.service;
  */
 public enum ImageFormat {
 
-    JPEG("jpg"),
-    PNG("png"),
-    GIF("gif"),
-    WEBP("webp");
+    JPEG("jpg", "image/jpeg"),
+    PNG("png", "image/png"),
+    GIF("gif", "image/gif"),
+    WEBP("webp", "image/webp");
 
     private static final byte[] JPEG_MAGIC = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF};
     private static final byte[] PNG_MAGIC = {(byte) 0x89, 'P', 'N', 'G'};
@@ -21,14 +21,21 @@ public enum ImageFormat {
     private static final byte[] WEBP_MAGIC = {'W', 'E', 'B', 'P'};
 
     private final String extension;
+    private final String contentType;
 
-    ImageFormat(String extension) {
+    ImageFormat(String extension, String contentType) {
         this.extension = extension;
+        this.contentType = contentType;
     }
 
     /** 存储扩展名（对象 key 命名用）。 */
     public String extension() {
         return extension;
+    }
+
+    /** HTTP Content-Type（对象存储写入时设置，决定浏览器解析方式）。 */
+    public String contentType() {
+        return contentType;
     }
 
     /** 判定文件头对应的真实格式；无法识别（含 SVG / 伪造扩展名）返回 null。 */

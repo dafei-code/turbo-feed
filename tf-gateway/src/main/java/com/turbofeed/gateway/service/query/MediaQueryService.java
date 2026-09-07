@@ -76,7 +76,12 @@ public class MediaQueryService {
                 return objectMapper.readValue(cached,
                         objectMapper.getTypeFactory().constructCollectionType(List.class, MediaItem.class));
             }
-            List<MediaItem> fresh = mediaRepository.listApprovedGlobal(limit, offset);
+            // 优先读写时物化的时间线（O(log n)/页，零扫分片库）；空结果（含 Redis 未就绪）降级回源
+            List<MediaItem> fresh = feedTimelineStore.readPage(page, limit);
+            if (fresh.isEmpty()) {
+                log.warn("时间线为空，降级回源分片库扫描: page={}, size={}", page, size);
+                fresh = mediaRepository.listApprovedGlobal(limit, offset);
+            }
             redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(fresh), REC_CACHE_TTL);
             return fresh;
         } catch (Exception e) {

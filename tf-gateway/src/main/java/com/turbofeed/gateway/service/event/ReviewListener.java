@@ -4,6 +4,7 @@ import com.turbofeed.gateway.service.review.MediaReviewService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 /**
@@ -21,6 +22,7 @@ public class ReviewListener {
 
     private final MediaReviewService reviewService;
 
+    @Async("reviewExecutor")
     @EventListener
     public void onMediaUploaded(MediaUploadedEvent event) {
         log.info("本地事件消费: mediaId={}, userId={}", event.mediaId(), event.userId());

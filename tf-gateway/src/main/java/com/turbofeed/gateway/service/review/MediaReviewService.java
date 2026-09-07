@@ -3,6 +3,8 @@ package com.turbofeed.gateway.service.review;
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
+import com.turbofeed.gateway.service.feed.FeedTimelineStore;
+import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.shared.result.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
