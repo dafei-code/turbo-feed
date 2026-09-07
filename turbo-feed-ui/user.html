@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="Y2Ch1vAjLFcbRHeFPGac0N">
+<head data-page-node-id="Bw9QulWF2upCfCfKEFz6Nv">
+<meta charset="UTF-8" data-page-node-id="BVLcfDVwahWVXTNkWbGfsQ">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="qhHys6o02C7LPN7WDD4Alx">
+<title>TurboFeed · 创作者中心</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #2d3646;
+    --text: #e6edf3;
+    --text-dim: #8b98ab;
+    --brand: #ff4d5e;
+    --brand-2: #ff7a45;
+    --accent: #3d7eff;
+    --ok: #2ecc8f;
+    --warn: #f0b429;
+    --error: #ff6b6b;
+    --sidebar-w: 240px;
+  }
+
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* ========== 侧边栏 ========== */
+  .sidebar {
+    position: fixed;
+    left: 0; top: 0; bottom: 0;
+    width: var(--sidebar-w);
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+  }
+  .side-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 20px 20px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .side-logo .mark {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 18px; color: #fff;
+  }
+  .side-logo .name { font-size: 19px; font-weight: 700; }
+  .side-logo .name em { font-style: normal; color: var(--brand); }
+
+  .nav { flex: 1; padding: 14px 12px; overflow-y: auto; }
+  .nav-group {
+    font-size: 11px;
+    color: #55617a;
+    letter-spacing: 1px;
+    padding: 14px 10px 6px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--text-dim);
+    cursor: pointer;
+    margin-bottom: 2px;
+    transition: background .15s, color .15s;
+    text-decoration: none;
+  }
+  .nav-item:hover { background: rgba(61,126,255,.08); color: var(--text); }
+  .nav-item.active {
+    background: linear-gradient(90deg, rgba(255,77,94,.16), rgba(255,122,69,.06));
+    color: #fff;
+    border-left: 3px solid var(--brand);
+  }
+  .nav-item svg { flex: 0 0 17px; }
+
+  .side-user {
+    padding: 14px 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .avatar {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), #6c5ce7);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; color: #fff;
+  }
+  .side-user .info { flex: 1; }
+  .side-user .info .n { font-size: 13px; }
+  .side-user .info .r { font-size: 11px; color: var(--text-dim); }
+  .logout-btn {
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text-dim);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .logout-btn:hover { border-color: var(--brand); color: var(--brand); }
+
+  /* ========== 主区域 ========== */
+  .main {
+    margin-left: var(--sidebar-w);
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  .topbar {
+    height: 60px;
+    padding: 0 26px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(22,27,34,.9);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+  .topbar .crumb { font-size: 15px; }
+  .topbar .crumb b { font-weight: 600; }
+  .topbar .crumb span { color: var(--text-dim); }
+  .topbar .search {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 12px;
+    width: 260px;
+  }
+  .topbar .search input {
+    flex: 1; background: none; border: none; outline: none;
+    color: var(--text); font-size: 13px;
+  }
+  .badge-dot {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    cursor: pointer;
+  }
+
+  .content {
+    flex: 1;
+    padding: 26px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  /* ========== 卡片 ========== */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px;
+  }
+  .card-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card-title .sub {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 400;
+    margin-left: auto;
+  }
+
+  /* ========== 个人信息卡片 ========== */
+  .profile {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+  .profile .avatar {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    font-size: 28px;
+    background: linear-gradient(135deg, var(--accent), #6c5ce7);
+  }
+  .profile .meta { flex: 1; }
+  .profile .meta .name {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .profile .meta .role {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 3px 10px;
+  }
+  .profile .stats {
+    display: flex;
+    gap: 32px;
+  }
+  .profile .stats .item {
+    text-align: center;
+  }
+  .profile .stats .item .num {
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+  .profile .stats .item .num.ok { color: var(--ok); }
+  .profile .stats .item .num.warn { color: var(--warn); }
+  .profile .stats .item .num.error { color: var(--error); }
+  .profile .stats .item .label {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* ========== 上传区域 ========== */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 32px;
+    text-align: center;
+    background: rgba(61,126,255,.04);
+    transition: border-color .2s, background .2s;
+    cursor: pointer;
+    position: relative;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: var(--accent);
+    background: rgba(61,126,255,.08);
+  }
+  .upload-zone input[type=file] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .upload-zone .icon {
+    width: 48px; height: 48px;
+    margin: 0 auto 12px;
+    border-radius: 12px;
+    background: rgba(61,126,255,.12);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent);
+    font-size: 22px;
+  }
+  .upload-zone .tip {
+    font-size: 14px;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .upload-zone .hint {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .upload-progress {
+    margin-top: 14px;
+    display: none;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .upload-progress.show { display: flex; }
+  .upload-progress .bar {
+    flex: 1;
+    height: 6px;
+    background: var(--panel-2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .upload-progress .bar i {
+    display: block;
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent), #6c5ce7);
+    transition: width .2s;
+  }
+
+  /* ========== 内容列表 ========== */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .filter-btn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 7px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .filter-btn:hover { color: var(--text); border-color: var(--accent); }
+  .filter-btn.active {
+    background: rgba(61,126,255,.12);
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .filter-btn .dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    margin-right: 5px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 18px;
+  }
+  .media-card {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    transition: transform .15s, box-shadow .15s;
+  }
+  .media-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 30px rgba(0,0,0,.35);
+  }
+  .media-card .thumb {
+    aspect-ratio: 16 / 10;
+    background: #0a0d12;
+    position: relative;
+    overflow: hidden;
+  }
+  .media-card .thumb img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .media-card .thumb .empty-img {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  .media-card .status {
+    position: absolute;
+    top: 10px; left: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 20px;
+    border: 1px solid;
+    background: rgba(13,17,23,.75);
+    backdrop-filter: blur(4px);
+  }
+  .media-card .status.pending { color: var(--warn); border-color: var(--warn); }
+  .media-card .status.approved { color: var(--ok); border-color: var(--ok); }
+  .media-card .status.rejected { color: var(--error); border-color: var(--error); }
+  .media-card .info {
+    padding: 12px;
+  }
+  .media-card .info .id {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    word-break: break-all;
+    line-height: 1.4;
+  }
+  .media-card .info .time {
+    font-size: 12px;
+    color: #55617a;
+    margin-bottom: 10px;
+  }
+  .media-card .actions {
+    display: flex;
+    gap: 8px;
+  }
+  .media-card .actions button {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 6px;
+    padding: 6px 0;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .media-card .actions button:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  /* ========== 状态徽章（工具栏统计） ========== */
+  .empty-state {
+    padding: 50px 20px;
+    text-align: center;
+    color: var(--text-dim);
+  }
+  .empty-state .big {
+    width: 64px; height: 64px;
+    margin: 0 auto 16px;
+    border-radius: 16px;
+    background: var(--panel-2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px;
+    color: #55617a;
+  }
+
+  /* ========== Toast ========== */
+  .toast {
+    position: fixed;
+    top: 20px; right: 20px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--text);
+    box-shadow: 0 12px 40px rgba(0,0,0,.4);
+    transform: translateX(140%);
+    transition: transform .25s ease;
+    z-index: 100;
+    max-width: 320px;
+  }
+  .toast.show { transform: translateX(0); }
+  .toast.ok { border-left-color: var(--ok); }
+  .toast.error { border-left-color: var(--error); }
+
+  /* ========== 未登录遮罩 ========== */
+  .login-backdrop {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+  }
+  .login-box {
+    text-align: center;
+  }
+  .login-box p { color: var(--text-dim); margin-bottom: 16px; }
+  .login-box a {
+    display: inline-block;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    color: #fff;
+    text-decoration: none;
+    padding: 10px 22px;
+    border-radius: 8px;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body data-page-node-id="FlveMXe5jlI3UFXbQmGdr0">
+
+<!-- 未登录时显示 -->
+<div id="loginBackdrop" class="login-backdrop" style="display:none;" data-page-node-id="KVqYhcmHLQXO3tKUj0hubS">
+  <div class="login-box" data-page-node-id="XjYew3GTYMcOwYKVc0Kwum">
+    <div class="side-logo" style="border:none; justify-content:center; margin-bottom:12px;" data-page-node-id="D4uQUYRisBXQusGaKawZ5f">
+      <div class="mark" data-page-node-id="GWyWFWw77g7uA8Zo4IMeic">T</div>
+      <div class="name" data-page-node-id="UhQuEyVJBhL6eMaaJkDqli">Turbo<em data-page-node-id="3u1HokNx9IHlFxbsnXInaY">Feed</em></div>
+    </div>
+    <p data-page-node-id="lkU8IBbW8rtN5U2JFewsoo">登录态已失效，请重新登录后进入创作者中心</p>
+    <a href="login.html" data-page-node-id="NMKMgc0HhBLlduJ3cGRoLZ">去登录</a>
+  </div>
+</div>
+
+<div class="sidebar" data-page-node-id="Ot8XSLeYxCPAdkGqugOOHp">
+  <div class="side-logo" data-page-node-id="qcf62S9zTQtNym8ZSxwjVG">
+    <div class="mark" data-page-node-id="uUWMfHI07CVmZ16RU78vKb">T</div>
+    <div class="name" data-page-node-id="KoCBE5CqqqVUlh0VVuEGFr">Turbo<em data-page-node-id="i6KWDVOqD5ld0WQhnTYViq">Feed</em></div>
+  </div>
+
+  <div class="nav" data-page-node-id="nAnY8lSlCCkkxeK9y0ni5m">
+    <div class="nav-group" data-page-node-id="XYpaquBFLCuKLdv1yJCmbI">创作者中心</div>
+    <a href="user.html" class="nav-item active" data-page-node-id="ZbDsPDxayW63ipGIK6suZC">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="maLTBjyC7dnm1Fa9e1kUer"><rect x="3" y="3" width="18" height="18" rx="2" data-page-node-id="5kZwSesOqKmgLFW4IOVUae"/><path d="M3 9h18M9 21V9" data-page-node-id="LW9uChxvIyhx5Cb6wOM9DM"/></svg>
+      概览
+    </a>
+
+    <div class="nav-group" style="margin-top:8px;" data-page-node-id="SHzFVzXN0KjCF0Z2IPC0PS">内容</div>
+    <a class="nav-item" onclick="showToast('「我的内容」模块已与概览页合并展示', 'ok')" data-page-node-id="YgSSer9657t1pbhnwnOTPO">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="8VJTDYHmryC3vAZA130Fit"><rect x="3" y="3" width="18" height="18" rx="2" data-page-node-id="hxs9VXOQWhBHX9vVZHGlNU"/><circle cx="8.5" cy="8.5" r="1.5" data-page-node-id="N5BaTvEcchrFWlvHrdJP5X"/><path d="M21 15l-5-5L5 21" data-page-node-id="QJ567ieQKDWQ3IUb2aUBA5"/></svg>
+      我的内容
+    </a>
+    <a class="nav-item" onclick="showToast('数据中心功能开发中', 'ok')" data-page-node-id="ULJtzdRQnjYAtSIvqxpg9G">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="TZNEIyYl4avAyNVwrMHLBx"><path d="M18 20V10M12 20V4M6 20v-6" data-page-node-id="XwmdCEnsvZoiWrzXBHAzKv"/></svg>
+      数据中心
+    </a>
+    <a class="nav-item" onclick="showToast('粉丝互动功能开发中', 'ok')" data-page-node-id="INuQ4IBRFULor2spOqlLsr">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="FlIoutDIwfnuxFZfve0M9h"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" data-page-node-id="OqkzC4bocR6NP2vyQGL9fT"/><circle cx="9" cy="7" r="4" data-page-node-id="8CULyaFH3nxmuIDh6C4eOF"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" data-page-node-id="aGeNXU7SudI1dYSAktvYoR"/></svg>
+      粉丝互动
+    </a>
+
+    <div class="nav-group" style="margin-top:8px;" data-page-node-id="G2F4np1HHRLQUgv1pW4n26">设置</div>
+    <a class="nav-item" onclick="showToast('账号设置功能开发中', 'ok')" data-page-node-id="rzfgWWiAzyxASJm38A8efp">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="YYoOCNE7085CTPiyh90p9t"><circle cx="12" cy="12" r="3" data-page-node-id="XTafghEaZ3LhWeYnoF07uJ"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" data-page-node-id="8sG9NljN56nJ6uYNQYF6DW"/></svg>
+      账号设置
+    </a>
+  </div>
+
+  <div class="side-user" data-page-node-id="TCayGuNhXOf1LFINtxEO0F">
+    <div class="avatar" id="sideUserAvatar" data-page-node-id="PuPmMnFDMiWloju3cfPLPK">U</div>
+    <div class="info" data-page-node-id="h1HC2ErxpCm7pRHxnIkUQa">
+      <div class="n" id="sideUserName" data-page-node-id="cn83K4liv6AW6ZHdmz7Mtr">用户</div>
+      <div class="r" data-page-node-id="8AXJr3XXntaRwrZ15B0w3T">创作者</div>
+    </div>
+    <button class="logout-btn" onclick="logout()" data-page-node-id="GFqTuHzyAuazRDam91KgUA">退出</button>
+  </div>
+</div>
+
+<div class="main" data-page-node-id="yR0OV92fjoUEuExc1VmKtC">
+  <div class="topbar" data-page-node-id="DCMRFP99Wvf0YyYZ59O759">
+    <div class="crumb" data-page-node-id="7FtjkJGQRnm0fMUBozNuGQ"><b data-page-node-id="8Rhd8NtDxDhdECQyvhFV93">TurboFeed</b> <span data-page-node-id="nEffKWnj6TUeOzMoRkfz48">/</span> 创作者中心</div>
+    <div class="search" data-page-node-id="XOuNryy8TDy8uooLiJJQtz">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#55617a" stroke-width="2" data-page-node-id="VBmQu7CCobiRBEAh4cwyP4"><circle cx="11" cy="11" r="8" data-page-node-id="YsEhxrHvPJmXYKv1Lcc5JW"/><path d="M21 21l-4.3-4.3" data-page-node-id="RWXZcdZUYTUGSjaP6GG8lI"/></svg>
+      <input type="text" placeholder="搜索我的内容 ID / 文件名..." id="searchInput" data-page-node-id="CyLIUrmRQ4UTwllLP1AraH">
+    </div>
+    <div class="badge-dot" title="通知" onclick="showToast('暂无新通知', 'ok')" data-page-node-id="Bv30i78f8QflIoVL1ewGRF">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#8b98ab" stroke-width="2" data-page-node-id="rPW043gSPF84JSrrYPWtuz"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" data-page-node-id="l5tD5ukGL7CuNRHE68Gf4N"/><path d="M13.73 21a2 2 0 0 1-3.46 0" data-page-node-id="oAoTEoSfX0cgBDw2GhvGah"/></svg>
+    </div>
+    <div class="avatar" id="topUserAvatar" style="width:32px;height:32px;font-size:13px;" data-page-node-id="eFgcKDcYG4Jo1WzKYnCLwX">U</div>
+  </div>
+
+  <div class="content" data-page-node-id="6Xao0u8IDmxw3EzEIAJdyl">
+    <!-- 个人信息 -->
+    <div class="card" data-page-node-id="E1pCptsMvu3jfwHepEra9y">
+      <div class="profile" data-page-node-id="YRv4XqjrPlQRFqXGy59uLL">
+        <div class="avatar" id="profileAvatar" data-page-node-id="tA9Uczo2mqxvHcpvjnIded">U</div>
+        <div class="meta" data-page-node-id="XrJu7PjrXi9kxooQvQClmn">
+          <div class="name" id="profileName" data-page-node-id="aLKYJTzIb37XjNzpCZ1flT">加载中...</div>
+          <div class="role" data-page-node-id="KDWmAgKJhkwdOx7UuZf3PZ">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="NmrBAtVs2Ds4Zj9a2vxLre"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" data-page-node-id="5V0XJgEJfQmrFFsIlYsokR"/></svg>
+            认证创作者
+          </div>
+        </div>
+        <div class="stats" data-page-node-id="cELlInedMrRJXAvAfQv3lF">
+          <div class="item" data-page-node-id="DohcCrBgpxwoct84LUQtNZ"><div class="num" id="statTotal" data-page-node-id="XWXsnHoIrV4xnj1vlsD7QQ">0</div><div class="label" data-page-node-id="eQiFsxnw5FhYk2m8NDSrvI">作品数</div></div>
+          <div class="item" data-page-node-id="VjhGngfCdtOPhgoToIu5lH"><div class="num ok" id="statApproved" data-page-node-id="K84svI4J6KiMCeRB51Pp0f">0</div><div class="label" data-page-node-id="CM9o5k4Tmrfl1ouynNMIl1">已通过</div></div>
+          <div class="item" data-page-node-id="I6Ol3ONXdrjD3hpsVpw0Ab"><div class="num warn" id="statPending" data-page-node-id="ysc3hB0wFZBGjkNORyol0n">0</div><div class="label" data-page-node-id="AyfXxnLVEusBZxZlIvX11K">审核中</div></div>
+          <div class="item" data-page-node-id="sYL4hyWeVHNQaxuHb6W4fL"><div class="num error" id="statRejected" data-page-node-id="Q0HctoaBmxWvgmvg65Cv2J">0</div><div class="label" data-page-node-id="GTL89pKgaGAoGaJvhiUWG8">已驳回</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 上传 -->
+    <div class="card" data-page-node-id="EbHoIZNqohkA09KInJaDT9">
+      <div class="card-title" data-page-node-id="4Jb41bAij2D3W8SPf4VWHR">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="72L3K5y8YjQhZnUAv6Jei2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" data-page-node-id="LSDU28pnaCDTlHCyshOdin"/><polyline points="17 8 12 3 7 8" data-page-node-id="8TRl7fNqCvqivoEcubFBew"/><line x1="12" y1="3" x2="12" y2="15" data-page-node-id="a6Pl7ya3d7oq4YYbgxfs4p"/></svg>
+        上传新内容
+        <span class="sub" data-page-node-id="3A2GAzL9H1YYIBDBKi2FuS">支持 jpg / png / gif / webp，单张 ≤5MB，单次最多 9 张</span>
+      </div>
+      <div class="upload-zone" id="uploadZone" data-page-node-id="vzntBspMsR26Gs14Alz8U6">
+        <input type="file" id="fileInput" accept="image/*" multiple data-page-node-id="37vBQXODbEoayfCfLi1ElR">
+        <div class="icon" data-page-node-id="Bvl2IugaPoZYmtIjtQJvWu">↑</div>
+        <div class="tip" data-page-node-id="cbeKr4kRBAsIrEjhLn4blB">点击或拖拽图片到此处上传</div>
+        <div class="hint" data-page-node-id="eeEAWMZrE6zadgOpE6RMXt">上传后进入待审核状态，审核通过后自动展示到 Feed 流</div>
+        <div class="upload-progress" id="uploadProgress" data-page-node-id="H3IVEAmscqFMAAtmDmKXUl">
+          <span data-page-node-id="A8S9b6xaqutH7F4lbnjG9E">上传中...</span>
+          <div class="bar" data-page-node-id="GRUcxZK8YPuNFGRkDETH4t"><i id="uploadBar" data-page-node-id="lTo5DMXrmsIjHYgFMqV5ND"></i></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 我的内容 -->
+    <div class="card" style="flex:1;" data-page-node-id="IPJGpFBmtDLGXLFC8MXzZM">
+      <div class="card-title" data-page-node-id="xpFWMB3GYgcnUid4gAUEyh">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="DijFZSuj7Kb0ILzcbsFJGj"><rect x="3" y="3" width="18" height="18" rx="2" data-page-node-id="JOeOLFdG3icEu7StGtHGux"/><circle cx="8.5" cy="8.5" r="1.5" data-page-node-id="sT8cYi4ilDpJtjODlv6KE6"/><path d="M21 15l-5-5L5 21" data-page-node-id="lNYFu92LcyGW2wvMUtMUyp"/></svg>
+        我的内容
+        <span class="sub" data-page-node-id="GDkqrwj59UreOcEKCYSFw5">仅展示本人上传的内容，状态实时同步后端</span>
+      </div>
+      <div class="toolbar" data-page-node-id="dExF6xEy5E3Wh4AwPabcao">
+        <button class="filter-btn active" data-filter="all" onclick="setFilter('all')" data-page-node-id="h5bME5lJKXKgVWcc48spyS">
+          <span class="dot" style="background:#8b98ab" data-page-node-id="FDj2bQNTDfP2cD8INQn5ip"></span>全部
+        </button>
+        <button class="filter-btn" data-filter="APPROVED" onclick="setFilter('APPROVED')" data-page-node-id="aIMyQRVhIu8cGgyU6dwLBX">
+          <span class="dot" style="background:var(--ok)" data-page-node-id="YNKE6DmbHCoufFt6jAEyqA"></span>已通过
+        </button>
+        <button class="filter-btn" data-filter="PENDING" onclick="setFilter('PENDING')" data-page-node-id="uvIwj9xAUE1CxNYPPQBIbF">
+          <span class="dot" style="background:var(--warn)" data-page-node-id="8gqbCgR5L2ADA4GJWqDYkX"></span>审核中
+        </button>
+        <button class="filter-btn" data-filter="REJECTED" onclick="setFilter('REJECTED')" data-page-node-id="ANGPjt0sHfE0diMfG8Z4a5">
+          <span class="dot" style="background:var(--error)" data-page-node-id="XH1xBAtQ4S6jlzeKaHDJCm"></span>已驳回
+        </button>
+        <button class="filter-btn" style="margin-left:auto" onclick="loadContent(true)" data-page-node-id="ytIpQxeMUOnkanXieQYYl4">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;vertical-align:-2px" data-page-node-id="SyFkJQnJaHtlM2a2WeholQ"><path d="M23 4v6h-6M1 20v-6h6" data-page-node-id="PRHCwy6A3ySVyWgRNqxano"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" data-page-node-id="hm5iRBIfCL1YrCO7oqADDM"/></svg>
+          刷新
+        </button>
+      </div>
+      <div id="contentGrid" class="grid" data-page-node-id="2Ono0xmvduvgoNACbfyX8O"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" data-page-node-id="F5UmgZPkKVAHrux0SAUHxz"></div>
+
+<script>
+  var API_BASE = 'http://localhost:8080';
+  var TOKEN = localStorage.getItem('turbofeed:token');
+  var USER = localStorage.getItem('turbofeed:user') || '用户';
+  var allItems = [];
+  var currentFilter = 'all';
+
+  // 未登录拦截
+  if (!TOKEN) {
+    document.getElementById('loginBackdrop').style.display = 'flex';
+  }
+
+  // 初始化用户显示
+  function initUser() {
+    document.getElementById('sideUserName').textContent = USER;
+    document.getElementById('sideUserAvatar').textContent = USER.charAt(0).toUpperCase();
+    document.getElementById('topUserAvatar').textContent = USER.charAt(0).toUpperCase();
+    document.getElementById('profileName').textContent = USER;
+    document.getElementById('profileAvatar').textContent = USER.charAt(0).toUpperCase();
+  }
+
+  // Toast
+  var toastTimer = null;
+  function showToast(msg, type) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'toast ' + (type || '');
+    el.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 3000);
+  }
+
+  // 时间格式化
+  function fmtTime(iso) {
+    if (!iso) return '-';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + ' ' +
+           pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  function pad(n) { return n < 10 ? '0'+n : n; }
+
+  // 状态标签
+  function statusClass(s) {
+    s = (s || '').toUpperCase();
+    if (s === 'APPROVED') return 'approved';
+    if (s === 'REJECTED') return 'rejected';
+    return 'pending';
+  }
+  function statusText(s) {
+    s = (s || '').toUpperCase();
+    if (s === 'APPROVED') return '已通过';
+    if (s === 'REJECTED') return '已驳回';
+    return '审核中';
+  }
+
+  // 截断 mediaId 用于展示
+  function shortId(mediaId) {
+    if (!mediaId) return '-';
+    if (mediaId.length <= 32) return mediaId;
+    return mediaId.slice(0, 14) + '...' + mediaId.slice(-14);
+  }
+
+  // 加载内容列表
+  function loadContent(manual) {
+    var grid = document.getElementById('contentGrid');
+    if (!manual) grid.innerHTML = '<div class="empty-state">加载中...</div>';
+
+    fetch(API_BASE + '/api/media/mine', {
+      headers: { 'Authorization': 'Bearer ' + TOKEN }
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (res.code !== 0) {
+        grid.innerHTML = '<div class="empty-state">加载失败：' + (res.message || '未知错误') + '</div>';
+        showToast('加载失败：' + (res.message || '未知错误'), 'error');
+        return;
+      }
+      allItems = res.data || [];
+      updateStats();
+      renderGrid();
+      if (manual) showToast('已刷新', 'ok');
+    })
+    .catch(function (err) {
+      grid.innerHTML = '<div class="empty-state">无法连接后端服务，请确认网关已启动</div>';
+      showToast('无法连接后端服务', 'error');
+    });
+  }
+
+  // 更新统计
+  function updateStats() {
+    var total = allItems.length;
+    var approved = allItems.filter(function (i) { return i.status === 'APPROVED'; }).length;
+    var pending = allItems.filter(function (i) { return i.status === 'PENDING'; }).length;
+    var rejected = allItems.filter(function (i) { return i.status === 'REJECTED'; }).length;
+    document.getElementById('statTotal').textContent = total;
+    document.getElementById('statApproved').textContent = approved;
+    document.getElementById('statPending').textContent = pending;
+    document.getElementById('statRejected').textContent = rejected;
+  }
+
+  // 过滤
+  function setFilter(f) {
+    currentFilter = f;
+    document.querySelectorAll('.filter-btn[data-filter]').forEach(function (btn) {
+      btn.classList.toggle('active', btn.getAttribute('data-filter') === f);
+    });
+    renderGrid();
+  }
+
+  // 渲染网格
+  function renderGrid() {
+    var grid = document.getElementById('contentGrid');
+    var items = currentFilter === 'all' ? allItems : allItems.filter(function (i) {
+      return (i.status || '').toUpperCase() === currentFilter;
+    });
+
+    var keyword = (document.getElementById('searchInput').value || '').trim().toLowerCase();
+    if (keyword) {
+      items = items.filter(function (i) {
+        return (i.mediaId || '').toLowerCase().indexOf(keyword) >= 0 ||
+               (i.url || '').toLowerCase().indexOf(keyword) >= 0;
+      });
+    }
+
+    if (!items.length) {
+      grid.innerHTML = '<div class="empty-state"><div class="big">📭</div>暂无符合条件的内容<br>点击上方上传区域添加新内容</div>';
+      return;
+    }
+
+    grid.innerHTML = '';
+    items.forEach(function (item) {
+      var stCls = statusClass(item.status);
+      var stTxt = statusText(item.status);
+      var card = document.createElement('div');
+      card.className = 'media-card';
+      card.innerHTML =
+        '<div class="thumb">' +
+          (item.url
+            ? '<img src="' + item.url + '" alt="" onerror="this.style.display=\'none\';this.parentNode.innerHTML+=\'<div class=\\'empty-img\\'>加载失败</div>\'">'
+            : '<div class="empty-img">无预览</div>') +
+          '<span class="status ' + stCls + '">' + stTxt + '</span>' +
+        '</div>' +
+        '<div class="info">' +
+          '<div class="id" title="' + (item.mediaId || '') + '">' + shortId(item.mediaId) + '</div>' +
+          '<div class="time">' + fmtTime(item.createdAt) + '</div>' +
+          '<div class="actions">' +
+            '<button onclick="openImage(\'' + (item.url || '') + '\')">查看</button>' +
+            '<button onclick="copyUrl(\'' + (item.url || '') + '\')">复制链接</button>' +
+          '</div>' +
+        '</div>';
+      grid.appendChild(card);
+    });
+  }
+
+  function openImage(url) {
+    if (!url) return showToast('链接为空', 'error');
+    window.open(url, '_blank');
+  }
+
+  function copyUrl(url) {
+    if (!url) return showToast('链接为空', 'error');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function () {
+        showToast('链接已复制', 'ok');
+      }, function () {
+        fallbackCopy(url);
+      });
+    } else {
+      fallbackCopy(url);
+    }
+  }
+  function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); showToast('链接已复制', 'ok'); }
+    catch (e) { showToast('复制失败', 'error'); }
+    document.body.removeChild(ta);
+  }
+
+  // 上传
+  function doUpload(files) {
+    if (!files || !files.length) return;
+    var progress = document.getElementById('uploadProgress');
+    var bar = document.getElementById('uploadBar');
+    progress.classList.add('show');
+    bar.style.width = '30%';
+
+    var fd = new FormData();
+    Array.prototype.forEach.call(files, function (f) { fd.append('files', f); });
+
+    fetch(API_BASE + '/api/media/upload', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + TOKEN },
+      body: fd
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      bar.style.width = '100%';
+      setTimeout(function () { progress.classList.remove('show'); bar.style.width = '0%'; }, 400);
+      if (res.code !== 0) {
+        showToast('上传失败：' + (res.message || '未知错误'), 'error');
+        return;
+      }
+      showToast('上传成功，已加入审核队列', 'ok');
+      loadContent(false);
+    })
+    .catch(function (err) {
+      progress.classList.remove('show');
+      showToast('上传失败：' + (err.message || '网络错误'), 'error');
+    });
+  }
+
+  // 上传事件
+  var fileInput = document.getElementById('fileInput');
+  var uploadZone = document.getElementById('uploadZone');
+  fileInput.addEventListener('change', function () {
+    doUpload(this.files);
+    this.value = '';
+  });
+
+  uploadZone.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    this.classList.add('dragover');
+  });
+  uploadZone.addEventListener('dragleave', function (e) {
+    e.preventDefault();
+    this.classList.remove('dragover');
+  });
+  uploadZone.addEventListener('drop', function (e) {
+    e.preventDefault();
+    this.classList.remove('dragover');
+    doUpload(e.dataTransfer.files);
+  });
+
+  // 搜索
+  document.getElementById('searchInput').addEventListener('input', function () {
+    renderGrid();
+  });
+
+  // 退出
+  function logout() {
+    localStorage.removeItem('turbofeed:token');
+    localStorage.removeItem('turbofeed:user');
+    window.location.href = 'login.html';
+  }
+
+  // 初始化
+  initUser();
+  if (TOKEN) loadContent(false);
+</script>
+
+</body>
+</html>
