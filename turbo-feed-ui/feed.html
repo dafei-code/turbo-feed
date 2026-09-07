@@ -516,18 +516,19 @@
 
 <script>
   // ========== 模拟视频数据 ==========
-  // ========== 真实内容数据（来自后端 /api/media/mine，仅展示 APPROVED） ==========
-  // 说明：当前无独立「公域 feed」接口，复用「我的上传」返回登录用户本人已过审的内容。
+  // ========== 真实内容数据（来自后端 /api/feed/recommended，仅返回 APPROVED） ==========
+  // 说明：P1.5 起公域推荐流与「个人中心 /api/media/mine」解耦，feed 走独立接口；
+  // 后端已只返回 APPROVED，前端无需再内存过滤。演示阶段推荐接口返回当前 APPROVED 内容。
   let videos = [];
 
   function loadFeed() {
     var TOKEN = localStorage.getItem('turbofeed:token');
     if (!TOKEN) { location.href = 'login.html'; return; }
-    fetch('http://localhost:8080/api/media/mine', {
+    fetch('http://localhost:8080/api/feed/recommended?page=0&size=20', {
       headers: { 'Authorization': 'Bearer ' + TOKEN }
     }).then(function (r) { return r.json(); })
       .then(function (res) {
-        var items = (res.data || []).filter(function (i) { return i.status === 'APPROVED'; });
+        var items = (res.data || []);
         videos = items.map(function (i) {
           return {
             id: i.mediaId,

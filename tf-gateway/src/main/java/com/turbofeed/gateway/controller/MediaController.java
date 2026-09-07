@@ -113,23 +113,32 @@ public class MediaController {
     }
 
     /**
-     * 查询当前用户上传的内容列表（按上传时间倒序）。
+     * 查询当前用户上传的内容列表（按上传时间倒序，分页）。
      *
      * <p>补齐"只有写接口、没有读接口"的缺口：此前前端上传成功后无从得知自己传过什么，
      * 列表页只能展示硬编码的假数据。本接口返回每条内容的
      * {@link MediaItem#mediaId()}、{@link MediaItem#url()} 与
-     * {@link MediaItem#status()}，前端据此渲染并过滤
-     * （UGC 公域展示只呈现 {@link MediaStatus#APPROVED}）。</p>
+     * {@link MediaItem#status()}，前端据此渲染（个人中心可见全部状态，含待审/驳回）。</p>
+     *
+     * <p><b>P1.5 分页/过滤</b>：{@code status} 可按审核状态过滤（如只看 APPROVED），
+     * {@code page}/{@code size} 分页，避免一次性回吐全部内容、也避免前端在内存里过滤状态。
+     * 公域推荐流请走独立 {@code GET /api/feed/recommended}，不再复用本接口。</p>
      *
      * <p>身份来源同 {@link #upload}：从 {@link UserContextHolder#requireUserId()} 取，
      * 不经方法签名，客户端无法传他人 ID 越权查看；未携带有效令牌直接 UNAUTHORIZED。</p>
      *
-     * @return 当前用户的内容列表，从未上传过则返回空数组
+     * @param page   页码（从 0 开始，默认 0）
+     * @param size   单页条数（默认 50，≤0 兜底 50）
+     * @param status 状态过滤（可选，null = 不过滤）
+     * @return 当前用户的内容列表（当前页），从未上传过则返回空数组
      */
     @GetMapping("/mine")
-    public Result<List<MediaItem>> mine() {
+    public Result<List<MediaItem>> mine(
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "50") int size,
+            @RequestParam(value = "status", required = false) MediaStatus status) {
         String userId = UserContextHolder.requireUserId();
-        return Result.ok(mediaQueryService.listByUser(userId));
+        return Result.ok(mediaQueryService.listByUser(userId, status, page, size));
     }
 
     /**
@@ -146,6 +155,6 @@ public class MediaController {
      */
     @GetMapping("/status")
     public Result<MediaStatus> status(@RequestParam("mediaId") String mediaId) {
-        return Result.ok(mediaQueryService.statusOf(mediaId));
+        return Result.ok(mediaQueryService.statusOf(mediaId, UserContextHolder.requireUserId()));
     }
 }

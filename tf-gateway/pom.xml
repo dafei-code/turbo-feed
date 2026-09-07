@@ -30,6 +30,13 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- JDBC 持久层：media 元数据落库（P1）。复用 ShardingSphere 已装配的 DataSource，
+             经 JdbcTemplate 读写分片后的 media 表；版本由 Spring Boot BOM 托管。
+             一并带来 HikariCP，与 shardingsphere-config.yaml 引用的 HikariDataSource 对齐。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
         <!-- Sentinel：timeline QPS 限流 + 点赞热点参数限流 + 依赖熔断 + 系统自适应保护 -->
         <dependency>
             <groupId>com.alibaba.cloud</groupId>

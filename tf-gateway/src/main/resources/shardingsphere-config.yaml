@@ -26,13 +26,13 @@ dataSources:
     # TODO 生产替换为 ENV: TURBO_FEED_DS_0_URL（密钥管理/配置中心注入）
     jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai
     username: root
-    password:
+    password: ****REMOVED***     # 若本地 MySQL root 有密码，请在此填写；否则应用首次访问 media 表会认证失败
   ds_1:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
     jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai
     username: root
-    password:
+    password:      # 若本地 MySQL root 有密码，请在此填写；否则应用首次访问 media 表会认证失败
 
 rules:
   - !SHARDING
@@ -56,6 +56,19 @@ rules:
         keyGenerateStrategy:
           column: id
           keyGeneratorName: snowflake
+      # 逻辑表 media（UGC 媒体元数据）：分片键 user_id，与 user 表同键同算法，
+      # 保证「我的上传」WHERE user_id=? 精准命中单分片、且同一用户媒体与其 user 行同片。
+      # media_id 为业务主键但不做分片键——按 media_id 查询时必须同时带 user_id 才精准路由。
+      media:
+        actualDataNodes: ds_${0..1}.media_${0..1}
+        databaseStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: mediaDbSharding
+        tableStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: mediaTableSharding
     # 分片算法：库 / 表各一条，复用 SS 内置 HASH_MOD，由 sharding-count 显式指定候选数
     shardingAlgorithms:
       userDbSharding:
@@ -67,6 +80,15 @@ rules:
         type: HASH_MOD
         props:
           # 表候选数 = 2（user_0, user_1），扩容需同步调整本值
+          sharding-count: 2
+      # media 分片算法：库 / 表各一条，复用 SS 内置 HASH_MOD，与 user 表同契约
+      mediaDbSharding:
+        type: HASH_MOD
+        props:
+          sharding-count: 2
+      mediaTableSharding:
+        type: HASH_MOD
+        props:
           sharding-count: 2
     # 主键生成器：雪花 ID，与 userId 体系一致
     keyGenerators:
