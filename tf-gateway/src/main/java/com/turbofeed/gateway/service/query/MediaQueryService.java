@@ -36,6 +36,7 @@ public class MediaQueryService {
     private final MediaJdbcRepository mediaRepository;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    private final FeedTimelineStore feedTimelineStore;
 
     /** 公域推荐流缓存 TTL：15s（短 TTL 换最终一致，避免批量失效 Redis 阻塞） */
     private static final Duration REC_CACHE_TTL = Duration.ofSeconds(15);
