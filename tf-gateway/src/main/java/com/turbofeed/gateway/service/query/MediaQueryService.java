@@ -2,6 +2,7 @@ package com.turbofeed.gateway.service.query;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
+import com.turbofeed.gateway.service.feed.FeedTimelineStore;
 import com.turbofeed.gateway.service.review.MediaStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

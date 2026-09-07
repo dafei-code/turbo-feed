@@ -52,6 +52,13 @@ public class MediaProperties {
     /** 上传限流阈值（turbofeed.media.rate-limit.*；机器维度 Sentinel + 用户维度 Redis 分工）。 */
     private RateLimit rateLimit = new RateLimit();
 
+    /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
+     *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
+    private boolean processingEnabled = false;
+
+    /** 缩略图长边上限（px），超过则等比缩放（turbofeed.media.thumbnail-max-dimension）。 */
+    private long thumbnailMaxDimension = 2048;
+
     /**
      * 上传接口限流阈值（机器维度与用户维度分工）。
      *
@@ -237,11 +244,4 @@ public class MediaProperties {
     public void setStorage(String storage) {
         this.storage = storage;
     }
-
-    /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
-     *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
-    private boolean processingEnabled = false;
-
-    /** 缩略图长边上限（px），超过则等比缩放（turbofeed.media.thumbnail-max-dimension）。 */
-    private long thumbnailMaxDimension = 2048;
 }

@@ -32,6 +32,8 @@ public class MediaReviewService {
 
     private final MediaJdbcRepository mediaRepository;
     private final StringRedisTemplate redisTemplate;
+    private final ContentModeration contentModeration;
+    private final FeedTimelineStore feedTimelineStore;
 
     private static final String STATUS_KEY_PREFIX = "tf:media:status:";
 
@@ -48,7 +50,11 @@ public class MediaReviewService {
     public void handleUploaded(MediaUploadedEvent event) {
         long userId = Long.parseLong(event.userId());
         mediaRepository.insert(event.mediaId(), userId, event.url(), MediaStatus.PENDING, event.occurredAt());
-        review(event.mediaId(), userId, true);
+        MediaStatus moderation = contentModeration.moderate(event.mediaId(), userId, event.url());
+        MediaStatus target = review(event.mediaId(), userId, moderation == MediaStatus.APPROVED);
+        if (target == MediaStatus.APPROVED) {
+            feedTimelineStore.append(new MediaItem(event.mediaId(), event.url(), target, event.occurredAt()));
+        }
     }
 
     /**

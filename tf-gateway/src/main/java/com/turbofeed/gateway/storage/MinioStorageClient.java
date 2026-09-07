@@ -3,6 +3,7 @@ package com.turbofeed.gateway.storage;
 import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.service.ImageFormat;
+import com.turbofeed.gateway.storage.MediaStorageClient.StoredMedia;
 import com.turbofeed.shared.result.ErrorCode;
 import io.minio.BucketExistsArgs;
 import io.minio.MakeBucketArgs;
