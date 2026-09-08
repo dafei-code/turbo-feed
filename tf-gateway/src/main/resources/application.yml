@@ -104,3 +104,4 @@ rocketmq:
   name-server: 127.0.0.1:9876
   producer:
     group: turbofeed-media-producer-group
+    send-msg-timeout: 1000   # 调短发送超时：MQ 不可用时更快触发降级，而非长时间阻塞上传线程

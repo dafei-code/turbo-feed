@@ -1,11 +1,10 @@
 package com.turbofeed.gateway.service.event;
 
-import com.turbofeed.gateway.exception.BizException;
-import com.turbofeed.shared.result.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.messaging.MessagingException;
 import org.springframework.stereotype.Component;
 
@@ -18,8 +17,12 @@ import org.springframework.stereotype.Component;
  * 注释块）。</p>
  *
  * <p>价值：上传事件跨进程投递，消费端（审核 / 清理 / 通知）可独立扩容与失败重试，
- * 高峰期以 MQ 削峰，避免审核逻辑阻塞上传响应。投递失败统一映射
- * {@code DEPENDENCY_UNAVAILABLE}，不裸抛 MQ 异常。</p>
+ * 高峰期以 MQ 削峰，避免审核逻辑阻塞上传响应。</p>
+ *
+ * <p>容错降级：MQ 投递失败（no route / 超时 / 连接失败）不向上抛异常阻断上传，
+ * 而是降级为本地 {@link ApplicationEventPublisher} 事件，由 {@code ReviewListener}({@code @Async})
+ * 在本节点线程池异步消费——功能不中断。降级态牺牲跨实例 rebalance 与持久化（本就是 MQ 职责），
+ * 仅作 MQ 抖动/宕机时的兜底；{@code handleUploaded} 已幂等，重复/双消费安全。</p>
  */
 @Slf4j
 @Component
@@ -31,6 +34,7 @@ public class RocketMqMediaEventPublisher implements MediaEventPublisher {
     public static final String TOPIC = "turbofeed-media-uploaded";
 
     private final RocketMQTemplate rocketMQTemplate;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     @Override
     public void publish(MediaUploadedEvent event) {
@@ -38,8 +42,10 @@ public class RocketMqMediaEventPublisher implements MediaEventPublisher {
             rocketMQTemplate.convertAndSend(TOPIC, event);
             log.info("媒体上传事件已投递 RocketMQ: topic={}, mediaId={}", TOPIC, event.mediaId());
         } catch (MessagingException e) {
-            log.error("RocketMQ 投递失败: topic={}, mediaId={}", TOPIC, event.mediaId(), e);
-            throw new BizException(ErrorCode.DEPENDENCY_UNAVAILABLE, "消息队列暂不可用，请稍后重试");
+            // MQ 不可用 → 降级本地线程池消费：上传不失败、审核不中断（幂等保证安全）
+            log.warn("RocketMQ 投递失败，降级本地线程处理: topic={}, mediaId={}, {}",
+                    TOPIC, event.mediaId(), e.getMessage());
+            applicationEventPublisher.publishEvent(event);
         }
     }
 }
