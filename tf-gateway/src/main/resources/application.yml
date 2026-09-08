@@ -73,10 +73,11 @@ turbofeed:
       per-user: 10
       # 同用户上传并发占位 TTL（秒）：进程崩溃 / 释放失败时的兜底过期时间（ConcurrentUploadValidator 消费）
       inflight-ttl-seconds: 30
-  # MQ（RocketMQ）事件总线：默认本地 Spring 事件（克隆即跑）；
-  # enabled=true 切换 RocketMQ 跨进程投递，需同时放开下方 rocketmq.* 配置
+  # MQ（RocketMQ）事件总线：
+  # 本地开发已部署 RocketMQ（Docker: rmqnamesrv 127.0.0.1:9876），启用跨进程投递。
+  # 若未部署 RocketMQ 且希望「克隆即跑」，改为 false 回退到本地 Spring 事件。
   mq:
-    enabled: false
+    enabled: true
   fanout:
     push-threshold: 1000        # 大 V 判定：粉丝数阈值
     inbox-max-size: 2000        # 收件箱 LTRIM 定长
@@ -98,8 +99,8 @@ turbofeed:
 #       file:
 #         file: classpath:sentinel/rules.json
 
-# RocketMQ 启用示例（turbofeed.mq.enabled=true 时生效，并同时放开本块配置）：
-# rocketmq:
-#   name-server: 127.0.0.1:9876
-#   producer:
-#     group: turbofeed-media-producer-group
+# RocketMQ 启用配置（turbofeed.mq.enabled=true 时生效）
+rocketmq:
+  name-server: 127.0.0.1:9876
+  producer:
+    group: turbofeed-media-producer-group
