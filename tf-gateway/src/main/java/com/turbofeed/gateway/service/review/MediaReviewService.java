@@ -45,10 +45,24 @@ public class MediaReviewService {
      * <p>流程：先落库受理态 PENDING（media_id 主键，幂等），再机审占位直接放行到 APPROVED，
      * 以演示 PENDING -> APPROVED 审核闭环。</p>
      *
+     * <p><b>幂等（适配 MQ at-least-once 重复投递 / 多消费者）</b>：进入即查当前态，
+     * 已是终态则直接返回（APPROVED 兜底补齐时间线），不重复流转、不抛异常进 DLQ；
+     * 仅 PENDING（含未落库）才走首次受理流程。同消息并发双消费由 RocketMQ「单消息单消费者」
+     * 语义兜底，正常路径不会出现。</p>
+     *
      * @param event 媒体上传事件（含 mediaId / userId / url / occurredAt）
      */
     public void handleUploaded(MediaUploadedEvent event) {
         long userId = Long.parseLong(event.userId());
+        MediaStatus existing = mediaRepository.getStatus(event.mediaId(), userId);
+        if (existing != null && existing != MediaStatus.PENDING) {
+            // 重复投递：已是终态，幂等返回；APPROVED 兜底补齐公域时间线（ZADD 覆盖，天然幂等）
+            if (existing == MediaStatus.APPROVED) {
+                feedTimelineStore.append(new MediaItem(event.mediaId(), event.url(), existing, event.occurredAt()));
+            }
+            return;
+        }
+        // 首投（或仍在 PENDING）：落库受理态（主键幂等，重复 insert 不报错），机审，流转终态
         mediaRepository.insert(event.mediaId(), userId, event.url(), MediaStatus.PENDING, event.occurredAt());
         MediaStatus moderation = contentModeration.moderate(event.mediaId(), userId, event.url());
         MediaStatus target = review(event.mediaId(), userId, moderation == MediaStatus.APPROVED);

@@ -32,6 +32,9 @@ public class AsyncConfig {
         executor.setMaxPoolSize(16);
         executor.setQueueCapacity(256);
         executor.setThreadNamePrefix("review-async-");
+        // 弹性核心：空闲时回收核心线程（省内存），负载回升时自动重建至 corePoolSize。
+        // 与"加节点水平扩容"互补——节点内空闲不空耗资源，突发自动顶上，零新依赖。
+        executor.setAllowCoreThreadTimeOut(true);
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(30);
