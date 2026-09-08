@@ -52,6 +52,9 @@ public class MediaProperties {
     /** 上传限流阈值（turbofeed.media.rate-limit.*；机器维度 Sentinel + 用户维度 Redis 分工）。 */
     private RateLimit rateLimit = new RateLimit();
 
+    /** 上传幂等去重 TTL（秒）：同一 X-Request-Id 在该窗口内重复提交直接返回首次结果（结合 userId 防越权）。 */
+    private int idempotentTtlSeconds = 5;
+
     /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
      *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
     private boolean processingEnabled = false;
@@ -78,6 +81,9 @@ public class MediaProperties {
 
         /** 单用户限流阈值（Redis UploadRateLimiter 消费）：防单用户持续刷接口；时间窗口径由限流器实现决定。 */
         private int perUser = 10;
+
+        /** 用户维度限流时间窗口（秒）：与 perUser 配合，例如 60s 内最多 perUser 次（固定窗口实现，边界突刺为已知取舍）。 */
+        private int windowSeconds = 60;
 
         /** 上传并发占位 TTL（秒，ConcurrentUploadValidator）：进程崩溃 / 释放失败时的兜底过期时间。 */
         private int inflightTtlSeconds = 30;
@@ -112,6 +118,14 @@ public class MediaProperties {
 
         public void setPerUser(int perUser) {
             this.perUser = perUser;
+        }
+
+        public int getWindowSeconds() {
+            return windowSeconds;
+        }
+
+        public void setWindowSeconds(int windowSeconds) {
+            this.windowSeconds = windowSeconds;
         }
     }
 
@@ -171,6 +185,14 @@ public class MediaProperties {
 
     public void setRateLimit(RateLimit rateLimit) {
         this.rateLimit = rateLimit;
+    }
+
+    public int getIdempotentTtlSeconds() {
+        return idempotentTtlSeconds;
+    }
+
+    public void setIdempotentTtlSeconds(int idempotentTtlSeconds) {
+        this.idempotentTtlSeconds = idempotentTtlSeconds;
     }
 
     public Minio getMinio() {

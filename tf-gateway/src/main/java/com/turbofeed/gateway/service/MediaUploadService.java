@@ -10,7 +10,9 @@ import com.turbofeed.gateway.security.UserContext;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.event.MediaEventPublisher;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
+import com.turbofeed.gateway.service.idempotency.UploadIdempotency;
 import com.turbofeed.gateway.service.processing.ImageProcessingChain;
+import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
 import com.turbofeed.gateway.service.validation.UploadValidation;
 import com.turbofeed.gateway.service.validation.UploadValidationChain;
 import com.turbofeed.gateway.storage.MediaStorageClient;
@@ -29,7 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 内容图片上传服务：责任链校验 -&gt; 逐文件「处理 -&gt; 存储 -&gt; 发事件」。
+ * 内容图片上传服务：责任链校验 -&gt; 用户维度限流 -&gt; 幂等去重 -&gt; 逐文件「处理 -&gt; 存储 -&gt; 发事件」。
  *
  * <p>校验整体外移至 {@code service/validation} 责任链
  * （{@link UploadValidationChain}）：批量数 / 空文件 / 大小 / Magic Number /
@@ -53,6 +55,8 @@ public class MediaUploadService {
     private final MediaEventPublisher eventPublisher;
     private final ImageProcessingChain processingChain;
     private final UploadValidationChain validationChain;
+    private final UploadRateLimiter rateLimiter;
+    private final UploadIdempotency idempotency;
 
     /**
      * 批量上传图片，返回可访问 URL 列表。
@@ -69,6 +73,14 @@ public class MediaUploadService {
      * exit，无泄漏）。资源名复用 {@link SentinelRateLimitConfig#UPLOAD_RESOURCE} 单一事实源，
      * {@code entryType = IN}（Web 入口流量；注解默认为 OUT，须显式声明）。</p>
      *
+     * <p><b>用户维度限流（Redis）</b>：{@link UploadRateLimiter#tryAcquire} 在 Sentinel 放行后、
+     * 校验链之前执行，跨实例统一计数（per-user + 时间窗，见 {@code MediaProperties.RateLimit}）。
+     * 机器维度保进程、用户维度防单用户刷接口，两层互补。</p>
+     *
+     * <p><b>幂等去重</b>：{@link UploadIdempotency#check} 在限流之后、校验之前执行；
+     * 同一 {@code requestId}（结合 userId）5s 内重复提交直接返回首次受理结果，避免重复落存储 /
+     * 送审 / 占限流配额。requestId 缺省则跳过幂等。</p>
+     *
      * <p><b>校验链</b>：{@link UploadValidationChain#validate(String, MultipartFile[])}
      * 在 {@code try} 块内执行，{@code finally} 统一触发完成回调——无论成功、校验失败
      * （{@code UPLOAD_INVALID / UPLOAD_IN_PROGRESS}）还是业务异常（{@code storeOne} 抛错），
@@ -76,20 +88,31 @@ public class MediaUploadService {
      * / 释放失败场景（{@code inflight-ttl-seconds}）。若 {@code validate()} 置于 try 之外，
      * 校验失败时占位 key 会滞留 TTL 期内，同用户重试会被 42903 误拒——见 changelog 0009。</p>
      *
-     * <p><b>限流分工</b>：机器维度（并发线程数 / 单机 QPS）走 Sentinel 注解；用户维度
-     * 配额限流属 Redis
-     * {@code com.turbofeed.gateway.service.ratelimit.UploadRateLimiter}
-     * （阈值 {@code turbofeed.media.rate-limit.per-user}，实现于该类 tryAcquire）。
-     * 接线位置：方法开头、责任链之前。</p>
-     *
      * @param files     multipart 字段 files 的上传文件数组
-     * @param requestId 客户端幂等键（可选，X-Request-Id 请求头；幂等去重落地时使用）
+     * @param requestId 客户端幂等键（可选，X-Request-Id 请求头；5s 内重复提交去重返回首次结果）
      * @return 上传成功后的图片 URL 列表（审核通过后对前端生效）
      */
     @SentinelResource(value = SentinelRateLimitConfig.UPLOAD_RESOURCE,
             entryType = EntryType.IN, blockHandler = "uploadBlocked")
     public List<String> upload(MultipartFile[] files, String requestId) {
         String userId = UserContextHolder.requireUserId();
+
+        // 用户维度限流（机器维度已由 Sentinel 注解外层放行）
+        if (!rateLimiter.tryAcquire(userId)) {
+            throw new BizException(ErrorCode.RATE_LIMITED, "上传过于频繁，请稍后再试");
+        }
+
+        // 幂等去重：同一 requestId（结合 userId）窗口内重复提交返回首次结果
+        UploadIdempotency.IdempotencyOutcome outcome = idempotency.check(userId, requestId);
+        if (outcome.isDuplicate()) {
+            log.info("上传幂等命中，返回首次结果: userId={}, requestId={}, count={}",
+                    userId, requestId, outcome.urls().size());
+            return outcome.urls();
+        }
+        if (outcome.isInProgress()) {
+            throw new BizException(ErrorCode.UPLOAD_IN_PROGRESS, "请求处理中，请勿重复提交");
+        }
+
         UploadValidation context = null;
         try {
             context = validationChain.validate(userId, files);
@@ -98,6 +121,7 @@ public class MediaUploadService {
                 urls.add(storeOne(userId, files[i], context.format(i), requestId));
             }
             log.info("媒体上传受理: userId={}, count={}, requestId={}", userId, urls.size(), requestId);
+            idempotency.store(userId, requestId, urls);
             return urls;
         } finally {
             // 覆盖 validate() 抛 UPLOAD_INVALID/UPLOAD_IN_PROGRESS 与 storeOne 异常：
