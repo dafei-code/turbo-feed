@@ -3,6 +3,7 @@ package com.turbofeed.gateway.service.event;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.messaging.MessagingException;
@@ -30,21 +31,26 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(name = "turbofeed.mq.enabled", havingValue = "true")
 public class RocketMqMediaEventPublisher implements MediaEventPublisher {
 
-    /** 媒体上传事件 Topic（编译期常量，供发布器与消费者共用）。 */
+    /** 媒体上传事件 Topic（编译期常量，作为 {@code @Value} 缺省值，发布与消费共用同一配置键）。 */
     public static final String TOPIC = "turbofeed-media-uploaded";
 
     private final RocketMQTemplate rocketMQTemplate;
     private final ApplicationEventPublisher applicationEventPublisher;
 
+    /** 事件 Topic，默认 {@link #TOPIC}，可被 {@code turbofeed.media.mq.topic} 覆盖，
+     * 与 {@link MediaReviewConsumer} 共用同一配置键，杜绝发布/订阅主题不一致。 */
+    @Value("${turbofeed.media.mq.topic:turbofeed-media-uploaded}")
+    private String topic;
+
     @Override
     public void publish(MediaUploadedEvent event) {
         try {
-            rocketMQTemplate.convertAndSend(TOPIC, event);
-            log.info("媒体上传事件已投递 RocketMQ: topic={}, mediaId={}", TOPIC, event.mediaId());
+            rocketMQTemplate.convertAndSend(topic, event);
+            log.info("媒体上传事件已投递 RocketMQ: topic={}, mediaId={}", topic, event.mediaId());
         } catch (MessagingException e) {
             // MQ 不可用 → 降级本地线程池消费：上传不失败、审核不中断（幂等保证安全）
             log.warn("RocketMQ 投递失败，降级本地线程处理: topic={}, mediaId={}, {}",
-                    TOPIC, event.mediaId(), e.getMessage());
+                    topic, event.mediaId(), e.getMessage());
             applicationEventPublisher.publishEvent(event);
         }
     }

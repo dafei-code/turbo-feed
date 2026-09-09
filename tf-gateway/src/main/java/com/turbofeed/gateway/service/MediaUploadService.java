@@ -6,6 +6,7 @@ import com.alibaba.csp.sentinel.slots.block.BlockException;
 import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.config.SentinelRateLimitConfig;
 import com.turbofeed.gateway.exception.BizException;
+import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.security.UserContext;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.event.MediaEventPublisher;
@@ -13,6 +14,7 @@ import com.turbofeed.gateway.service.event.MediaUploadedEvent;
 import com.turbofeed.gateway.service.idempotency.UploadIdempotency;
 import com.turbofeed.gateway.service.processing.ImageProcessingChain;
 import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
+import com.turbofeed.gateway.service.review.MediaStatus;
 import com.turbofeed.gateway.service.validation.UploadValidation;
 import com.turbofeed.gateway.service.validation.UploadValidationChain;
 import com.turbofeed.gateway.storage.MediaStorageClient;
@@ -57,6 +59,7 @@ public class MediaUploadService {
     private final UploadValidationChain validationChain;
     private final UploadRateLimiter rateLimiter;
     private final UploadIdempotency idempotency;
+    private final MediaJdbcRepository mediaRepository;
 
     /**
      * 批量上传图片，返回可访问 URL 列表。
@@ -155,6 +158,11 @@ public class MediaUploadService {
             long size = processed != null ? processed.length : file.getSize();
             MediaStorageClient.StoredMedia stored =
                     storageClient.store(userId, format, content, size);
+            // 先同步落 PENDING：消除「存储成功但审核事件消费前进程崩溃」导致的 MinIO 孤儿对象。
+            // insert 以 media_id 主键幂等（ON DUPLICATE KEY UPDATE），与 handleUploaded 兜底插互不冲突；
+            // 即便事件丢失，media 表已留 PENDING 记录，可经巡检对账补审 / 清理。
+            mediaRepository.insert(stored.mediaId(), Long.parseLong(userId), stored.url(),
+                    MediaStatus.PENDING, Instant.now());
             eventPublisher.publish(new MediaUploadedEvent(
                     stored.mediaId(), userId, stored.url(), requestId, Instant.now()));
             return stored.url();

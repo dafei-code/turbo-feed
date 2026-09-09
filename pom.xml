@@ -72,6 +72,34 @@
                 <artifactId>redisson-spring-boot-starter</artifactId>
                 <version>${redisson.version}</version>
             </dependency>
+            <!-- RocketMQ：钉死 2.3.5（2.3.x 最新，对 Spring Boot 3.4.x 的 @ConfigurationProperties 绑定兼容）。
+                 关键点：spring-cloud-alibaba-dependencies BOM 会把内层 rocketmq-spring-boot
+                 （承载 RocketMQProperties / RocketMQUtil 真实类）管理成 2.3.0；2.3.0 与 Boot 3.4.3
+                 绑定不兼容，导致 rocketmq.name-server 绑不上、消费者启动报 connect to null。
+                 此处强制覆盖 starter 与内层版本，避免 SCA BOM 把内层拉成 2.3.0。 -->
+            <dependency>
+                <groupId>org.apache.rocketmq</groupId>
+                <artifactId>rocketmq-spring-boot-starter</artifactId>
+                <version>2.3.5</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.rocketmq</groupId>
+                <artifactId>rocketmq-spring-boot</artifactId>
+                <version>2.3.5</version>
+            </dependency>
+            <!-- rocketmq-client / rocketmq-acl：starter 2.3.5 的 parent 实际声明 rocketmq.version=5.3.2，
+                 但 SCA BOM 又把它们覆盖成 5.3.1（patch 差）。显式钉 5.3.2 与 starter 期望完全一致，
+                 消除 client/starter 版本错位可能带来的 namesrv 地址透传异常。 -->
+            <dependency>
+                <groupId>org.apache.rocketmq</groupId>
+                <artifactId>rocketmq-client</artifactId>
+                <version>5.3.2</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.rocketmq</groupId>
+                <artifactId>rocketmq-acl</artifactId>
+                <version>5.3.2</version>
+            </dependency>
             <!-- 内部模块 -->
             <dependency>
                 <groupId>com.turbofeed</groupId>

@@ -21,7 +21,27 @@ spring:
       timeout: 500ms
       lettuce:
         pool:
-          enabled: false  # 网关仅同步命令，不需要连接池；true 需 commons-pool2
+          # 网关以同步命令为主，但上传限流为并发场景，启用小连接池复用连接、吸收抖动；
+          # 依赖 commons-pool2（lettuce-core 的 optional 依赖不传递；已在 tf-gateway pom 显式声明），启用连接池复用连接、吸收抖动
+          enabled: true
+          max-active: 16        # 最大连接数（并发上限）
+          max-idle: 8            # 最大空闲连接
+          min-idle: 2            # 最小空闲连接（预热，避免冷启动建连抖动）
+          max-wait: 1000ms       # 获取连接最大等待（超时即失败，快速失败而非线程堆积）
+        shutdown-timeout: 100ms
+      # 生产集群 / 哨兵示例（二选一取消注释，并删除上面的单机 host/port）：
+      # cluster:
+      #   nodes:
+      #     - 10.0.0.1:6379
+      #     - 10.0.0.2:6379
+      #     - 10.0.0.3:6379
+      #   max-redirects: 3
+      # sentinel:
+      #   master: turbo-feed-redis
+      #   nodes:
+      #     - 10.0.0.1:26379
+      #     - 10.0.0.2:26379
+      #     - 10.0.0.3:26379
 
 # Redis 就绪前关闭其健康指示器，避免 /actuator/health 整体被拉成 DOWN（克隆即跑）；
 # 本地启动 Redis 后改为 true（或直接删除此段）
@@ -80,6 +100,11 @@ turbofeed:
       per-user: 10
       # 同用户上传并发占位 TTL（秒）：进程崩溃 / 释放失败时的兜底过期时间（ConcurrentUploadValidator 消费）
       inflight-ttl-seconds: 30
+    # MQ 事件总线主题 / 消费组：RocketMqMediaEventPublisher 与 MediaReviewConsumer 共用同一配置键，
+    # 缺省 turbofeed-media-uploaded / turbofeed-media-review-group；修改须发布端与消费端一致
+    mq:
+      topic: turbofeed-media-uploaded
+      consumer-group: turbofeed-media-review-group
   # MQ（RocketMQ）事件总线：
   # 本地开发已部署 RocketMQ（Docker: rmqnamesrv 127.0.0.1:9876），启用跨进程投递。
   # 若未部署 RocketMQ 且希望「克隆即跑」，改为 false 回退到本地 Spring 事件。
@@ -107,8 +132,15 @@ turbofeed:
 #         file: classpath:sentinel/rules.json
 
 # RocketMQ 启用配置（turbofeed.mq.enabled=true 时生效）
+# name-server 三处都显式声明：顶层（生产者/全局兜底）+ producer + consumer。
+# PUSH 消费者在 rocketmq-spring-boot-starter 里优先读 rocketmq.consumer.name-server，
+# 仅配顶层会导致消费端 setNamesrvAddr 不被调用、启动报 "connect to null failed"；
+# 三处齐设可兼容不同 starter 版本的属性解析路径。
 rocketmq:
   name-server: 127.0.0.1:9876
   producer:
     group: turbofeed-media-producer-group
+    name-server: 127.0.0.1:9876
     send-msg-timeout: 1000   # 调短发送超时：MQ 不可用时更快触发降级，而非长时间阻塞上传线程
+  consumer:
+    name-server: 127.0.0.1:9876

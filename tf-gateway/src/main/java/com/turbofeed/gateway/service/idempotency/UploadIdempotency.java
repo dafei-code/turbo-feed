@@ -109,11 +109,11 @@ public class UploadIdempotency {
             return new IdempotencyOutcome(Kind.IN_PROGRESS, null);
         }
 
-        boolean isDuplicate() {
+        public boolean isDuplicate() {
             return kind == Kind.DUPLICATE;
         }
 
-        boolean isInProgress() {
+        public boolean isInProgress() {
             return kind == Kind.IN_PROGRESS;
         }
     }

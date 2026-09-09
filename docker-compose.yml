@@ -1,0 +1,53 @@
+# turbo-feed 本地基础设施：RocketMQ NameServer + Broker
+# 用途：让 tf-gateway 的媒体上传事件（turbofeed-media-uploaded）能真正异步落 MQ。
+# 对应 application.yml 的 rocketmq.name-server=127.0.0.1:9876。
+#
+# 启动： docker compose up -d
+# 停止： docker compose down
+# 日志： docker compose logs -f broker
+#
+# 说明：
+# - 使用 RocketMQ 5.3.1 官方镜像，兼容 JDK 17 / Spring Boot 3.4.x 的 rocketmq-spring-boot-starter 2.3.5。
+# - autoCreateTopicEnable=true：本地无需预先创建 turbofeed-media-uploaded 主题，
+#   首次发送时由 Broker 自动建主题，省去手动 mqadmin 步骤。
+# - 单机部署（非集群），brokerRole=ASYNC_MASTER + flushDiskType=ASYNC_FLUSH，
+#   本地开发追求吞吐与一键启动，不保证宕机零丢失（生产环境另配 SYNC + 多副本）。
+# - Broker 通过 -c 挂载自定义 broker.conf；namesrv 地址用 namesrv:9876（compose 网络内服务名解析）。
+
+services:
+  namesrv:
+    image: apache/rocketmq:5.3.1
+    container_name: tf-rocketmq-namesrv
+    command: sh mqnamesrv
+    ports:
+      - "9876:9876"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "echo > /dev/tcp/127.0.0.1/9876"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  broker:
+    image: apache/rocketmq:5.3.1
+    container_name: tf-rocketmq-broker
+    # 不挂载 broker.conf：macOS + D 盘 SMB 挂载时 Docker Desktop 默认不共享 /Volumes，
+    # bind mount 会失败。改为命令行参数传关键项，避免文件共享授权麻烦。
+    # autoCreateTopicEnable=true：首次发送 turbofeed-media-uploaded 自动建主题。
+    # brokerIP1=127.0.0.1：Broker 向 NameServer 注册用本机回环，网关经 127.0.0.1:10911
+    #   端口映射回容器，单容器场景链路打通。
+    command: sh mqbroker -n namesrv:9876 autoCreateTopicEnable=true brokerIP1=127.0.0.1
+    depends_on:
+      namesrv:
+        condition: service_healthy
+    ports:
+      - "10909:10909"   # fastListenPort（5.x fast remoting，可选）
+      - "10911:10911"   # 主 remoting listenPort（spring-boot-starter 2.3.5 客户端连这个）
+      - "10912:10912"   # haListenPort（可选）
+    environment:
+      # RocketMQ 镜像默认 JAVA_OPT 偏省，单机开发给足堆，避免 Broker 启动 OOM
+      JAVA_OPT: "-server -Xms512m -Xmx512m -Xmn256m"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "echo > /dev/tcp/127.0.0.1/10911"]
+      interval: 5s
+      timeout: 3s
+      retries: 15

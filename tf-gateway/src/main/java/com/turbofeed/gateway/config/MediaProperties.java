@@ -55,6 +55,9 @@ public class MediaProperties {
     /** 上传幂等去重 TTL（秒）：同一 X-Request-Id 在该窗口内重复提交直接返回首次结果（结合 userId 防越权）。 */
     private int idempotentTtlSeconds = 5;
 
+    /** MQ 审核事件 topic / consumerGroup（turbofeed.media.mq.*；可被 application.yml 覆盖，保留与代码常量一致的默认名）。 */
+    private Mq mq = new Mq();
+
     /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
      *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
     private boolean processingEnabled = false;
@@ -187,6 +190,14 @@ public class MediaProperties {
         this.rateLimit = rateLimit;
     }
 
+    public Mq getMq() {
+        return mq;
+    }
+
+    public void setMq(Mq mq) {
+        this.mq = mq;
+    }
+
     public int getIdempotentTtlSeconds() {
         return idempotentTtlSeconds;
     }
@@ -265,5 +276,33 @@ public class MediaProperties {
 
     public void setStorage(String storage) {
         this.storage = storage;
+    }
+
+    /**
+     * MQ 审核事件配置（turbofeed.media.mq.*）：topic 与 consumerGroup 外部化，
+     * 保留与 {@code RocketMqMediaEventPublisher.TOPIC} / 默认消费组一致的默认名，可被 application.yml 覆盖。
+     */
+    public static class Mq {
+        /** 媒体上传事件 Topic（发布器与消费者共用，须与消费者占位符默认一致）。 */
+        private String topic = "turbofeed-media-uploaded";
+
+        /** 审核事件消费者组（RocketMQ 消费集群隔离与偏移管理单位）。 */
+        private String consumerGroup = "turbofeed-media-review-group";
+
+        public String getTopic() {
+            return topic;
+        }
+
+        public void setTopic(String topic) {
+            this.topic = topic;
+        }
+
+        public String getConsumerGroup() {
+            return consumerGroup;
+        }
+
+        public void setConsumerGroup(String consumerGroup) {
+            this.consumerGroup = consumerGroup;
+        }
     }
 }

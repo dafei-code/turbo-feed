@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 媒体审核服务：维护内容审核状态，执行唯一的合法转换 PENDING -&gt; APPROVED / REJECTED。
@@ -52,6 +53,7 @@ public class MediaReviewService {
      *
      * @param event 媒体上传事件（含 mediaId / userId / url / occurredAt）
      */
+    @Transactional(rollbackFor = Exception.class)
     public void handleUploaded(MediaUploadedEvent event) {
         long userId = Long.parseLong(event.userId());
         MediaStatus existing = mediaRepository.getStatus(event.mediaId(), userId);
@@ -85,8 +87,10 @@ public class MediaReviewService {
             throw new BizException(ErrorCode.INTERNAL_ERROR, "未找到待审核记录: mediaId=" + mediaId);
         }
         if (current != MediaStatus.PENDING) {
-            throw new BizException(ErrorCode.INTERNAL_ERROR,
-                    "终态不可再次审核: mediaId=" + mediaId + ", status=" + current);
+            // 终态幂等：重复投递 / 并发流转已到达终态时直接返回当前态，不抛异常——
+            // 避免重复消息被抛异常后触发 RocketMQ 重试 / 进 DLQ（handleUploaded 已保证终态安全）。
+            log.info("审核终态幂等返回（不重复流转）: mediaId={}, status={}", mediaId, current);
+            return current;
         }
         MediaStatus target = approved ? MediaStatus.APPROVED : MediaStatus.REJECTED;
         mediaRepository.updateStatus(mediaId, userId, target);
