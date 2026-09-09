@@ -25,13 +25,13 @@ dataSources:
     # TODO 生产替换为 ENV: TURBO_FEED_DS_0_URL（密钥管理/配置中心注入）
     jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai
     username: root
-    password: ****REMOVED***     # 若本地 MySQL root 有密码，请在此填写；否则应用首次访问 media 表会认证失败
+    password: "123456"
   ds_1:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
     jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai
     username: root
-    password:      # 若本地 MySQL root 有密码，请在此填写；否则应用首次访问 media 表会认证失败
+    password: "123456"
 
 rules:
   - !SHARDING

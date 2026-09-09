@@ -54,13 +54,20 @@ turbofeed:
     # 对外访问基址：存储实现拼装返回 URL 时的前缀。
     # local 模式下须指向本服务（含端口），使返回的图片 URL 可被浏览器直接加载；
     # 切到对象存储后改为其公网域名 / CDN 域名。
-    public-url-base: http://localhost:8080/
+    # 切到 MinIO 后指向对象存储访问基址（bucket 需匿名可读，否则返回的 URL 浏览器 403）
+    public-url-base: http://127.0.0.1:9000/turbo-feed-media/
     # 存储实现：local=本地磁盘真实落盘（默认，保证「上传→展示」链路可跑通）；
     # placeholder=仅拼装 URL 不落盘（回归占位行为时用）
-    storage: local
+    storage: minio
     # 本地落盘根目录（storage=local 时生效），与 WebConfig 的 /media/** 静态映射共享此值，
     # 避免「写入目录」与「读取目录」两处配置漂移导致 404
     local-dir: ./data/media
+    # 对象存储（MinIO）连接配置：仅 storage=minio 时生效；开发期凭据硬编码，生产改用 ENV 注入
+    minio:
+      endpoint: http://127.0.0.1:9000
+      access-key: minioadmin
+      secret-key: minioadmin
+      bucket: turbo-feed-media
     # 图片处理链（Decorator：缩略图缩放）。默认关闭保持流式零内存路径；
     # 开启后经 ImageIO 解码重编码（12MP ARGB ≈ 48MB/张），需评估上传 QPS 与堆内存
     processing-enabled: false
