@@ -188,9 +188,11 @@ CREATE TABLE `turbo_feed_2`.`media_3` (
 -- 密码均为 "123456" 的 BCrypt(cost=10) 哈希，生产环境务必移除这些种子。
 
 -- 管理员账号：id 1000000000000000000 % 4 = 0 → user_0(ds_0)
+-- 密码 "123456" 的 BCrypt(cost=10) 哈希，必须使用 $2a$ 前缀（Spring BCryptPasswordEncoder/jBCrypt 仅原生接受 $2a$，
+-- $2y$/$2b$ 会在 hashpw 抛 Invalid salt revision）。本机用 htpasswd -B 生成的是 $2y$，改前缀为 $2a$ 即可（纯 ASCII 短口令等价）。
 INSERT INTO `turbo_feed_1`.`user_0` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `created_at`, `updated_at`)
-VALUES (1000000000000000000, '13800138000', '$2y$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoAdmin', '', 1, NOW(), NOW());
+VALUES (1000000000000000000, '13800138000', '$2a$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoAdmin', '', 1, NOW(), NOW());
 
 -- 普通用户账号：id 1000000000000000001 % 4 = 1 → user_1(ds_1)
 INSERT INTO `turbo_feed_2`.`user_1` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `created_at`, `updated_at`)
-VALUES (1000000000000000001, '13900139000', '$2y$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoUser', '', 1, NOW(), NOW());
+VALUES (1000000000000000001, '13900139000', '$2a$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoUser', '', 1, NOW(), NOW());
