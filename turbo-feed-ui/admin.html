@@ -643,6 +643,11 @@
   var TOKEN = localStorage.getItem('turbofeed:token');
   if (!TOKEN) {
     window.location.href = 'login.html';
+  } else if (localStorage.getItem('turbofeed:role') === 'USER') {
+    // 非管理员（已确认角色为 USER）不得进入审核后台，回退普通用户页。
+    // 后端 /api/admin/** 仍按 JWT 中的 role 二次拦截，页面层仅做快捷拦截。
+    // 旧令牌未写入 role 时放行，由后端兜底校验。
+    window.location.href = 'user.html';
   }
 
   // 静态演示版：仅侧边栏选中态交互，无后端逻辑
