@@ -76,6 +76,17 @@ rules:
       snowflake:
         type: SNOWFLAKE
 
+  # 单表规则：account_credit / report / appeal 三张「单表」路由到 ds_0（turbo_feed_1），不分片。
+  # 抖音式审核骨架新增的元数据：账号信用分级、举报、申诉均落单表，按业务主键(user_id/media_id)查询，无需跨片。
+  # ShardingSphere 5.5.x 要求未被 sharding 规则绑定的逻辑表必须登记在 SINGLE 规则下（或配置 defaultDataSource 自动接管），
+  # 否则启动报「Can not find table rule」/「Table doesn't exist」。defaultDataSource 指定默认库为 ds_0。
+  - !SINGLE
+    tables:
+      - account_credit
+      - report
+      - appeal
+    defaultDataSource: ds_0
+
 props:
   # 开发期打印实际落到的物理库/表与 SQL，便于核对路由；生产可关闭
   sql-show: true

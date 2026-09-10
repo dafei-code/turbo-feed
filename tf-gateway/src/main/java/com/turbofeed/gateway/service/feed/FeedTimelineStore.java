@@ -76,22 +76,26 @@ public class FeedTimelineStore {
         List<MediaItem> candidates = new ArrayList<>();
         LocalDate today = LocalDate.now();
         for (int d = 0; d < MERGE_BUCKETS; d++) {
-            String key = TL_PREFIX + today.minusDays(d).format(DateTimeFormatter.BASIC_ISO_DATE);
-            try {
-                Set<String> jsons = redisTemplate.opsForZSet()
-                        .reverseRangeByScore(key, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, 0, PER_BUCKET_CAP);
-                if (jsons != null) {
-                    for (String json : jsons) {
-                        try {
-                            candidates.add(objectMapper.readValue(json, MediaItem.class));
-                        } catch (Exception ignore) {
-                            // 单条损坏不影响整体
+            String date = today.minusDays(d).format(DateTimeFormatter.BASIC_ISO_DATE);
+            // 合并所有流量池（L1..Ln）近 N 天：发布即进对应池，读时统一聚合
+            for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
+                String key = TL_PREFIX + pool + ":" + date;
+                try {
+                    Set<String> jsons = redisTemplate.opsForZSet()
+                            .reverseRangeByScore(key, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, 0, PER_BUCKET_CAP);
+                    if (jsons != null) {
+                        for (String json : jsons) {
+                            try {
+                                candidates.add(objectMapper.readValue(json, MediaItem.class));
+                            } catch (Exception ignore) {
+                                // 单条损坏不影响整体
+                            }
                         }
                     }
+                } catch (Exception e) {
+                    log.warn("时间线读取失败（降级回源由调用方处理）: key={}, {}", key, e.getMessage());
+                    return List.of();
                 }
-            } catch (Exception e) {
-                log.warn("时间线读取失败（降级回源由调用方处理）: key={}, {}", key, e.getMessage());
-                return List.of();
             }
         }
         candidates.sort(Comparator.comparing(MediaItem::createdAt).reversed());

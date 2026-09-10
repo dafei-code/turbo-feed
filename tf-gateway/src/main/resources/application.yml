@@ -116,12 +116,18 @@ turbofeed:
     review:
       auto-pass: false
       # 机审策略（可插拔开关，决定激活哪个 ContentModeration 实现）：
-      #   pass = AutoPassModeration 占位桩（恒 APPROVED，仅机审不拦截，下游仍卡人审闸；当前默认，纯人审）
+      #   rule = RuleBasedModeration 本地规则引擎（文件名/元数据级 fail-closed，非 AI 视觉；当前默认，机审初筛骨架）
+      #   pass = AutoPassModeration 占位桩（恒 APPROVED，仅机审不拦截，下游仍卡人审闸）
       #   ai   = AiContentModeration（Ollama 本地视觉模型，已卸载；保留为「类抖音机器初审」后续接入点）
       #   cloud（预留）= 将来接云内容安全 API（腾讯云/阿里云）做类抖音机器初审，审核主流程零改动
       # 注意：无论哪种机审，默认策略都是「驳回即拦 · 通过仍人审」，机审不直接放行到公域。
-      # 当前阶段：先纯人审跑通审核页（moderation-mode=pass），抖音式机器初审后续按架构方案接入。
-      moderation-mode: pass
+      # 当前 MVP：机审初筛用 rule（本地规则引擎），视觉语义识别留 cloud（需云 API key）。
+      moderation-mode: rule
+      banned-keywords:
+        - "涉黄"
+        - "暴恐"
+        - "涉政"
+        - "赌博"
   # MQ（RocketMQ）事件总线：
   # 本地开发已部署 RocketMQ（Docker: rmqnamesrv 127.0.0.1:9876），启用跨进程投递。
   # 若未部署 RocketMQ 且希望「克隆即跑」，改为 false 回退到本地 Spring 事件。

@@ -3,10 +3,14 @@ package com.turbofeed.gateway.service.review;
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
+import com.turbofeed.gateway.repository.ReportRepository;
+import com.turbofeed.gateway.repository.AppealRepository;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
 import com.turbofeed.gateway.service.feed.FeedTimelineStore;
 import com.turbofeed.gateway.service.query.MediaItem;
-import com.turbofeed.shared.result.ErrorCode;
+import com.turbofeed.gateway.service.review.credit.AccountCreditService;
+import com.turbofeed.gateway.service.review.credit.CreditLevel;
+import com.turbofeed.gateway.shared.result.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -14,18 +18,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 媒体审核服务：维护内容审核状态，执行唯一的合法转换 PENDING -&gt; APPROVED / REJECTED。
+ * 媒体审核服务：维护内容审核状态机，并执行「机审初筛 + 账号信用分级（先发/先审）+ 多池发布 + 举报/申诉闭环」。
  *
- * <p><b>存储边界</b>：审核状态已落库（{@link MediaJdbcRepository}，media 表 status 列），
- * 不再依赖进程内内存态（原 statusRegistry 已退役），重启不丢失。状态与内容元数据同表，
- * 单一事实源，无需双写。</p>
+ * <p><b>抖音式分层</b>：上传后先跑机审初筛（{@link ContentModerationRouter}，MVP=本地规则引擎 RULE）；
+ * 机审通过的内容按<b>账号信用等级</b>分流——L0 低信用/新号<b>先审后放</b>（进 PENDING 等人审），
+ * L1/L2 高信用<b>先发后审</b>（直接 APPROVED 进对应流量池，靠举报/人审兜底）；机审 REJECTED 立即拦截。
+ * 已发布内容可被用户举报、作者申诉，形成完整治理闭环。</p>
  *
- * <p><b>缓存一致性（P2）</b>：审核状态写入后精确失效单条状态缓存
- * （{@code tf:media:status:{mediaId}}），保证个人中心状态查询立即刷新；公域推荐流
- * 采用短 TTL（15s）最终一致，不在此主动批量失效（避免 Redis keys 阻塞，详见 changelog 0018）。</p>
- *
- * <p>状态约束：仅 PENDING 可转终态（APPROVED / REJECTED），终态不可再流转——这一条
- * 合法性检查落在 {@link #review} 内（单路径转换无需独立状态机）。</p>
+ * <p><b>存储边界</b>：审核状态已落库（{@link MediaJdbcRepository}，media 表 status 列），重启不丢失；
+ * 公域可见性由 {@link FeedTimelineStore}（多池 ZSET）物化，发布即按信用进对应池。</p>
  */
 @Slf4j
 @Service
@@ -37,75 +38,74 @@ public class MediaReviewService {
     private final ContentModerationRouter contentModeration;
     private final FeedTimelineStore feedTimelineStore;
     private final MediaProperties properties;
+    private final AccountCreditService accountCreditService;
+    private final ReportRepository reportRepository;
+    private final AppealRepository appealRepository;
 
     private static final String STATUS_KEY_PREFIX = "tf:media:status:";
 
     /**
-     * 上传事件处理入口（Observer 两种事件源共用）：
-     * {@link com.turbofeed.gateway.service.event.ReviewListener}（本地 Spring 事件）与
-     * {@code MediaReviewConsumer}（RocketMQ）均调用本方法，保证审核逻辑单一来源。
+     * 上传事件处理入口（本地 Spring 事件与 RocketMQ 消费者共用，审核逻辑单一来源）。
      *
-     * <p>流程：先落库受理态 PENDING（media_id 主键，幂等），再机审占位直接放行到 APPROVED，
-     * 以演示 PENDING -> APPROVED 审核闭环。</p>
-     *
-     * <p><b>幂等（适配 MQ at-least-once 重复投递 / 多消费者）</b>：进入即查当前态，
-     * 已是终态则直接返回（APPROVED 兜底补齐时间线），不重复流转、不抛异常进 DLQ；
-     * 仅 PENDING（含未落库）才走首次受理流程。同消息并发双消费由 RocketMQ「单消息单消费者」
-     * 语义兜底，正常路径不会出现。</p>
-     *
-     * @param event 媒体上传事件（含 mediaId / userId / url / occurredAt）
+     * <p>流程：落库 PENDING → 机审初筛 → 按账号信用分级决定先发后审 / 先审后放。</p>
      */
     @Transactional(rollbackFor = Exception.class)
     public void handleUploaded(MediaUploadedEvent event) {
         long userId = Long.parseLong(event.userId());
         MediaStatus existing = mediaRepository.getStatus(event.mediaId(), userId);
         if (existing != null && existing != MediaStatus.PENDING) {
-            // 重复投递：已是终态，幂等返回；APPROVED 兜底补齐公域时间线（ZADD 覆盖，天然幂等）
+            // 重复投递：已是终态，幂等返回；APPROVED 兜底补齐时间线（按信用池）
             if (existing == MediaStatus.APPROVED) {
-                feedTimelineStore.append(new MediaItem(event.mediaId(), event.url(), existing, event.occurredAt()));
+                CreditLevel level = accountCreditService.ensure(userId);
+                feedTimelineStore.append(
+                        new MediaItem(event.mediaId(), event.url(), MediaStatus.APPROVED, event.occurredAt()),
+                        level.poolLevel());
             }
             return;
         }
-        // 首投（或仍在 PENDING）：落库受理态（主键幂等，重复 insert 不报错）
+        // 首投：落库受理态
         mediaRepository.insert(event.mediaId(), userId, event.url(), MediaStatus.PENDING, event.occurredAt());
 
-        // —— 机审（第一阶段，始终执行）——
-        // 真实机审实现（AiContentModeration，Ollama 本地视觉模型）返回 APPROVED / REJECTED；
-        // 不可用或解析失败时安全降级为 APPROVED（仅表示「机审不拦截」，最终仍卡人工闸，不裸奔）。
-        // 占位桩 AutoPassModeration 恒返回 APPROVED（演示用）。机审结果驱动下方分流。
+        // —— 机审初筛（始终执行）——
         MediaStatus machine = contentModeration.moderate(event.mediaId(), userId, event.url());
 
         if (properties.getReview().isAutoPass()) {
-            // 演示占位：跳过真人审核，机审结果直接放行（仅供本地联调 / 克隆即跑）。
-            // 生产务必关闭（auto-pass=false），否则 UGC 内容裸奔涉政涉黄。
+            // 演示占位：机审结果直接放行（仅供本地联调）
             MediaStatus target = review(event.mediaId(), userId, machine == MediaStatus.APPROVED);
             if (target == MediaStatus.APPROVED) {
-                feedTimelineStore.append(new MediaItem(event.mediaId(), event.url(), target, event.occurredAt()));
+                CreditLevel level = accountCreditService.ensure(userId);
+                feedTimelineStore.append(
+                        new MediaItem(event.mediaId(), event.url(), MediaStatus.APPROVED, event.occurredAt()),
+                        level.poolLevel());
             }
             return;
         }
 
-        // —— 真人审核模式（默认开启，真审核闸）——
-        // 策略（用户选择：驳回即拦 · 通过仍人审）：
         if (machine == MediaStatus.REJECTED) {
-            // 机审直接判定违规 -> 立即翻 REJECTED，不进人工队列（节省人工，且不让违规内容卡在队列占坑）。
-            MediaStatus target = review(event.mediaId(), userId, false);
-            log.info("机审驳回即拦：内容直接判定 REJECTED（不进人审队列）: mediaId={}, userId={}, status={}", event.mediaId(), userId, target);
+            // 机审驳回即拦：直接翻 REJECTED，不进人工队列
+            review(event.mediaId(), userId, false);
+            log.info("机审驳回即拦：内容直接判定 REJECTED（不进人审队列）: mediaId={}, userId={}", event.mediaId(), userId);
             return;
         }
 
-        // 机审通过（含 AI 不可用降级）-> 一律进 PENDING，由管理员终裁（通过仍人审）。
-        // 此分支没有任何自动放行逻辑——即「真审核」闸，结构上不可能自动过。
-        log.info("机审通过/降级（机审结果={}），内容转入人工审核队列，等待审核人员裁定: mediaId={}, userId={}", machine, event.mediaId(), userId);
+        // 机审通过/降级：按账号信用分级分流
+        CreditLevel level = accountCreditService.ensure(userId);
+        if (level == CreditLevel.L0) {
+            // 先审后放：机审通过仍进 PENDING，等人审终裁（不自动进公域）
+            log.info("低信用账户：机审通过转人审队列（先审后放）: mediaId={}, userId={}", event.mediaId(), userId);
+            return;
+        }
+        // 先发后审（L1/L2）：直接 APPROVED 进对应流量池（小池/大池），靠举报/人审兜底
+        MediaStatus target = review(event.mediaId(), userId, true);
+        if (target == MediaStatus.APPROVED) {
+            feedTimelineStore.append(
+                    new MediaItem(event.mediaId(), event.url(), MediaStatus.APPROVED, event.occurredAt()),
+                    level.poolLevel());
+        }
     }
 
     /**
-     * 执行审核动作：PENDING -&gt; APPROVED / REJECTED（终态）。
-     *
-     * @param mediaId  内容唯一标识
-     * @param userId   归属用户（分片键，保证按单分片精准更新）
-     * @param approved 通过 / 驳回
-     * @return 审核后的终态
+     * 执行审核动作：PENDING -> APPROVED / REJECTED（终态）。
      */
     public MediaStatus review(String mediaId, long userId, boolean approved) {
         MediaStatus current = mediaRepository.getStatus(mediaId, userId);
@@ -113,8 +113,6 @@ public class MediaReviewService {
             throw new BizException(ErrorCode.INTERNAL_ERROR, "未找到待审核记录: mediaId=" + mediaId);
         }
         if (current != MediaStatus.PENDING) {
-            // 终态幂等：重复投递 / 并发流转已到达终态时直接返回当前态，不抛异常——
-            // 避免重复消息被抛异常后触发 RocketMQ 重试 / 进 DLQ（handleUploaded 已保证终态安全）。
             log.info("审核终态幂等返回（不重复流转）: mediaId={}, status={}", mediaId, current);
             return current;
         }
@@ -126,31 +124,102 @@ public class MediaReviewService {
     }
 
     /**
-     * 管理员审核入口：按 mediaId 解析归属 userId（mediaId 内含 userId 分片键），
-     * 驱动 PENDING → APPROVED / REJECTED。供 {@code /api/admin/media/review?mediaId=...} 调用，
-     * 是「真审核」闸的执行点（机审 auto-pass 关闭时，仅此入口能把内容翻成终态）。
-     *
-     * @param mediaId  内容唯一标识（media/{userId}/{uuid}.{ext}）
-     * @param approved true=通过 / false=驳回
-     * @return 审核后的终态
+     * 管理员审核入口：PENDING → APPROVED / REJECTED，通过即按信用进对应流量池。
      */
     public MediaStatus reviewByMediaId(String mediaId, boolean approved) {
         long userId = parseUserId(mediaId);
         MediaStatus target = review(mediaId, userId, approved);
         if (target == MediaStatus.APPROVED) {
-            // 通过即写入公域时间线（与 auto-pass 分支口径一致）；
-            // review() 只翻状态，不碰时间线，故此处补 append，保证内容进推荐流。
             MediaItem item = mediaRepository.findMedia(mediaId, userId);
             if (item != null) {
-                feedTimelineStore.append(new MediaItem(item.mediaId(), item.url(), MediaStatus.APPROVED, item.createdAt()));
+                CreditLevel level = accountCreditService.ensure(userId);
+                feedTimelineStore.append(
+                        new MediaItem(item.mediaId(), item.url(), MediaStatus.APPROVED, item.createdAt()),
+                        level.poolLevel());
             }
         }
         return target;
     }
 
+    /**
+     * 用户举报：仅已发布内容可被举报。高危类目（涉政/暴恐/儿童）立即下架停推（fail-closed）；
+     * 普通举报写表进人工队列，由 {@link #handleReport} 复核。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void report(String mediaId, long reporterUserId, String reason) {
+        long authorId = parseUserId(mediaId);
+        MediaStatus cur = mediaRepository.getStatus(mediaId, authorId);
+        if (cur == null || cur != MediaStatus.APPROVED) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "仅已发布内容可被举报");
+        }
+        reportRepository.insert(mediaId, reporterUserId, reason);
+        if (isHighRisk(reason)) {
+            mediaRepository.updateStatus(mediaId, authorId, MediaStatus.TAKEN_DOWN);
+            feedTimelineStore.remove(mediaId);
+            accountCreditService.onViolationConfirmed(authorId);
+            log.warn("高危举报立即下架停推: mediaId={}, reporterUserId={}, reason={}", mediaId, reporterUserId, reason);
+        }
+        // 普通举报：进人工队列，管理员 report-review 处理
+    }
+
+    /** 管理员处理举报：确认违规→TAKEN_DOWN + 扣信用；驳回→内容保持。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void handleReport(String mediaId, boolean confirmed) {
+        long authorId = parseUserId(mediaId);
+        if (confirmed) {
+            mediaRepository.updateStatus(mediaId, authorId, MediaStatus.TAKEN_DOWN);
+            feedTimelineStore.remove(mediaId);
+            accountCreditService.onViolationConfirmed(authorId);
+            log.info("举报确认违规→下架: mediaId={}", mediaId);
+        }
+        reportRepository.resolve(mediaId, confirmed);
+    }
+
+    /**
+     * 作者申诉：仅被驳回/下架内容可申。状态翻 APPEALING（暂不可见），写表进人工复核。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void appeal(String mediaId, long authorUserId) {
+        MediaStatus cur = mediaRepository.getStatus(mediaId, authorUserId);
+        if (cur == null || (cur != MediaStatus.REJECTED && cur != MediaStatus.TAKEN_DOWN)) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "仅被驳回/下架内容可申诉");
+        }
+        mediaRepository.updateStatus(mediaId, authorUserId, MediaStatus.APPEALING);
+        feedTimelineStore.remove(mediaId); // 申诉中暂不可见
+        appealRepository.insert(mediaId, authorUserId);
+        log.info("作者申诉（内容暂不可见）: mediaId={}, authorUserId={}", mediaId, authorUserId);
+    }
+
+    /** 管理员处理申诉：翻案→APPROVED 恢复公域（按信用池）+ 信用加回；维持→TAKEN_DOWN。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void handleAppeal(String mediaId, boolean upheld) {
+        long authorId = parseUserId(mediaId);
+        if (upheld) {
+            mediaRepository.updateStatus(mediaId, authorId, MediaStatus.APPROVED);
+            MediaItem item = mediaRepository.findMedia(mediaId, authorId);
+            if (item != null) {
+                CreditLevel level = accountCreditService.ensure(authorId);
+                feedTimelineStore.append(
+                        new MediaItem(item.mediaId(), item.url(), MediaStatus.APPROVED, item.createdAt()),
+                        level.poolLevel());
+            }
+            accountCreditService.onAppealUpheld(authorId);
+            log.info("申诉翻案→恢复公域: mediaId={}", mediaId);
+        } else {
+            mediaRepository.updateStatus(mediaId, authorId, MediaStatus.TAKEN_DOWN);
+            log.info("申诉维持原状: mediaId={}", mediaId);
+        }
+        appealRepository.resolve(mediaId, upheld);
+    }
+
+    private static boolean isHighRisk(String reason) {
+        if (reason == null) return false;
+        return reason.contains("涉政") || reason.contains("暴恐")
+                || reason.contains("儿童") || reason.contains("未成年") || reason.contains("色情儿童");
+    }
+
     /** 从 mediaId（media/{userId}/{uuid}.{ext}）解析归属 userId，用于审核接口分片路由。 */
     private static long parseUserId(String mediaId) {
-        // mediaId 形如 media/{userId}/{uuid}.{ext}，第二段即分片键 userId
         String[] parts = mediaId.split("/");
         if (parts.length < 2) {
             throw new BizException(ErrorCode.PARAM_ERROR, "非法的 mediaId: " + mediaId);
@@ -162,15 +231,7 @@ public class MediaReviewService {
         }
     }
 
-    /**
-     * 失效单条状态缓存（旁路缓存 fail-open：异常不影响主流程）。
-     *
-     * <p>仅清状态缓存，不清公域推荐流——推荐流 TTL 仅 15s 自然会过期，最长 15s 延迟后
-     * 公域可见性收敛，可接受的最终一致；主动批量清推荐流需 Redis keys/SCAN，存在阻塞风险，
-     * 故不在此处理。</p>
-     *
-     * @param mediaId 内容唯一标识
-     */
+    /** 失效单条状态缓存（旁路缓存 fail-open）。 */
     private void evictCache(String mediaId) {
         try {
             redisTemplate.delete(STATUS_KEY_PREFIX + mediaId);

@@ -83,6 +83,45 @@ CREATE TABLE `turbo_feed_1`.`media_2` (
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体元数据表(物理分片 turbo_feed_1.media_2)';
 
+-- ==================== 单表（抖音式审核骨架）：account_credit / report / appeal ====================
+-- 三张单表均落在 ds_0(turbo_feed_1)，由 ShardingSphere SINGLE 规则路由（见 shardingsphere-config.yaml）。
+-- 与分片表不同，单表无物理下标，逻辑表名 == 物理表名。
+
+-- 账号信用分级表：高信用(L2)先发后审入大池 / 普通(L1)先发后审入小池 / 低信用·新号(L0)先审后放。
+CREATE TABLE `turbo_feed_1`.`account_credit` (
+  `user_id`           BIGINT       NOT NULL                COMMENT '用户ID, 单表主键',
+  `credit_score`      INT          NOT NULL DEFAULT 100    COMMENT '信用分(0-100), 越低越严',
+  `level`             TINYINT      NOT NULL DEFAULT 1      COMMENT '信用等级 0=L0(先审后放) 1=L1(小池) 2=L2(大池)',
+  `strict_queue_flag` TINYINT      NOT NULL DEFAULT 0      COMMENT '0=普通 1=加严队列(近30天有下架, 所有内容先审后放)',
+  `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(单表 ds_0)';
+
+-- 用户举报表：对任意已发布内容举报写本表；高危理由由服务层 fail-closed 立即下架。
+CREATE TABLE `turbo_feed_1`.`report` (
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '举报记录ID',
+  `media_id`          VARCHAR(255) NOT NULL                COMMENT '被举报内容ID',
+  `reporter_user_id`  BIGINT       NOT NULL                COMMENT '举报人用户ID',
+  `reason`            VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '举报理由(含涉政/暴恐/儿童等高危词→立即下架)',
+  `status`            TINYINT      NOT NULL DEFAULT 0      COMMENT '0=待处理 1=已确认违规 2=已驳回',
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '举报时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_media_status` (`media_id`, `status`),
+  KEY `idx_reporter` (`reporter_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容举报表(单表 ds_0)';
+
+-- 作者申诉表：作者对自身被驳回/下架内容申诉写本表；管理员复核翻案/维持。
+CREATE TABLE `turbo_feed_1`.`appeal` (
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '申诉记录ID',
+  `media_id`          VARCHAR(255) NOT NULL                COMMENT '被申诉内容ID',
+  `author_user_id`    BIGINT       NOT NULL                COMMENT '申诉作者用户ID',
+  `status`            TINYINT      NOT NULL DEFAULT 0      COMMENT '0=申诉中 1=翻案(恢复) 2=维持(驳回)',
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '申诉时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_media_status` (`media_id`, `status`),
+  KEY `idx_author` (`author_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容申诉表(单表 ds_0)';
+
 -- ==================== 库 2：turbo_feed_2（ds_1）===================
 -- ds_1 承载编号奇数下标的物理表：user_1/user_3、media_1/media_3
 CREATE TABLE `turbo_feed_2`.`user_1` (

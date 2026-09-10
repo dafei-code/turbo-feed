@@ -69,4 +69,32 @@ public class AdminMediaController {
         MediaStatus status = reviewService.reviewByMediaId(mediaId, approve);
         return Result.ok(status);
     }
+
+    /**
+     * 管理员处理举报：确认违规→内容下架 + 作者扣分；驳回→内容保持。
+     *
+     * @param mediaId  内容标识（含斜杠，走 query）
+     * @param confirmed true=确认违规（下架）/ false=举报不成立（驳回）
+     */
+    @PostMapping("/report-review")
+    public Result<MediaStatus> reportReview(
+            @RequestParam("mediaId") String mediaId,
+            @RequestParam("confirmed") boolean confirmed) {
+        reviewService.handleReport(mediaId, confirmed);
+        return Result.ok(confirmed ? MediaStatus.TAKEN_DOWN : MediaStatus.APPROVED);
+    }
+
+    /**
+     * 管理员处理申诉：翻案→恢复公域（按信用池）+ 作者信用加回；维持→维持下架态。
+     *
+     * @param mediaId 内容标识（含斜杠，走 query）
+     * @param upheld   true=翻案（恢复）/ false=维持原拒绝/下架
+     */
+    @PostMapping("/appeal-review")
+    public Result<MediaStatus> appealReview(
+            @RequestParam("mediaId") String mediaId,
+            @RequestParam("upheld") boolean upheld) {
+        reviewService.handleAppeal(mediaId, upheld);
+        return Result.ok(upheld ? MediaStatus.APPROVED : MediaStatus.TAKEN_DOWN);
+    }
 }

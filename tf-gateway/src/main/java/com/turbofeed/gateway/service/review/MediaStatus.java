@@ -20,5 +20,9 @@ public enum MediaStatus {
     PENDING,
     APPROVED,
     REJECTED,
-    DELETED
+    DELETED,
+    /** 发布后被举报/流量复审确认违规，已下架停推（区别于 REJECTED：发布前就被拦）。 */
+    TAKEN_DOWN,
+    /** 作者申诉处理中（内容暂不可见，等待人工复核翻案/维持）。 */
+    APPEALING
 }

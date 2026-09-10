@@ -176,6 +176,8 @@ public class MediaJdbcRepository {
             case APPROVED -> 1;
             case REJECTED -> 2;
             case DELETED -> 3;
+            case TAKEN_DOWN -> 4;
+            case APPEALING -> 5;
         };
     }
 
@@ -184,6 +186,8 @@ public class MediaJdbcRepository {
             case 1 -> MediaStatus.APPROVED;
             case 2 -> MediaStatus.REJECTED;
             case 3 -> MediaStatus.DELETED;
+            case 4 -> MediaStatus.TAKEN_DOWN;
+            case 5 -> MediaStatus.APPEALING;
             default -> MediaStatus.PENDING;
         };
     }

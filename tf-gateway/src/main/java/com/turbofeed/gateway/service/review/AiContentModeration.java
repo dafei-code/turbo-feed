@@ -17,24 +17,19 @@ import java.util.Base64;
  * AI 机审实现（Ollama 本地视觉模型）。
  *
  * <p><b>定位</b>：{@link ContentModeration} 端口的一个可插拔实现，对应 {@link ModerationMode#AI}。
- * 与占位桩 {@link AutoPassModeration} 都作为 Spring Bean 注册，由
- * {@link ContentModerationRouter} 按配置 {@code moderation-mode} 选其一激活，二者不再互斥。</p>
+ * 与占位桩 {@link AutoPassModeration}、本地规则引擎 {@link RuleBasedModeration} 都作为 Spring Bean
+ * 注册，由 {@link ContentModerationRouter} 按配置 {@code moderation-mode} 选其一激活。</p>
  *
  * <p><b>调用链路</b>：下载媒体原图 -> Base64 -> 调 Ollama {@code /api/chat}（视觉多模态） ->
  * 解析模型返回的 {@code {"safe":bool,"reason":"..."}} -> 映射为 {@link MediaStatus}。</p>
  *
  * <p><b>失败安全（fail-open）</b>：Ollama 未启动 / 模型未拉取 / 网络异常 / 解析失败，
  * 一律降级返回 {@link MediaStatus#APPROVED} ——注意这里「APPROVED」仅表示「机审不拦截」，
- * 在 {@code MediaReviewService#handleUploaded} 中会被导向 PENDING 等人审，<b>不会</b>直接对公域可见。
- * 即：AI 不可用 ≠ 内容裸奔，内容仍卡在人工审核闸。</p>
+ * 在 {@code MediaReviewService#handleUploaded} 中会被导向 PENDING 等人审，<b>不会</b>直接对公域可见。</p>
  *
- * <p><b>策略（用户选择：驳回即拦 · 通过仍人审）</b>：
- * 机审 {@code REJECTED} -> 内容直接翻 REJECTED（不进人工队列，节省人工）；
- * 机审 {@code APPROVED}（含降级）-> 进 PENDING，由管理员终裁。</p>
- *
- * <p><b>依赖</b>：本机需运行 Ollama 并拉取视觉模型（如 {@code ollama pull qwen2.5-vl}），
- * 否则每次上传触发一次失败降级（连接被拒通常瞬时返回，无显著延迟）。Ollama 已卸载时，
- * 将 {@code moderation-mode} 设为 {@code pass} 即可完全跳过本实现，零开销。</p>
+ * <p><b>现状</b>：本机 Ollama 已卸载，{@code moderation-mode=ai} 不再默认启用；本类保留为
+ * 「类抖音机器初审」的本地视觉接入点。视觉语义级的机审初筛在云端 API 方案下由
+ * {@link ModerationMode#CLOUD} 承接（需用户提供云内容安全 API key 后接入）。</p>
  */
 @Slf4j
 @Component
@@ -44,20 +39,6 @@ public class AiContentModeration implements ContentModeration {
     public ModerationMode mode() {
         return ModerationMode.AI;
     }
-
-    private final String baseUrl;
-    private final String model;
-
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(3))
-            .build();
-    private final ObjectMapper objectMapper = new ObjectMapper();
-
-    public AiContentModeration(
-            @Value("${turbofeed.media.review.ai-base-url:http://localhost:11434}") String baseUrl,
-            @Value("${turbofeed.media.review.ai-model:qwen2.5-vl}") String model) {
-        this.baseUrl = stripTrailingSlash(baseUrl);
-        this.model = model;
 
     private final String baseUrl;
     private final String model;

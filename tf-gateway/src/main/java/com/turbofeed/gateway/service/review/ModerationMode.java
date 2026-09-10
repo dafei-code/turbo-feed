@@ -14,7 +14,11 @@ public enum ModerationMode {
     PASS,
 
     /** 本地视觉模型（AiContentModeration，Ollama qwen2.5-vl）：看图审核，失败安全降级待人审。 */
-    AI
+    AI,
 
-    // 未来扩展（drop-in）：CLOUD（云内容安全 API：阿里云内容安全 / 腾讯天御 / AWS Rekognition）
+    /** 本地规则引擎（RuleBasedModeration）：文件名/元数据级 fail-closed 拦硬伤，非 AI 视觉；MVP 机审初筛默认。 */
+    RULE,
+
+    /** 云内容安全 API（预留 drop-in）：阿里云内容安全 / 腾讯天御 / AWS Rekognition，视觉语义级机审；需用户提供 API key 后接入。 */
+    CLOUD
 }
