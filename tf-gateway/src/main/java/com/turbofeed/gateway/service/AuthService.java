@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.service;
 
+import com.turbofeed.gateway.config.AdminProperties;
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.repository.UserJdbcRepository;
 import com.turbofeed.gateway.security.JwtUtil;
@@ -24,6 +25,7 @@ public class AuthService {
 
     private final UserJdbcRepository userJdbcRepository;
     private final JwtUtil jwtUtil;
+    private final AdminProperties adminProperties;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     /**
@@ -44,7 +46,9 @@ public class AuthService {
         if (account.get().status() == 2) {
             throw new BizException(ErrorCode.UNAUTHORIZED, "账号已禁用");
         }
-        // 令牌内携带 UID 而非手机号（对标抖音账号体系）
-        return jwtUtil.generateToken(String.valueOf(account.get().id()));
+        // 令牌内携带 UID 而非手机号（对标抖音账号体系）；
+        // demo 阶段角色由手机号是否命中管理员白名单派生（生产改 user 表 role 列）。
+        String role = adminProperties.getPhones().contains(phone) ? "ADMIN" : "USER";
+        return jwtUtil.generateToken(String.valueOf(account.get().id()), role);
     }
 }

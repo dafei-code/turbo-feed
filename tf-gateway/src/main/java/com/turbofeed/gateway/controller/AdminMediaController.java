@@ -22,8 +22,10 @@ import java.util.List;
  * 提供「审核队列查询 + 通过/驳回」两个操作，把内容翻成 APPROVED / REJECTED 终态——
  * 即抖音级「机审 + 人审」中的人审入口（机审占位实现见 {@code AutoPassModeration}）。</p>
  *
- * <p><b>鉴权（TODO）</b>：当前与业务接口一致——仅当携带有效令牌时绑定操作人，未强制管理员角色。
- * 生产须在此叠加管理员角色校验（{@code @PreAuthorize} 或网关层），否则任意登录用户都能审核。</p>
+ * <p><b>鉴权（已落地）</b>：{@code /api/admin/**} 已由 {@link com.turbofeed.gateway.security.AdminAuthInterceptor}
+ * （注册于 {@code WebConfig#addInterceptors}）在 preHandle 强制校验管理员角色——非 ADMIN 令牌
+ * 或匿名请求一律 {@code 40301 / 40101}（由 {@code GlobalExceptionHandler} 翻译为 {@code Result}），
+ * 任意登录用户不再能审核。</p>
  *
  * <p><b>mediaId 传参方式</b>：mediaId 形如 {@code media/{userId}/{uuid}.{ext}} 本身含斜杠，
  * 不能做路径变量（PathPattern 会把斜杠当段分隔符），一律走 query 参数原样携带。</p>

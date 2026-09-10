@@ -58,6 +58,12 @@ turbofeed:
   jwt:
     secret: turbofeed-demo-secret-change-me
     expire-seconds: 86400
+  # 管理员配置（demo 阶段）：手机号白名单派生 ADMIN 角色。
+  # 登录时手机号命中 phones 即签发 ADMIN 令牌，可访问 /api/admin/**；
+  # 生产应替换为 user 表 role 列 + RBAC，移除本白名单。
+  admin:
+    phones:
+      - "13800138000"
   # 演示登录账号：键为手机号，值为账号信息（密码 + uid）；
   # 对标抖音：令牌 sub 携带 uid（身份层），手机号仅作登录凭证（凭证层），不进入令牌、不参与分片。
   # 生产改数据库 + user_phone_router(phone→uid) 映射 + 哈希存储
@@ -109,6 +115,13 @@ turbofeed:
     # true=演示占位（AutoPassModeration 机审桩直接放行，仅本地联调用）。生产务必 false。
     review:
       auto-pass: false
+      # 机审策略（可插拔开关，决定激活哪个 ContentModeration 实现）：
+      #   pass = AutoPassModeration 占位桩（恒 APPROVED，仅机审不拦截，下游仍卡人审闸；当前默认，纯人审）
+      #   ai   = AiContentModeration（Ollama 本地视觉模型，已卸载；保留为「类抖音机器初审」后续接入点）
+      #   cloud（预留）= 将来接云内容安全 API（腾讯云/阿里云）做类抖音机器初审，审核主流程零改动
+      # 注意：无论哪种机审，默认策略都是「驳回即拦 · 通过仍人审」，机审不直接放行到公域。
+      # 当前阶段：先纯人审跑通审核页（moderation-mode=pass），抖音式机器初审后续按架构方案接入。
+      moderation-mode: pass
   # MQ（RocketMQ）事件总线：
   # 本地开发已部署 RocketMQ（Docker: rmqnamesrv 127.0.0.1:9876），启用跨进程投递。
   # 若未部署 RocketMQ 且希望「克隆即跑」，改为 false 回退到本地 Spring 事件。

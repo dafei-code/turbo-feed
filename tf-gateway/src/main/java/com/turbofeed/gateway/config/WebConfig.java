@@ -1,8 +1,10 @@
 package com.turbofeed.gateway.config;
 
+import com.turbofeed.gateway.security.AdminAuthInterceptor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -34,6 +36,7 @@ public class WebConfig implements WebMvcConfigurer {
     private static final String MEDIA_URL_PREFIX = "/media/**";
 
     private final MediaProperties mediaProperties;
+    private final AdminAuthInterceptor adminAuthInterceptor;
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
@@ -44,6 +47,14 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .maxAge(3600);
+    }
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        // 管理员接口强制角色校验：任意有效 JWT 但非 ADMIN 一律 40301。
+        // 路径匹配走 Ant 风格，仅覆盖 /api/admin/**，不影响普通业务接口。
+        registry.addInterceptor(adminAuthInterceptor)
+                .addPathPatterns("/api/admin/**");
     }
 
     @Override

@@ -47,10 +47,20 @@ public class JwtUtil {
         this.clock = clock;
     }
 
-    /** 签发令牌，载荷含 sub(用户ID) / iat(签发时间) / exp(过期时间)，秒级时间戳。 */
+    /** 签发令牌（默认 USER 角色），载荷含 sub / role(默认USER) / iat / exp，秒级时间戳。 */
     public String generateToken(String userId) {
+        return generateToken(userId, "USER");
+    }
+
+    /**
+     * 签发令牌（携带角色），载荷含 sub(用户ID) / role(角色编码) / iat / exp，秒级时间戳。
+     *
+     * <p>role 为 null 时降级为 USER（最小权限，不允许越权签发）。</p>
+     */
+    public String generateToken(String userId, String role) {
         long nowSec = clock.millis() / MILLIS_PER_SECOND;
-        String payload = "{\"sub\":\"" + escape(userId) + "\",\"iat\":" + nowSec
+        String roleClaim = (role == null || role.isBlank()) ? "USER" : role;
+        String payload = "{\"sub\":\"" + escape(userId) + "\",\"role\":\"" + escape(roleClaim) + "\",\"iat\":" + nowSec
                 + ",\"exp\":" + (nowSec + properties.getExpireSeconds()) + "}";
         String signingInput = base64Url(HEADER_JSON) + "." + base64Url(payload);
         return signingInput + "." + hmac(signingInput);
@@ -58,6 +68,16 @@ public class JwtUtil {
 
     /** 校验签名与有效期，成功返回用户 ID；任何失败抛 BizException(UNAUTHORIZED, 具体原因)。 */
     public String parseUserId(String token) {
+        return parseClaims(token).userId();
+    }
+
+    /**
+     * 校验签名与有效期，成功返回完整声明（userId + role）；任何失败抛 BizException(UNAUTHORIZED)。
+     *
+     * <p>失败路径与 {@link #parseUserId} 完全一致（共享底层验签/过期校验），仅返回值更丰富，
+     * 供 {@link JwtAuthenticationFilter} 一次性解析身份与角色，避免重复验签。</p>
+     */
+    public JwtClaims parseClaims(String token) {
         if (token == null || token.isBlank()) {
             throw unauthorized("令牌为空");
         }
@@ -77,7 +97,27 @@ public class JwtUtil {
         if (exp == null || clock.millis() / MILLIS_PER_SECOND >= parseExp(exp)) {
             throw unauthorized("令牌已过期");
         }
-        return sub;
+        String role = jsonField(payload, "role");
+        return new JwtClaims(sub, role == null ? "USER" : role);
+    }
+
+    /** JWT 解析结果（不可变值对象）。 */
+    public static final class JwtClaims {
+        private final String userId;
+        private final String role;
+
+        JwtClaims(String userId, String role) {
+            this.userId = userId;
+            this.role = role;
+        }
+
+        public String userId() {
+            return userId;
+        }
+
+        public String role() {
+            return role;
+        }
     }
 
     // ---------- 内部工具 ----------

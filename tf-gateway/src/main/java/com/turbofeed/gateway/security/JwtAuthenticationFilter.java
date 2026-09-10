@@ -46,8 +46,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             String token = extractBearerToken(request.getHeader(AUTHORIZATION_HEADER));
             if (token != null) {
-                // 验签失败/过期直接抛 UNAUTHORIZED，不静默匿名（见类注释）
-                UserContextHolder.set(UserContext.of(jwtUtil.parseUserId(token)));
+                // 验签失败/过期直接抛 UNAUTHORIZED，不静默匿名（见类注释）。
+                // 一次解析出 userId + role，绑定含角色的 UserContext（未知角色降级 USER）。
+                JwtUtil.JwtClaims claims = jwtUtil.parseClaims(token);
+                UserContextHolder.set(UserContext.of(claims.userId(), Role.from(claims.role())));
             }
             filterChain.doFilter(request, response);
         } finally {

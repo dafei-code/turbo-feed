@@ -34,7 +34,7 @@ public class MediaReviewService {
 
     private final MediaJdbcRepository mediaRepository;
     private final StringRedisTemplate redisTemplate;
-    private final ContentModeration contentModeration;
+    private final ContentModerationRouter contentModeration;
     private final FeedTimelineStore feedTimelineStore;
     private final MediaProperties properties;
 
@@ -70,13 +70,13 @@ public class MediaReviewService {
         mediaRepository.insert(event.mediaId(), userId, event.url(), MediaStatus.PENDING, event.occurredAt());
 
         // —— 机审（第一阶段，始终执行）——
-        // 真实项目此处接入内容安全模型（鉴黄 / 暴恐 / 涉政 OCR 等），返回 APPROVED / REJECTED。
-        // 当前 AutoPassModeration 为占位桩，恒返回 APPROVED（仅演示「机审通过」分支）；
-        // 后续替换为真实模型即可，审核主流程无需改动。机审结果仅作辅助记录，不直接决定终态。
+        // 真实机审实现（AiContentModeration，Ollama 本地视觉模型）返回 APPROVED / REJECTED；
+        // 不可用或解析失败时安全降级为 APPROVED（仅表示「机审不拦截」，最终仍卡人工闸，不裸奔）。
+        // 占位桩 AutoPassModeration 恒返回 APPROVED（演示用）。机审结果驱动下方分流。
         MediaStatus machine = contentModeration.moderate(event.mediaId(), userId, event.url());
 
         if (properties.getReview().isAutoPass()) {
-            // 演示占位：跳过真人审核，机审桩结果直接放行（仅供本地联调 / 克隆即跑）。
+            // 演示占位：跳过真人审核，机审结果直接放行（仅供本地联调 / 克隆即跑）。
             // 生产务必关闭（auto-pass=false），否则 UGC 内容裸奔涉政涉黄。
             MediaStatus target = review(event.mediaId(), userId, machine == MediaStatus.APPROVED);
             if (target == MediaStatus.APPROVED) {
@@ -85,12 +85,18 @@ public class MediaReviewService {
             return;
         }
 
-        // —— 真人审核（第二阶段，默认开启）——
-        // 机审结果仅作辅助记录（当前桩恒 APPROVED）；内容一律停在 PENDING，
-        // 由审核人员在审核页（review.html / admin.html → /api/admin/media/review?mediaId=...&approve=...）
-        // 最终裁定 通过 / 驳回。通过即写入公域推荐流，驳回仅本人「我的内容」可见。
+        // —— 真人审核模式（默认开启，真审核闸）——
+        // 策略（用户选择：驳回即拦 · 通过仍人审）：
+        if (machine == MediaStatus.REJECTED) {
+            // 机审直接判定违规 -> 立即翻 REJECTED，不进人工队列（节省人工，且不让违规内容卡在队列占坑）。
+            MediaStatus target = review(event.mediaId(), userId, false);
+            log.info("机审驳回即拦：内容直接判定 REJECTED（不进人审队列）: mediaId={}, userId={}, status={}", event.mediaId(), userId, target);
+            return;
+        }
+
+        // 机审通过（含 AI 不可用降级）-> 一律进 PENDING，由管理员终裁（通过仍人审）。
         // 此分支没有任何自动放行逻辑——即「真审核」闸，结构上不可能自动过。
-        log.info("机审完成（机审结果={}），内容转入人工审核队列，等待审核人员裁定: mediaId={}, userId={}", machine, event.mediaId(), userId);
+        log.info("机审通过/降级（机审结果={}），内容转入人工审核队列，等待审核人员裁定: mediaId={}, userId={}", machine, event.mediaId(), userId);
     }
 
     /**

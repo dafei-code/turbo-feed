@@ -47,6 +47,24 @@ public final class UserContextHolder {
         return context.userId();
     }
 
+    /**
+     * 要求当前操作为管理员；鉴权失败时抛 {@link BizException}：
+     * <ul>
+     *   <li>匿名（未登录）-> {@code UNAUTHORIZED}（请先登录）；</li>
+     *   <li>已登录但非管理员 -> {@code FORBIDDEN}（无权限访问）。</li>
+     * </ul>
+     * 供 {@code /api/admin/**} 鉴权使用（{@link AdminAuthInterceptor} 在 preHandle 调用）。
+     */
+    public static void requireAdmin() {
+        UserContext context = CONTEXT.get();
+        if (context == null) {
+            throw new BizException(ErrorCode.UNAUTHORIZED, "请先登录");
+        }
+        if (!context.isAdmin()) {
+            throw new BizException(ErrorCode.FORBIDDEN, "需要管理员权限");
+        }
+    }
+
     /** 清理上下文（请求结束兜底，防止线程池串号）。 */
     public static void clear() {
         CONTEXT.remove();

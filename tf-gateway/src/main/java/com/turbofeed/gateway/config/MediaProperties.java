@@ -4,6 +4,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.util.unit.DataSize;
 
+import com.turbofeed.gateway.service.review.ModerationMode;
+
 /**
  * 媒体上传配置（turbofeed.media.*）。
  *
@@ -338,12 +340,28 @@ public class MediaProperties {
         /** 机审自动放行（true=占位直接过；false=人工审核闸，停在 PENDING）。默认 false。 */
         private boolean autoPass = false;
 
+        /**
+         * 机审策略（可插拔开关）：决定激活哪个 {@link ContentModeration} 实现。
+         * 默认 AI（Ollama 本地视觉模型）；Ollama 不可用时会安全降级为「待人审」，
+         * 不会裸奔。切到 PASS 则用占位桩（恒 APPROVED，仅演示/无 Ollama 时零开销）。
+         * 未来接云内容安全 API 时补 CLOUD 枚举值即可。
+         */
+        private ModerationMode moderationMode = ModerationMode.AI;
+
         public boolean isAutoPass() {
             return autoPass;
         }
 
         public void setAutoPass(boolean autoPass) {
             this.autoPass = autoPass;
+        }
+
+        public ModerationMode getModerationMode() {
+            return moderationMode;
+        }
+
+        public void setModerationMode(ModerationMode moderationMode) {
+            this.moderationMode = moderationMode;
         }
     }
 }
