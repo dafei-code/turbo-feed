@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TurboFeed · 审核人员工作台</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #2d3646;
+    --text: #e6edf3;
+    --text-dim: #8b98ab;
+    --brand: #ff4d5e;
+    --brand-2: #ff7a45;
+    --accent: #3d7eff;
+    --ok: #2ecc8f;
+    --warn: #f0b429;
+  }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .topbar {
+    height: 60px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    gap: 14px;
+  }
+  .topbar .mark {
+    width: 34px; height: 34px;
+    border-radius: 9px;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 17px; color: #fff;
+  }
+  .topbar .ttl { font-size: 17px; font-weight: 700; }
+  .topbar .ttl em { font-style: normal; color: var(--brand); }
+  .topbar .crumb { color: var(--text-dim); font-size: 13px; }
+  .topbar .crumb b { color: var(--text); font-weight: 600; }
+  .topbar .spacer { flex: 1; }
+  .topbar .who {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 13px; color: var(--text-dim);
+  }
+  .topbar .who .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), #6c5ce7);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #fff;
+  }
+  .topbar a.back {
+    color: var(--text-dim); font-size: 13px; text-decoration: none;
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px;
+    transition: all .15s;
+  }
+  .topbar a.back:hover { border-color: var(--accent); color: var(--accent); }
+
+  .main { max-width: 1080px; margin: 26px auto; padding: 0 24px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .panel .p-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 14px;
+  }
+  .panel .p-head .title { font-size: 15px; font-weight: 600; }
+  .upload-tip {
+    font-size: 12px; color: var(--text-dim);
+    margin: 4px 2px 14px; line-height: 1.7;
+  }
+  .upload-tip b { color: var(--text); }
+
+  .mini-btn {
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .mini-btn.ok:hover { border-color: var(--ok); color: var(--ok); }
+  .mini-btn.bad:hover { border-color: var(--brand); color: var(--brand); }
+  .mini-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+  .table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .table th {
+    text-align: left; color: var(--text-dim); font-weight: 500;
+    padding: 9px 10px; border-bottom: 1px solid var(--border);
+  }
+  .table td { padding: 11px 10px; border-bottom: 1px solid rgba(45,54,70,.5); vertical-align: middle; }
+  .table tr:last-child td { border-bottom: none; }
+  .table .hot-tag {
+    display: inline-block; padding: 2px 8px; border-radius: 5px;
+    font-size: 11px; margin-right: 6px;
+  }
+  .tag-warm  { background: rgba(240,180,41,.13); color: var(--warn); border: 1px solid rgba(240,180,41,.4); }
+  .tag-cold  { background: rgba(46,204,143,.12); color: var(--ok); border: 1px solid rgba(46,204,143,.35); }
+  .tag-fire  { background: rgba(255,77,94,.15); color: var(--brand); border: 1px solid rgba(255,77,94,.4); }
+
+  .thumb {
+    width: 72px; height: 50px; border-radius: 7px;
+    border: 1px solid var(--border); overflow: hidden; background: var(--panel-2);
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  .empty { color: var(--text-dim); font-size: 13px; padding: 28px 0; text-align: center; }
+  .err { color: var(--brand); font-size: 13px; padding: 18px 0; }
+  .mid { color: var(--text-dim); font-size: 12px; }
+  code.id { font-family: ui-monospace, Menlo, monospace; color: var(--text-dim); font-size: 11px; word-break: break-all; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="mark">TF</div>
+    <div class="ttl">Turbo<em>Feed</em></div>
+    <div class="crumb">/ <b>审核人员工作台</b></div>
+    <div class="spacer"></div>
+    <div class="who">
+      <span class="avatar" id="ava">?</span>
+      <span id="whoName">审核员</span>
+    </div>
+    <a class="back" href="login.html">退出</a>
+  </div>
+
+  <div class="main">
+    <div class="panel">
+      <div class="p-head">
+        <div class="title">内容审核队列（待人工审核）</div>
+        <button class="mini-btn" onclick="loadReviewQueue()" id="refreshBtn">刷新队列</button>
+      </div>
+      <div class="upload-tip">
+        审核流程为「<b>机审 + 真人审核</b>」两段：用户上传后先过<b>机审</b>（内容安全模型，当前为占位桩，恒判定通过），
+        随后内容停在 <b>待人工审核</b>，由你（审核人员）在此最终裁定。
+        <b>通过</b>：内容写入公域推荐流，所有人可见；<b>驳回</b>：仅本人「我的内容」可见，不进公域。
+        此页面无任何自动放行逻辑。
+      </div>
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width:88px">缩略图</th>
+            <th>内容 ID</th>
+            <th style="width:170px">上传时间</th>
+            <th style="width:96px">状态</th>
+            <th style="width:160px">操作</th>
+          </tr>
+        </thead>
+        <tbody id="reviewBody">
+          <tr><td colspan="5" class="empty">加载中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+  // 后端网关地址：静态页与后端不同源，故写全址。换端口 / 部署时只改这一处。
+  var API_BASE = 'http://localhost:8080';
+
+  // 登录守卫：审核接口校验 Bearer 令牌，无令牌直接回登录页。
+  var TOKEN = localStorage.getItem('turbofeed:token');
+  if (!TOKEN) {
+    window.location.href = 'login.html';
+  }
+
+  // 当前登录用户（login.html 登录成功后写入；未登录直接打开时回退为 reviewer）
+  var currentUser = localStorage.getItem('turbofeed:user') || 'reviewer';
+  document.getElementById('whoName').textContent = currentUser;
+  document.getElementById('ava').textContent = currentUser.charAt(0).toUpperCase();
+
+  function setRowDisabled(disabled) {
+    document.getElementById('refreshBtn').disabled = disabled;
+  }
+
+  // 拉取全平台待人工审核内容（跨分片广播，演示/小数据量）
+  function loadReviewQueue() {
+    var body = document.getElementById('reviewBody');
+    body.innerHTML = '<tr><td colspan="5" class="empty">加载中…</td></tr>';
+    fetch(API_BASE + '/api/admin/media/pending?size=50', {
+      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.data || res.data.length === 0) {
+          body.innerHTML = '<tr><td colspan="5" class="empty">队列为空，没有待审核内容 🎉</td></tr>';
+          return;
+        }
+        body.innerHTML = '';
+        res.data.forEach(function (it) {
+          var tr = document.createElement('tr');
+          var thumb = '<div class="thumb"><img src="' + it.url + '" alt=""></div>';
+          var time = it.createdAt ? new Date(it.createdAt).toLocaleString() : '-';
+          tr.innerHTML = '<td>' + thumb + '</td>'
+            + '<td><code class="id">' + it.mediaId + '</code></td>'
+            + '<td class="mid">' + time + '</td>'
+            + '<td><span class="hot-tag tag-warm">待人工审核</span></td>'
+            + '<td>'
+            + '<button class="mini-btn ok" onclick="reviewMedia(\'' + it.mediaId + '\', true, this)">通过</button> '
+            + '<button class="mini-btn bad" onclick="reviewMedia(\'' + it.mediaId + '\', false, this)">驳回</button>'
+            + '</td>';
+          body.appendChild(tr);
+        });
+      })
+      .catch(function (e) {
+        body.innerHTML = '<tr><td colspan="5" class="err">加载失败：' + e.message + '</td></tr>';
+      });
+  }
+
+  // 审核执行：通过 / 驳回（真人审核闸的翻转点）
+  function reviewMedia(mediaId, approve, btn) {
+    // 禁用本行两个按钮，避免重复提交
+    var row = btn.parentNode;
+    row.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+    fetch(API_BASE + '/api/admin/media/review?mediaId=' + encodeURIComponent(mediaId) + '&approve=' + approve, {
+      method: 'POST',
+      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0) {
+          loadReviewQueue(); // 操作后刷新队列
+        } else {
+          alert('审核失败：' + (res.message || '未知错误'));
+          row.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
+        }
+      })
+      .catch(function (e) {
+        alert('审核请求失败：' + e.message);
+        row.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
+      });
+  }
+
+  // 进入页面即加载一次审核队列
+  loadReviewQueue();
+</script>
+</body>
+</html>

@@ -47,10 +47,14 @@ public class UploadRateLimiter {
 
     private final StringRedisTemplate redisTemplate;
     private final MediaProperties properties;
+    private final LocalFallbackRateLimiter localFallback;
 
-    public UploadRateLimiter(StringRedisTemplate redisTemplate, MediaProperties properties) {
+    public UploadRateLimiter(StringRedisTemplate redisTemplate,
+                             MediaProperties properties,
+                             LocalFallbackRateLimiter localFallback) {
         this.redisTemplate = redisTemplate;
         this.properties = properties;
+        this.localFallback = localFallback;
     }
 
     /**
@@ -79,9 +83,9 @@ public class UploadRateLimiter {
             }
             return allowed;
         } catch (Exception e) {
-            // Redis 不可用：降级放行，保证主链路可用（限流暂时失效，打 warn 便于排查）
-            log.warn("用户维度限流 Redis 异常，降级放行: userId={}, {}", userId, e.getMessage());
-            return true;
+            // Redis 不可用：降级为进程内兜底限流（仍拦单用户刷接口，而非完全放开），保证主链路可用
+            log.warn("用户维度限流 Redis 异常，降级本地兜底限流: userId={}, {}", userId, e.getMessage());
+            return localFallback.tryAcquire(userId);
         }
     }
 }

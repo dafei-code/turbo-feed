@@ -9,7 +9,10 @@ import io.minio.BucketExistsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+import io.minio.RemoveObjectArgs;
+import io.minio.SetBucketPolicyArgs;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -37,7 +40,7 @@ import java.util.UUID;
 @Slf4j
 @Component
 @ConditionalOnProperty(name = "turbofeed.media.storage", havingValue = "minio")
-public class MinioStorageClient implements MediaStorageClient {
+public class MinioStorageClient implements MediaStorageClient, InitializingBean {
 
     private final MediaProperties properties;
     private volatile MinioClient client;
@@ -45,6 +48,16 @@ public class MinioStorageClient implements MediaStorageClient {
 
     public MinioStorageClient(MediaProperties properties) {
         this.properties = properties;
+    }
+
+    /**
+     * 启动时主动初始化 MinIO 客户端并预检桶策略。
+     * <p>原来懒初始化到第一次上传时才设置桶策略，导致「只重启、不新上传」时旧图仍 403。
+     * 改为启动期即完成桶创建 + 匿名读策略下发，确保重启后已有对象立即可读。</p>
+     */
+    @Override
+    public void afterPropertiesSet() {
+        client();
     }
 
     /** 懒初始化 MinIO 客户端 + 桶预检（双检锁，仅首次）。 */
@@ -72,8 +85,29 @@ public class MinioStorageClient implements MediaStorageClient {
                 client.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
                 log.info("MinIO bucket 已创建: {}", bucket);
             }
+            // 本地/演示：把桶设为匿名可读，使返回的 publicUrlBase+key 可被浏览器直接加载；
+            // 生产应关闭（publicRead=false）并改用预签名 URL，避免对象公网裸奔。
+            if (properties.getMinio().isPublicRead()) {
+                setBucketPublicRead(bucket);
+            }
         } catch (Exception e) {
             log.warn("MinIO bucket 预检失败（写入时再校验）: bucket={}, {}", bucket, e.getMessage());
+        }
+    }
+
+    /** 设置桶匿名读策略（仅 GetObject），使 publicUrlBase+key 可直接被浏览器加载。 */
+    private void setBucketPublicRead(String bucket) {
+        // MinIO/S3 策略：允许匿名对桶内所有对象做 GetObject
+        // Principal 使用 {"AWS":"*"} 而非 "*"，兼容更多 MinIO 版本与旧版 S3 解析器
+        String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
+                + "\"Principal\":{\"AWS\":\"*\"},\"Action\":[\"s3:GetObject\"],"
+                + "\"Resource\":[\"arn:aws:s3:::" + bucket + "/*\"]}]}";
+        try {
+            client.setBucketPolicy(SetBucketPolicyArgs.builder().bucket(bucket).config(policy).build());
+            log.info("MinIO bucket 已设为匿名可读: {}", bucket);
+        } catch (Exception e) {
+            // 设置失败只告警：已有对象仍可能 403，需在 MinIO 控制台手动开启匿名读
+            log.warn("设置桶匿名读策略失败（图片可能 403，请在 MinIO 控制台手动开启匿名读）: bucket={}, policy={}", bucket, policy, e);
         }
     }
 
@@ -96,5 +130,26 @@ public class MinioStorageClient implements MediaStorageClient {
             throw new BizException(ErrorCode.INTERNAL_ERROR, "文件写入对象存储失败");
         }
         return new StoredMedia(mediaId, properties.getPublicUrlBase() + mediaId);
+    }
+
+    /**
+     * 物理删除对象（用户删除内容时调用）。
+     *
+     * <p>mediaId 即对象名（{@code media/{userId}/{uuid}.{ext}}）。删除失败（对象已不存在等）
+     * 仅告警不抛，由调用方决定后续逻辑删除是否继续——避免物理层异常阻断用户的删除操作。</p>
+     *
+     * @param mediaId 对象名（即存储 key）
+     */
+    @Override
+    public void delete(String mediaId) {
+        try {
+            client().removeObject(RemoveObjectArgs.builder()
+                    .bucket(properties.getMinio().getBucket())
+                    .object(mediaId)
+                    .build());
+            log.info("MinIO 对象已物理删除: {}", mediaId);
+        } catch (Exception e) {
+            log.warn("MinIO 对象删除失败（可能已不存在，继续逻辑删除）: mediaId={}, {}", mediaId, e.getMessage());
+        }
     }
 }

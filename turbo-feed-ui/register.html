@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="WYCYd2nnBJMEsYE0HTgZv9">
+<head data-page-node-id="DWzckTUfvcyTEumABEmuWE">
+<meta charset="UTF-8" data-page-node-id="64ct3ZcMscWfI6jEk11zZS">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="cCrQ9GdNRNuU3ESgW3PfL2">
+<title>TurboFeed · 注册</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #2d3646;
+    --text: #e6edf3;
+    --text-dim: #8b98ab;
+    --brand: #ff4d5e;
+    --brand-2: #ff7a45;
+    --accent: #3d7eff;
+    --ok: #2ecc8f;
+  }
+
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .bg-stream {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    gap: 90px;
+    transform: rotate(-18deg) scale(1.4);
+    opacity: .35;
+    pointer-events: none;
+  }
+  .bg-stream .lane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    animation: flow 14s linear infinite;
+  }
+  .bg-stream .lane:nth-child(2) { animation-duration: 19s; }
+  .bg-stream .lane:nth-child(3) { animation-duration: 11s; }
+  .bg-stream .card {
+    height: 64px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(61,126,255,.10), rgba(255,77,94,.08));
+    border: 1px solid rgba(61,126,255,.14);
+  }
+  @keyframes flow {
+    from { transform: translateY(-45%); }
+    to   { transform: translateY(45%); }
+  }
+
+  .reg-wrap {
+    position: relative;
+    z-index: 2;
+    width: 400px;
+    background: rgba(22, 27, 34, .92);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 42px 38px 34px;
+    box-shadow: 0 24px 64px rgba(0,0,0,.5);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .logo-mark {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 22px; color: #fff;
+    letter-spacing: -1px;
+  }
+  .logo-name { font-size: 26px; font-weight: 700; letter-spacing: .5px; }
+  .logo-name em { font-style: normal; color: var(--brand); }
+
+  .slogan { color: var(--text-dim); font-size: 13px; margin-bottom: 30px; }
+
+  .field { margin-bottom: 18px; }
+  .field label {
+    display: block;
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 7px;
+  }
+  .field .input {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0 14px;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .field .input:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(61,126,255,.18);
+  }
+  .field .input svg { flex: 0 0 18px; opacity: .55; }
+  .field input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-size: 15px;
+    height: 46px;
+  }
+  .field input::placeholder { color: #55617a; }
+
+  .btn-reg {
+    width: 100%;
+    height: 48px;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 4px;
+    transition: transform .15s, filter .2s;
+  }
+  .btn-reg:hover { filter: brightness(1.1); }
+  .btn-reg:active { transform: scale(.98); }
+
+  .msg {
+    display: none;
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    background: rgba(255,77,94,.10);
+    border: 1px solid rgba(255,77,94,.4);
+    color: #ff8b96;
+  }
+  .msg.show { display: block; }
+
+  .ok-box {
+    display: none;
+    margin-bottom: 16px;
+    padding: 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.8;
+    background: rgba(46,204,143,.10);
+    border: 1px solid rgba(46,204,143,.4);
+    color: #7ee2bd;
+  }
+  .ok-box.show { display: block; }
+  .ok-box b { color: var(--ok); }
+
+  .footer-row {
+    text-align: center;
+    margin-top: 18px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .footer-row a { color: var(--accent); text-decoration: none; }
+  .footer-row a:hover { text-decoration: underline; }
+
+  .footer {
+    position: absolute;
+    bottom: 22px;
+    width: 100%;
+    text-align: center;
+    color: #55617a;
+    font-size: 12px;
+    z-index: 2;
+  }
+  .footer span { color: #6b7a94; }
+</style>
+</head>
+<body data-page-node-id="1niiseyhrVXLbvOAnZYOC6">
+
+<div class="bg-stream" aria-hidden="true" data-page-node-id="6521lH7rcDJWKvAX39dBSn">
+  <div class="lane" data-page-node-id="8sCzQRvLyO6e7NbRl0Mavq">
+    <div class="card" data-page-node-id="h12Gx4AfgVC8CTfFB1jfgD"></div><div class="card" data-page-node-id="SnfLS2gIDGSm5uwUbmo2GF"></div><div class="card" data-page-node-id="gUniw3llsN1PwTwiFw7G6N"></div>
+    <div class="card" data-page-node-id="pAvFmxRep5ncFneA3Wkcyn"></div><div class="card" data-page-node-id="rcTmMINrcuOmK3dZcH4o7j"></div><div class="card" data-page-node-id="dRTBN7WDv3FzwKDvNuaa32"></div>
+  </div>
+  <div class="lane" data-page-node-id="Qz5ucRWtAYAFTgFvJWedFe">
+    <div class="card" data-page-node-id="alaSOgXiUNlWCVPt3zlp57"></div><div class="card" data-page-node-id="eVD3ZWcOo28BvQ34eDrLj6"></div><div class="card" data-page-node-id="DugzKOyAU9c50KNsqJqK51"></div>
+    <div class="card" data-page-node-id="uk23R0h7KqiGG7GU58jAuN"></div><div class="card" data-page-node-id="9GEVgjS0IfPIbPKs4NCy8O"></div><div class="card" data-page-node-id="3BBiD7AOv4G1CPK25AWDdX"></div>
+  </div>
+  <div class="lane" data-page-node-id="k3s0eKRow4YF9Xbpg4Qlzc">
+    <div class="card" data-page-node-id="tCHCTj9A2Kn2Zy9jnsxr4X"></div><div class="card" data-page-node-id="5M0qvAlhnh98Xk57LlBZMs"></div><div class="card" data-page-node-id="NFDHZN8GM9UTdkJ7szxEmv"></div>
+    <div class="card" data-page-node-id="y8xpWiqUHOXrScW6hMF9nH"></div><div class="card" data-page-node-id="F0DSj5l9RGF30lhoDcdrGg"></div><div class="card" data-page-node-id="gUUdT64rYDZjKbaptDLjBN"></div>
+  </div>
+</div>
+
+<div class="reg-wrap" data-page-node-id="NXGFlvo6EIv2IaczF2nSA2">
+  <div class="logo" data-page-node-id="0goLcOhSEe8BClM6XWr8Gg">
+    <div class="logo-mark" data-page-node-id="EFSpae6CP8MQvRtuGCIjHo">T</div>
+    <div class="logo-name" data-page-node-id="VtGaJT11HITMoard3su2E1">Turbo<em data-page-node-id="tmZ5oIZ3CM5yLbJzk6Dshm">Feed</em></div>
+  </div>
+  <div class="slogan" data-page-node-id="YkCNDhRfsrJlhPZ4Fv930H">创建账号 · 手机号即登录凭证（密码本地哈希存储）</div>
+
+  <div class="msg" id="msg" data-page-node-id="9WpLyCLztwHOGfrCxpoWRg"></div>
+  <div class="ok-box" id="okBox" data-page-node-id="OBgOAE86S2a12hxmfcHqx7"></div>
+
+  <form id="regForm" novalidate data-page-node-id="ZBvvKCdpGjWb6z0OQAjVIL">
+    <div class="field" data-page-node-id="Xf0ZhLr4nbPzO3mtVBLCVX">
+      <label data-page-node-id="fhWEEwIZ29L0L83OPXFuaO">手机号</label>
+      <div class="input" data-page-node-id="2p1MToMiCjDQLDUGgoRYMA">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#8b98ab" stroke-width="2" data-page-node-id="DqjZrjaCNTxsSlSPQpC1kW">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" data-page-node-id="Pdd2ZPlSsW4apFD5UEA2HC"/><circle cx="12" cy="7" r="4" data-page-node-id="odXc34vTSFpnDDJqJ61DQ8"/>
+        </svg>
+        <input type="tel" id="phone" placeholder="请输入手机号" autocomplete="username" data-page-node-id="wKmz2SsYkIcFkfEYfCNfne">
+      </div>
+    </div>
+
+    <div class="field" data-page-node-id="P3HyPw0UYq45Cptb1gLNrQ">
+      <label data-page-node-id="aQuIjA4v8VfqSyeNagkXEH">密码</label>
+      <div class="input" data-page-node-id="iWXU2KRD5aIJ5Ita56MQLN">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#8b98ab" stroke-width="2" data-page-node-id="bLKTrMiPQ5qs4v1AtnoJKs">
+          <rect x="3" y="11" width="18" height="11" rx="2" data-page-node-id="ZC2oSTTnOaRpiyKOInuQgx"/><path d="M7 11V7a5 5 0 0 1 10 0v4" data-page-node-id="BG7hE7n8C7hAHFyl6vH5vw"/>
+        </svg>
+        <input type="password" id="password" placeholder="至少 6 位" autocomplete="new-password" data-page-node-id="W4ay7Gnkd0su3GdtPQu1k8">
+      </div>
+    </div>
+
+    <div class="field" data-page-node-id="v1tisaaZ3vUKZDUlfBmHSM">
+      <label data-page-node-id="ECKzkPnqvCx0wdXLdMSgz7">昵称（选填）</label>
+      <div class="input" data-page-node-id="dGLupCMKVJIHi4ZWGHQCkp">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#8b98ab" stroke-width="2" data-page-node-id="UbNeqM00H4CRkBhWAbsEPf">
+          <circle cx="12" cy="8" r="4" data-page-node-id="SFK39ml9pqfsMDvbz5i53l"/><path d="M4 21a8 8 0 0 1 16 0" data-page-node-id="Zmi8nmQGnGK8geKnAhKgOA"/>
+        </svg>
+        <input type="text" id="nickname" placeholder="不填则自动生成" autocomplete="nickname" data-page-node-id="HEokWOdqUcGCJT8ex0SN2h">
+      </div>
+    </div>
+
+    <button type="submit" class="btn-reg" data-page-node-id="ozuhw3z7n8R9a0l3Cvob2Y">注 册</button>
+  </form>
+
+  <div class="footer-row" data-page-node-id="AGmoH4xyuHzAids64wZHwd">已有账号？<a href="login.html" data-page-node-id="JhLYc8Jqdwv0MHWa8pcjYp">去登录 ›</a></div>
+</div>
+
+<div class="footer" data-page-node-id="S0RuphAM9uNITZgY5KgQfz">
+  TurboFeed Open Source · <span data-page-node-id="NqUA4n3FQhyruImwFRax2A">Java 17 + Spring Boot 3.4.3</span> · Apache-2.0 License
+</div>
+
+<script>
+  // 后端网关地址：静态页与后端不同源（file:// 或其它端口），故写全址。
+  var API_BASE = 'http://localhost:8080';
+
+  function showMsg(text) {
+    var el = document.getElementById('msg');
+    el.textContent = text;
+    el.classList.add('show');
+    document.getElementById('okBox').classList.remove('show');
+  }
+
+  document.getElementById('regForm').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var phone = document.getElementById('phone').value.trim();
+    var password = document.getElementById('password').value.trim();
+    var nickname = document.getElementById('nickname').value.trim();
+    if (!phone) return showMsg('请输入手机号');
+    if (!password) return showMsg('请输入密码');
+
+    var btn = document.querySelector('.btn-reg');
+    btn.disabled = true;
+    btn.textContent = '注册中...';
+    try {
+      var resp = await fetch(API_BASE + '/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ phone: phone, password: password, nickname: nickname })
+      });
+      var result = await resp.json();
+      if (!result || result.code !== 0) {
+        return showMsg((result && result.message) || '注册失败');
+      }
+      // 注册成功：展示账号信息，引导去登录换取 JWT（上传链路需令牌）。
+      var ok = document.getElementById('okBox');
+      ok.innerHTML = '<b>注册成功！</b><br>账号：' + result.data.phone
+        + '<br>昵称：' + result.data.nickname
+        + '<br><br><a href="login.html" style="color:var(--accent)">去登录 ›</a>';
+      ok.classList.add('show');
+      document.getElementById('msg').classList.remove('show');
+      document.getElementById('regForm').style.display = 'none';
+    } catch (err) {
+      showMsg('无法连接后端服务，请确认网关已启动：' + API_BASE);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '注 册';
+    }
+  });
+</script>
+
+</body>
+</html>

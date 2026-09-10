@@ -83,6 +83,10 @@ public class MediaJdbcRepository {
         if (statusFilter != null) {
             sql.append(" AND status = ?");
             args.add(toCode(statusFilter));
+        } else {
+            // 逻辑删除的内容不展示在「我的内容」：默认过滤 DELETED，避免已删内容重现
+            sql.append(" AND status <> ?");
+            args.add(toCode(MediaStatus.DELETED));
         }
         sql.append(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
         args.add(limit);
@@ -110,6 +114,52 @@ public class MediaJdbcRepository {
     }
 
     /**
+     * 按 (media_id, user_id) 精确取单条内容（审核通过后补写公域时间线用）。
+     *
+     * @return 命中的媒体条目（含 url / createdAt），未命中返回 {@code null}
+     */
+    public MediaItem findMedia(String mediaId, long userId) {
+        List<MediaItem> items = jdbcTemplate.query(
+                "SELECT media_id, url, status, created_at FROM media WHERE media_id = ? AND user_id = ?",
+                MEDIA_ROW_MAPPER, mediaId, userId);
+        return items.isEmpty() ? null : items.get(0);
+    }
+
+    /**
+     * 人工审核队列查询：跨分片广播查全平台 PENDING 内容（按受理时间倒序，分页）。
+     *
+     * <p><b>重要</b>：与 {@link #listApprovedGlobal} 同源——不携带分片键，ShardingSphere 广播到全部
+     * 分片并合并，仅适用于演示/小数据量。生产环境人工审核队列应由审核中台 + 异构索引提供，
+     * 不可实时扫分片库（海量 PENDING 下广播查询会拖垮所有分片）。</p>
+     *
+     * @param limit  单页条数
+     * @param offset 偏移量
+     */
+    public List<MediaItem> listPendingGlobal(int limit, long offset) {
+        return jdbcTemplate.query(
+                "SELECT media_id, url, status, created_at FROM media "
+                        + "WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                MEDIA_ROW_MAPPER, toCode(MediaStatus.PENDING), limit, offset);
+    }
+
+    /**
+     * 逻辑删除（用户主动删除自己的内容）：将状态置为 {@link MediaStatus#DELETED}。
+     *
+     * <p><b>为什么是逻辑删除</b>：物理对象已由存储实现（MinIO 等）删除，DB 仅标记删除态，
+     * 保留审计痕迹、避免硬删带来的级联/时序风险。带 {@code user_id} 分片键，
+     * 仅删除「本人」内容——即使传入他人 mediaId，因 (media_id, user_id) 不匹配也不会误删。</p>
+     *
+     * @param mediaId 内容唯一标识
+     * @param userId  归属用户（分片键，来自 JWT，防越权删他人）
+     */
+    public void delete(String mediaId, long userId) {
+        jdbcTemplate.update(
+                "UPDATE media SET status = ? WHERE media_id = ? AND user_id = ?",
+                toCode(MediaStatus.DELETED), mediaId, userId);
+        log.debug("媒体逻辑删除: mediaId={}, userId={}", mediaId, userId);
+    }
+
+    /**
      * 查询单条内容状态。带 user_id 分片键精准路由；未查到返回 {@code null}
      * （调用方按 PENDING 处理，对应「已受理但审核事件未到」的中间态）。
      */
@@ -125,6 +175,7 @@ public class MediaJdbcRepository {
             case PENDING -> 0;
             case APPROVED -> 1;
             case REJECTED -> 2;
+            case DELETED -> 3;
         };
     }
 
@@ -132,6 +183,7 @@ public class MediaJdbcRepository {
         return switch (code) {
             case 1 -> MediaStatus.APPROVED;
             case 2 -> MediaStatus.REJECTED;
+            case 3 -> MediaStatus.DELETED;
             default -> MediaStatus.PENDING;
         };
     }

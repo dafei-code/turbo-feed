@@ -8,6 +8,7 @@ import com.turbofeed.gateway.service.review.MediaStatus;
 import com.turbofeed.shared.result.Result;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -156,5 +157,24 @@ public class MediaController {
     @GetMapping("/status")
     public Result<MediaStatus> status(@RequestParam("mediaId") String mediaId) {
         return Result.ok(mediaQueryService.statusOf(mediaId, UserContextHolder.requireUserId()));
+    }
+
+    /**
+     * 删除当前用户上传的内容（物理删除 + 逻辑删除）。
+     *
+     * <p><b>mediaId 用 query 参数</b>：其形如 {@code media/{userId}/{uuid}.{ext}} 含斜杠，
+     * 不能做路径变量（PathPattern 会把斜杠当段分隔符），故走 {@code ?mediaId=...} 原样携带。</p>
+     *
+     * <p><b>删除语义</b>：对象存储（MinIO / 本地磁盘）物理删除对象；MySQL 将状态置
+     * {@code DELETED}（逻辑删除）。身份来自 {@link UserContextHolder#requireUserId()}，
+     * 与 mediaId 的 user_id 分片键共同约束，不能删除他人内容。</p>
+     *
+     * @param mediaId 内容唯一标识（取自 {@link MediaItem#mediaId()}）
+     * @return 统一返回结构（data 为 null）
+     */
+    @DeleteMapping
+    public Result<Void> delete(@RequestParam("mediaId") String mediaId) {
+        mediaUploadService.delete(mediaId, UserContextHolder.requireUserId());
+        return Result.ok();
     }
 }

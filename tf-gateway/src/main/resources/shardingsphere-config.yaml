@@ -24,72 +24,53 @@ dataSources:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
     # TODO 生产替换为 ENV: TURBO_FEED_DS_0_URL（密钥管理/配置中心注入）
-    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai
+    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
     username: root
     password: "123456"
   ds_1:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
-    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai
+    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
     username: root
     password: "123456"
 
 rules:
   - !SHARDING
-    tables:
-      # 逻辑表 user（业务 SQL 只写 user，由 ShardingSphere 路由到物理表）
+    # 采用 autoTables（自动分片）而非 tables（手动分片）：
+    # ShardingSphere 5.5.x 把 HASH_MOD / MOD 归类为「自动分片算法」，只能用于 autoTables；
+    # 手动 tables 引用会报 "tables sharding configuration can not use auto sharding algorithm"。
+    # autoTables + HASH_MOD(sharding-count=总物理节点数) 自动把分片摊到各库各表，
+    # 物理表命名约定 <逻辑表>_<0..N-1>（本例 sharding-count=4 → user_0..user_3、media_0..media_3）由 SS 推断；
+    # 落库规则：第 i 张表落到 actualDataSources.get(i % 库数)，即 ds_0→{_0,_2}、ds_1→{_1,_3}。
+    # init-local.sql 的建表命名必须与此一致（见其头部说明），否则报 Table doesn't exist。
+    autoTables:
+      # 逻辑表 user：2 库(ds_0/ds_1) × 2 表 = 4 物理节点，按 id 哈希取模路由
       user:
-        # 2 库 × 2 表 = 4 物理表：ds_0.user_0 / ds_0.user_1 / ds_1.user_0 / ds_1.user_1
-        # prefix 写法（ds_ / user_）必须与下方的 HASH_MOD 内置算法前缀匹配逻辑对齐
-        actualDataNodes: ds_${0..1}.user_${0..1}
-        # 分库策略：按 id 分到 ds_0 / ds_1
-        databaseStrategy:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
           standard:
             shardingColumn: id
-            shardingAlgorithmName: userDbSharding
-        # 分表策略：在已选定的库内按 id 分到 user_0 / user_1
-        tableStrategy:
-          standard:
-            shardingColumn: id
-            shardingAlgorithmName: userTableSharding
-        # 主键生成（雪花 ID，对接业务侧的 userId 生成策略，留待接入）
+            # autoTables 通过 shardingAlgorithmName 引用下方具名算法（HASH_MOD 是自动分片算法，仅 autoTables 可用；
+            # 注意：standard 策略只接受 shardingAlgorithmName 引用，不接受内联 shardingAlgorithm 块）
+            shardingAlgorithmName: hashMod
+        # 主键生成（雪花 ID）；业务侧也会显式传 id，传入时以传入值为准
         keyGenerateStrategy:
           column: id
           keyGeneratorName: snowflake
-      # 逻辑表 media（UGC 媒体元数据）：分片键 user_id，与 user 表同键同算法，
-      # 保证「我的上传」WHERE user_id=? 精准命中单分片、且同一用户媒体与其 user 行同片。
-      # media_id 为业务主键但不做分片键——按 media_id 查询时必须同时带 user_id 才精准路由。
+      # 逻辑表 media：分片键 user_id，与 user 表同策略，
+      # 保证「同用户」的 user 行与其 media 落同片，「我的上传」WHERE user_id=? 精准命中单分片
       media:
-        actualDataNodes: ds_${0..1}.media_${0..1}
-        databaseStrategy:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
           standard:
             shardingColumn: user_id
-            shardingAlgorithmName: mediaDbSharding
-        tableStrategy:
-          standard:
-            shardingColumn: user_id
-            shardingAlgorithmName: mediaTableSharding
-    # 分片算法：库 / 表各一条，复用 SS 内置 HASH_MOD，由 sharding-count 显式指定候选数
+            shardingAlgorithmName: hashMod
+    # 分片算法（自动分片算法，仅 autoTables 引用；sharding-count = 总物理节点数 = 库数2 × 表数2 = 4）
     shardingAlgorithms:
-      userDbSharding:
+      hashMod:
         type: HASH_MOD
         props:
-          # 库候选数 = 2（ds_0, ds_1），扩容需同步调整本值
-          sharding-count: 2
-      userTableSharding:
-        type: HASH_MOD
-        props:
-          # 表候选数 = 2（user_0, user_1），扩容需同步调整本值
-          sharding-count: 2
-      # media 分片算法：库 / 表各一条，复用 SS 内置 HASH_MOD，与 user 表同契约
-      mediaDbSharding:
-        type: HASH_MOD
-        props:
-          sharding-count: 2
-      mediaTableSharding:
-        type: HASH_MOD
-        props:
-          sharding-count: 2
+          sharding-count: 4
     # 主键生成器：雪花 ID，与 userId 体系一致
     keyGenerators:
       snowflake:

@@ -1,6 +1,7 @@
 package com.turbofeed.gateway.service.review;
 
 import com.turbofeed.gateway.exception.BizException;
+import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
 import com.turbofeed.gateway.service.feed.FeedTimelineStore;
@@ -35,6 +36,7 @@ public class MediaReviewService {
     private final StringRedisTemplate redisTemplate;
     private final ContentModeration contentModeration;
     private final FeedTimelineStore feedTimelineStore;
+    private final MediaProperties properties;
 
     private static final String STATUS_KEY_PREFIX = "tf:media:status:";
 
@@ -64,13 +66,31 @@ public class MediaReviewService {
             }
             return;
         }
-        // 首投（或仍在 PENDING）：落库受理态（主键幂等，重复 insert 不报错），机审，流转终态
+        // 首投（或仍在 PENDING）：落库受理态（主键幂等，重复 insert 不报错）
         mediaRepository.insert(event.mediaId(), userId, event.url(), MediaStatus.PENDING, event.occurredAt());
-        MediaStatus moderation = contentModeration.moderate(event.mediaId(), userId, event.url());
-        MediaStatus target = review(event.mediaId(), userId, moderation == MediaStatus.APPROVED);
-        if (target == MediaStatus.APPROVED) {
-            feedTimelineStore.append(new MediaItem(event.mediaId(), event.url(), target, event.occurredAt()));
+
+        // —— 机审（第一阶段，始终执行）——
+        // 真实项目此处接入内容安全模型（鉴黄 / 暴恐 / 涉政 OCR 等），返回 APPROVED / REJECTED。
+        // 当前 AutoPassModeration 为占位桩，恒返回 APPROVED（仅演示「机审通过」分支）；
+        // 后续替换为真实模型即可，审核主流程无需改动。机审结果仅作辅助记录，不直接决定终态。
+        MediaStatus machine = contentModeration.moderate(event.mediaId(), userId, event.url());
+
+        if (properties.getReview().isAutoPass()) {
+            // 演示占位：跳过真人审核，机审桩结果直接放行（仅供本地联调 / 克隆即跑）。
+            // 生产务必关闭（auto-pass=false），否则 UGC 内容裸奔涉政涉黄。
+            MediaStatus target = review(event.mediaId(), userId, machine == MediaStatus.APPROVED);
+            if (target == MediaStatus.APPROVED) {
+                feedTimelineStore.append(new MediaItem(event.mediaId(), event.url(), target, event.occurredAt()));
+            }
+            return;
         }
+
+        // —— 真人审核（第二阶段，默认开启）——
+        // 机审结果仅作辅助记录（当前桩恒 APPROVED）；内容一律停在 PENDING，
+        // 由审核人员在审核页（review.html / admin.html → /api/admin/media/review?mediaId=...&approve=...）
+        // 最终裁定 通过 / 驳回。通过即写入公域推荐流，驳回仅本人「我的内容」可见。
+        // 此分支没有任何自动放行逻辑——即「真审核」闸，结构上不可能自动过。
+        log.info("机审完成（机审结果={}），内容转入人工审核队列，等待审核人员裁定: mediaId={}, userId={}", machine, event.mediaId(), userId);
     }
 
     /**
@@ -97,6 +117,43 @@ public class MediaReviewService {
         evictCache(mediaId);
         log.info("审核状态流转: mediaId={}, {} -> {}", mediaId, current, target);
         return target;
+    }
+
+    /**
+     * 管理员审核入口：按 mediaId 解析归属 userId（mediaId 内含 userId 分片键），
+     * 驱动 PENDING → APPROVED / REJECTED。供 {@code /api/admin/media/review?mediaId=...} 调用，
+     * 是「真审核」闸的执行点（机审 auto-pass 关闭时，仅此入口能把内容翻成终态）。
+     *
+     * @param mediaId  内容唯一标识（media/{userId}/{uuid}.{ext}）
+     * @param approved true=通过 / false=驳回
+     * @return 审核后的终态
+     */
+    public MediaStatus reviewByMediaId(String mediaId, boolean approved) {
+        long userId = parseUserId(mediaId);
+        MediaStatus target = review(mediaId, userId, approved);
+        if (target == MediaStatus.APPROVED) {
+            // 通过即写入公域时间线（与 auto-pass 分支口径一致）；
+            // review() 只翻状态，不碰时间线，故此处补 append，保证内容进推荐流。
+            MediaItem item = mediaRepository.findMedia(mediaId, userId);
+            if (item != null) {
+                feedTimelineStore.append(new MediaItem(item.mediaId(), item.url(), MediaStatus.APPROVED, item.createdAt()));
+            }
+        }
+        return target;
+    }
+
+    /** 从 mediaId（media/{userId}/{uuid}.{ext}）解析归属 userId，用于审核接口分片路由。 */
+    private static long parseUserId(String mediaId) {
+        // mediaId 形如 media/{userId}/{uuid}.{ext}，第二段即分片键 userId
+        String[] parts = mediaId.split("/");
+        if (parts.length < 2) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "非法的 mediaId: " + mediaId);
+        }
+        try {
+            return Long.parseLong(parts[1]);
+        } catch (NumberFormatException e) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "mediaId 中的 userId 非法: " + mediaId);
+        }
     }
 
     /**

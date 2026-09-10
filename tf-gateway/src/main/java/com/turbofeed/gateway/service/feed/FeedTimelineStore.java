@@ -103,4 +103,36 @@ public class FeedTimelineStore {
     private String bucketOf(Instant t) {
         return DateTimeFormatter.BASIC_ISO_DATE.format(t.atZone(ZoneId.systemDefault()).toLocalDate());
     }
+
+    /**
+     * 从公域时间线移除某条内容（用户删除已通过内容时调用）。
+     *
+     * <p>内容可能落在最近 {@code MERGE_BUCKETS} 天任一桶内，因此遍历这些桶、解析成员比对
+     * mediaId 后 {@code ZREM}。fail-open：任一桶异常只告警不抛，不阻断删除主流程。</p>
+     *
+     * @param mediaId 内容唯一标识
+     */
+    public void remove(String mediaId) {
+        LocalDate today = LocalDate.now();
+        for (int d = 0; d < MERGE_BUCKETS; d++) {
+            String key = TL_PREFIX + today.minusDays(d).format(DateTimeFormatter.BASIC_ISO_DATE);
+            try {
+                Set<String> jsons = redisTemplate.opsForZSet()
+                        .reverseRangeByScore(key, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, 0, PER_BUCKET_CAP);
+                if (jsons == null) continue;
+                for (String json : jsons) {
+                    try {
+                        MediaItem it = objectMapper.readValue(json, MediaItem.class);
+                        if (mediaId.equals(it.mediaId())) {
+                            redisTemplate.opsForZSet().remove(key, json);
+                        }
+                    } catch (Exception ignore) {
+                        // 单条损坏不影响整体
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("时间线移除失败（不影响主流程）: mediaId={}, key={}, {}", mediaId, key, e.getMessage());
+            }
+        }
+    }
 }

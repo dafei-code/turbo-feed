@@ -78,6 +78,26 @@ public class LocalDiskStorageClient implements MediaStorageClient {
     }
 
     /**
+     * 物理删除本地文件（用户删除内容时调用）。
+     *
+     * <p>mediaId 即本地相对路径（{@code {userId}/{uuid}.{ext}}），经
+     * {@link #resolveTargetPath} 归一化并做路径穿越校验后删除。文件不存在时
+     * {@code Files.deleteIfExists} 幂等返回，不抛；仅删除失败时（权限/占用）告警。</p>
+     *
+     * @param mediaId 内容唯一标识（即本地相对路径）
+     */
+    @Override
+    public void delete(String mediaId) {
+        Path target = resolveTargetPath(mediaId);
+        try {
+            boolean removed = Files.deleteIfExists(target);
+            log.info("本地文件{}: mediaId={}, path={}", removed ? "已删除" : "不存在(跳过)", mediaId, target);
+        } catch (IOException e) {
+            log.warn("本地文件删除失败: mediaId={}, path={}, {}", mediaId, target, e.getMessage());
+        }
+    }
+
+    /**
      * 把 mediaId 解析为本地落盘路径，并做路径穿越校验。
      *
      * @throws BizException mediaId 归一化后越出存储根目录（理论上不会发生，防御性检查）

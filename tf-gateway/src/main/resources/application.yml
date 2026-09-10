@@ -105,6 +105,10 @@ turbofeed:
     mq:
       topic: turbofeed-media-uploaded
       consumer-group: turbofeed-media-review-group
+    # 审核模式：false=真审核闸（上传停在 PENDING，由管理员审核接口通过/驳回）；
+    # true=演示占位（AutoPassModeration 机审桩直接放行，仅本地联调用）。生产务必 false。
+    review:
+      auto-pass: false
   # MQ（RocketMQ）事件总线：
   # 本地开发已部署 RocketMQ（Docker: rmqnamesrv 127.0.0.1:9876），启用跨进程投递。
   # 若未部署 RocketMQ 且希望「克隆即跑」，改为 false 回退到本地 Spring 事件。

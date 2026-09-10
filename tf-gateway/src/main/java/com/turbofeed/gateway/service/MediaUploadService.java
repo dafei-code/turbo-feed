@@ -11,6 +11,7 @@ import com.turbofeed.gateway.security.UserContext;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.event.MediaEventPublisher;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
+import com.turbofeed.gateway.service.feed.FeedTimelineStore;
 import com.turbofeed.gateway.service.idempotency.UploadIdempotency;
 import com.turbofeed.gateway.service.processing.ImageProcessingChain;
 import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
@@ -22,6 +23,7 @@ import com.turbofeed.shared.result.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -60,6 +62,11 @@ public class MediaUploadService {
     private final UploadRateLimiter rateLimiter;
     private final UploadIdempotency idempotency;
     private final MediaJdbcRepository mediaRepository;
+    private final FeedTimelineStore feedTimelineStore;
+    private final StringRedisTemplate redisTemplate;
+
+    /** 单条状态缓存前缀（与 MediaReviewService 一致，删除时精确失效） */
+    private static final String STATUS_KEY_PREFIX = "tf:media:status:";
 
     /**
      * 批量上传图片，返回可访问 URL 列表。
@@ -191,5 +198,40 @@ public class MediaUploadService {
             log.warn("图片处理失败，降级使用原图: format={}", format, e);
             return null;
         }
+    }
+
+    /**
+     * 删除用户自己上传的内容：<b>物理删除（对象存储）+ 逻辑删除（MySQL）</b> 两段式。
+     *
+     * <p><b>为什么两段</b>：物理对象一旦删除不可恢复，故先删 MinIO（或本地磁盘）对象，
+     * 失败仅告警不阻断（对象可能已不存在）；再在 MySQL 把状态置 {@link MediaStatus#DELETED}
+     * （逻辑删除，保留审计痕迹）。随后清理公域时间线（若该内容曾 APPROVED 入流）与单条状态缓存，
+     * 保证删除后立即从「我的内容」与公域发现流消失。</p>
+     *
+     * <p><b>越权防护</b>：{@code userId} 来自 JWT（服务端签发，非客户端可控），与 mediaId 一并
+     * 下传仓库的 {@code (media_id, user_id)} 条件——即使传入他人 mediaId，因分片键不匹配也删不到
+     * 别人的行。</p>
+     *
+     * @param mediaId 内容唯一标识（含 user_id 分片键，形如 media/{userId}/{uuid}.{ext}）
+     * @param userId  归属用户（来自 JWT）
+     */
+    public void delete(String mediaId, String userId) {
+        // 1) 物理删除：对象存储删除（fail-open，对象不存在也继续）
+        try {
+            storageClient.delete(mediaId);
+        } catch (Exception e) {
+            log.warn("物理删除异常（继续逻辑删除）: mediaId={}, {}", mediaId, e.getMessage());
+        }
+        // 2) 逻辑删除：MySQL 标记 DELETED（带 user_id 分片键，仅删本人内容）
+        mediaRepository.delete(mediaId, Long.parseLong(userId));
+        // 3) 清理公域时间线（若曾 APPROVED 入流），删除后立即移出发现流
+        feedTimelineStore.remove(mediaId);
+        // 4) 失效单条状态缓存（旁路缓存 fail-open）
+        try {
+            redisTemplate.delete(STATUS_KEY_PREFIX + mediaId);
+        } catch (Exception e) {
+            log.warn("状态缓存失效失败（不影响主流程）: mediaId={}, {}", mediaId, e.getMessage());
+        }
+        log.info("内容已删除（物理+逻辑）: mediaId={}, userId={}", mediaId, userId);
     }
 }

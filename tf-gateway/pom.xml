@@ -74,6 +74,85 @@
             <artifactId>shardingsphere-jdbc</artifactId>
             <version>5.5.3</version>
         </dependency>
+        <!-- ShardingSphere classpath: URL 加载器：shardingsphere-jdbc 5.5.3 的上游 pom 误把
+             shardingsphere-infra-url-classpath 声明为 test scope，不会传递到使用方的运行时
+             classpath，导致 jdbc:shardingsphere:classpath:shardingsphere-config.yaml 初始化报
+             SPI-00001: No implementation class load from SPI 'ShardingSphereModeConfigurationURLLoader'
+             with type 'classpath:'（HikariPool-1 起不来，首个碰库请求 500）。
+             接口在 5.5.0→5.5.3 间由 ShardingSphereURLLoader 改名而来，实现类 ClassPathURLLoader
+             仍在该模块。此处显式声明以覆盖上游 test scope（直接声明优先于传递依赖的 scope）。 -->
+        <dependency>
+            <groupId>org.apache.shardingsphere</groupId>
+            <artifactId>shardingsphere-infra-url-classpath</artifactId>
+            <version>5.5.3</version>
+        </dependency>
+        <!-- ⚠️ ShardingSphere 5.5.3 上游打包回归：shardingsphere-jdbc:5.5.3.pom 把以下运行期
+             必需模块全部声明为 <scope>test</scope>（见其 pom 第 91-135 行），不会传递到使用方的
+             运行时 classpath，导致驱动初始化连环失败：
+               · shardingsphere-sharding-core            → 缺则 YAML 解析报 Invalid tag: !SHARDING
+               · shardingsphere-parser-sql-engine-mysql  → 缺则无法解析 MySQL 业务 SQL
+               · shardingsphere-parser-sql-engine-sql92  → 通用 SQL 解析引擎（兜底）
+               · shardingsphere-infra-data-source-pool-hikari → 缺则无法创建 Hikari 连接池数据源
+               · shardingsphere-standalone-mode-repository-memory → 缺则 classpath 配置 standalone 内存仓库加载失败
+               · shardingsphere-authority-simple         → 默认权限提供器（缺则 authority rule 构建失败）
+             此处逐一显式声明 5.5.3 以覆盖上游 test scope（直接声明优先于传递依赖 scope）。
+             唯一未声明的是 shardingsphere-test-infra-fixture-database（纯上游测试设施，使用方无需）。 -->
+        <dependency>
+            <groupId>org.apache.shardingsphere</groupId>
+            <artifactId>shardingsphere-sharding-core</artifactId>
+            <version>5.5.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.shardingsphere</groupId>
+            <artifactId>shardingsphere-parser-sql-engine-mysql</artifactId>
+            <version>5.5.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.shardingsphere</groupId>
+            <artifactId>shardingsphere-parser-sql-engine-sql92</artifactId>
+            <version>5.5.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.shardingsphere</groupId>
+            <artifactId>shardingsphere-infra-data-source-pool-hikari</artifactId>
+            <version>5.5.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.shardingsphere</groupId>
+            <artifactId>shardingsphere-standalone-mode-repository-memory</artifactId>
+            <version>5.5.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.shardingsphere</groupId>
+            <artifactId>shardingsphere-authority-simple</artifactId>
+            <version>5.5.3</version>
+        </dependency>
+        <!-- 密码哈希：Spring Security Crypto 的 BCryptPasswordEncoder（仅加密工具类，
+             不引入 Spring Security Web / 鉴权自动配置；版本由 spring-boot-dependencies BOM 托管，无需写 version）。 -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+        <!-- MySQL 驱动：ShardingSphere-JDBC 不内置任何数据库驱动，必须由应用侧显式声明！
+             否则底层 Hikari 池建连时 ClassNotFoundException 被包装成
+             "Failed to initialize pool: null"（message 为 null，根因被吞）。
+             版本由 spring-boot-dependencies BOM 托管（Spring Boot 3.4.3 → mysql-connector-j 8.0.33/9.x，
+             本地 .m2 已有 8.0.33，兼容）。 -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+        </dependency>
+        <!-- ShardingSphere 5.5.3 运行期依赖 commons-lang3（SystemSchemaManager 静态初始化引用
+             org.apache.commons.lang3.Strings）。⚠️ 关键坑：spring-boot-dependencies 3.4.3 BOM 把
+             commons-lang3 锁定为 3.17.0，而 org.apache.commons.lang3.Strings 这个 class 直到
+             commons-lang3 3.18.0 才引入（3.17.0 及更早版本根本没有 Strings.class），导致
+             NoClassDefFoundError: org/apache/commons/lang3/Strings。此处显式锁 3.18.0 覆盖 BOM。
+             本地 .m2 已有 3.18.0（含 Strings 类），无需联网下载；根 pom dependencyManagement 也同步覆盖。 -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>3.18.0</version>
+        </dependency>
         <!-- RocketMQ：媒体上传事件异步化（Observer 事件总线的跨进程实现）。
              2.3.x 兼容 Spring Boot 3.x（2.3.4 已修复 MessageModel 包路径冲突）。
              默认不激活：未配置 rocketmq.name-server 时 starter 自动配置不生效，

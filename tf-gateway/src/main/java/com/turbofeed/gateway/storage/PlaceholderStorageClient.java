@@ -42,4 +42,14 @@ public class PlaceholderStorageClient implements MediaStorageClient {
         log.debug("占位存储（未真实落盘）: mediaId={}, size={}B", mediaId, size);
         return new StoredMedia(mediaId, properties.getPublicUrlBase() + mediaId);
     }
+
+    /**
+     * 占位存储无真实对象，删除为无操作（仅记录）。
+     *
+     * @param mediaId 内容唯一标识
+     */
+    @Override
+    public void delete(String mediaId) {
+        log.debug("占位存储无物理对象可删（无操作）: {}", mediaId);
+    }
 }

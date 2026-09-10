@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<html lang="zh-CN" data-page-node-id="iOtGowQcRhynZlQn0pWdh3">
+<head data-page-node-id="6OeLy7HfhZIyY7cEkpnNcW">
+<meta charset="UTF-8" data-page-node-id="KZoTPabTtRdHczqCmQi1Sd">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="orOmrukizLdDTZ5oMemhZS">
 <title>TurboFeed · 管理后台</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -375,6 +375,18 @@
     margin: 10px 2px 12px;
     line-height: 1.6;
   }
+  .mini-btn {
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .mini-btn.ok:hover { border-color: var(--ok); color: var(--ok); }
+  .mini-btn.bad:hover { border-color: var(--brand); color: var(--brand); }
   .thumb-strip {
     display: flex;
     flex-wrap: wrap;
@@ -413,219 +425,210 @@
   }
 </style>
 </head>
-<body>
+<body data-page-node-id="VSv5fZOdIo7OcvAYu6fDqb">
 
 <!-- ================= 侧边栏 ================= -->
-<aside class="sidebar">
-  <div class="side-logo">
-    <div class="mark">T</div>
-    <div class="name">Turbo<em>Feed</em></div>
+<aside class="sidebar" data-page-node-id="H0ry4aIKWe0w15jGQrAwX9">
+  <div class="side-logo" data-page-node-id="jHE47jcfAbeGjeOSvoVz7E">
+    <div class="mark" data-page-node-id="mumC2YqmPIspEabpN0jQsI">T</div>
+    <div class="name" data-page-node-id="iIgT7eZIkYxCCdmDsRHb5p">Turbo<em data-page-node-id="H9hNbJvU0uZBcdBWY07OX2">Feed</em></div>
   </div>
 
-  <nav class="nav">
-    <div class="nav-group">总览</div>
-    <div class="nav-item active">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+  <nav class="nav" data-page-node-id="GMcex00Xy0DJd29WsOYBzD">
+    <div class="nav-group" data-page-node-id="dLcqnXs51wUTIGKBe7gACH">总览</div>
+    <div class="nav-item active" data-page-node-id="zCwqO3fFTogKVUHcz8iIXR">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="oF3z4lnqDCBjvAasY3EDIG"><rect x="3" y="3" width="7" height="9" rx="1" data-page-node-id="CQSM4GsIsYxAXAodoUeekz"/><rect x="14" y="3" width="7" height="5" rx="1" data-page-node-id="8mEjBqrdUAAB2e00mDosxp"/><rect x="14" y="12" width="7" height="9" rx="1" data-page-node-id="pKNASpujSArbsSY56GbX8D"/><rect x="3" y="16" width="7" height="5" rx="1" data-page-node-id="c8JEvYSJRhgfw19ydNKSgB"/></svg>
       数据看板
     </div>
 
-    <div class="nav-group">FEED 流</div>
-    <div class="nav-item">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.3"/><polyline points="21 3 21 9 15 9"/></svg>
+    <div class="nav-group" data-page-node-id="voFJNL4yPeY5T1gEPh5MV2">FEED 流</div>
+    <div class="nav-item" data-page-node-id="cqyjb1dHttCdLtD6ReOruo">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="EEkUG6TRK8FlOQ1J3ntbFC"><path d="M21 12a9 9 0 1 1-2.6-6.3" data-page-node-id="TBi6pCE1NhcDlApL3aWpvX"/><polyline points="21 3 21 9 15 9" data-page-node-id="curbkgPhryVsy5ysUb07v6"/></svg>
       收件箱 Inbox
     </div>
-    <div class="nav-item">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg>
+    <div class="nav-item" data-page-node-id="NrNebj5X8nWgk414qgANe9">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="7hnoe81ytcs7s6DGjR57lW"><path d="M22 2 11 13" data-page-node-id="tH0lkqU5IKFPkUTvqdNfGl"/><path d="M22 2 15 22l-4-9-9-4Z" data-page-node-id="F1FZWaYasunZDJGpf2RaK3"/></svg>
       发件箱 / 扇出
     </div>
 
-    <div class="nav-group">核心能力</div>
-    <div class="nav-item">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2s5 4.9 5 10a5 5 0 0 1-10 0c0-2 1-4 2-5 0 2 1 3 2 3 0-3 1-6 1-8Z"/></svg>
+    <div class="nav-group" data-page-node-id="ngVUA6IMY64BmvF485wWF0">核心能力</div>
+    <div class="nav-item" data-page-node-id="CFFCCaWTL8bV0rs0UALv4O">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="dC80pJ7909Dv6OidmT7oHi"><path d="M12 2s5 4.9 5 10a5 5 0 0 1-10 0c0-2 1-4 2-5 0 2 1 3 2 3 0-3 1-6 1-8Z" data-page-node-id="EJJLcmpVUdC01C8DgpFAnC"/></svg>
       热点探测
     </div>
-    <div class="nav-item">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
+    <div class="nav-item" data-page-node-id="GGKfwHYjKD3ZcSi6OwLY1t">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="pJtHn1HTUnKEA0zVpeKvBM"><line x1="12" y1="20" x2="12" y2="10" data-page-node-id="Tfn9PJlCauunKkwoSLBVOU"/><line x1="18" y1="20" x2="18" y2="4" data-page-node-id="4o2o7C2bqINCHaHru27wnf"/><line x1="6" y1="20" x2="6" y2="16" data-page-node-id="HrPGiOyF6ZAWXMpyN3C1ql"/></svg>
       计数中心
     </div>
 
-    <div class="nav-group">工程</div>
-    <div class="nav-item">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+    <div class="nav-group" data-page-node-id="cp90l5ROH3BahlpgYYWGBr">工程</div>
+    <div class="nav-item" data-page-node-id="cHb8w4HYzS7LqjHACCD6aU">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="4v9NWLpXSSpd59T2toYfhA"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" data-page-node-id="xNBZ3DY6GZysDEDUx8uqx9"/></svg>
       压测中心
     </div>
-    <div class="nav-item">
-      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+    <div class="nav-item" data-page-node-id="MfeExA4JwNnycvp91keWdr">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="D4Y7leBb6LGCI2Qz8PCQv0"><circle cx="12" cy="12" r="3" data-page-node-id="0bQ74HykFpzGcfJgs7R5pf"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" data-page-node-id="ZQsajJ1xSoBrDuwTYzMNzY"/></svg>
       系统设置
     </div>
   </nav>
 
-  <div class="side-user">
-    <div class="avatar" id="sideUserAvatar">A</div>
-    <div class="info">
-      <div class="n" id="sideUserName">admin</div>
-      <div class="r">超级管理员</div>
+  <div class="side-user" data-page-node-id="CPVnWJpJiLlBpvIKsinYzi">
+    <div class="avatar" id="sideUserAvatar" data-page-node-id="yei4kDhmTR8a5IVBxuucQx">A</div>
+    <div class="info" data-page-node-id="sJNE2dTdBVI6vKA9rmTfAF">
+      <div class="n" id="sideUserName" data-page-node-id="R5SgyU2o6njJZYmMxn4L9i">admin</div>
+      <div class="r" data-page-node-id="RYY42cpc5dBbkcoL0zMqsu">超级管理员</div>
     </div>
-    <button class="logout-btn" onclick="location.href='login.html'">退出</button>
+    <button class="logout-btn" onclick="location.href='login.html'" data-page-node-id="BKofVrQWfk78IYxODSPmRa">退出</button>
   </div>
 </aside>
 
 <!-- ================= 主区域 ================= -->
-<div class="main">
-  <header class="topbar">
-    <div class="crumb"><span> TurboFeed /</span> <b>数据看板</b></div>
-    <div class="search">
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#8b98ab" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input placeholder="搜索内容ID / 用户ID…">
+<div class="main" data-page-node-id="0Fs0RfhU32nEioN5SirDzp">
+  <header class="topbar" data-page-node-id="8UG5Re3sPGkOHhd6Bk4pie">
+    <div class="crumb" data-page-node-id="qrgVj6LyCyqKtSfJN0MCdx"><span data-page-node-id="zBb9CunHuFRAQsUmyPUf1a"> TurboFeed /</span> <b data-page-node-id="vlOa9ARP5DvgxJR2sdWhi1">数据看板</b></div>
+    <div class="search" data-page-node-id="AAT1cdl84rQ1qGAfBhMC9i">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#8b98ab" stroke-width="2" data-page-node-id="fpyPJ7OaP5FAUWXh6W9w8E"><circle cx="11" cy="11" r="8" data-page-node-id="3JmqqfpWDKtGNp6ZlyLFRC"/><line x1="21" y1="21" x2="16.65" y2="16.65" data-page-node-id="QKysnzW26kmICwkbQnn2Yp"/></svg>
+      <input placeholder="搜索内容ID / 用户ID…" data-page-node-id="jD3zafYwAeCkRhld3FlFQD">
     </div>
-    <div class="badge-dot">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#8b98ab" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+    <div class="badge-dot" data-page-node-id="zcqG5uTng3A96CDUAqCcRv">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#8b98ab" stroke-width="2" data-page-node-id="Cmd9JE9oPEhzkTAFRRuzEL"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" data-page-node-id="LnczvtJM4CZH2mXIB4Qn0r"/><path d="M13.73 21a2 2 0 0 1-3.46 0" data-page-node-id="Xd0xkI17dSqtLpuaoCypQK"/></svg>
     </div>
   </header>
 
-  <main class="content">
+  <main class="content" data-page-node-id="hMFgcetDK4VqtsbqP5zM88">
 
     <!-- 统计卡片 -->
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="t">Feed 时间线 QPS
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#8b98ab" stroke-width="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+    <div class="stat-grid" data-page-node-id="K0OwAgTczojaTkWAJ99ys1">
+      <div class="stat-card" data-page-node-id="1VNF9KKPIPZlPz3HYdvAq9">
+        <div class="t" data-page-node-id="yC4nCtkVwWJe8flPpqKpSL">Feed 时间线 QPS
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#8b98ab" stroke-width="2" data-page-node-id="ig5Ll6ILuEFQuA3HhF8LzI"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17" data-page-node-id="eEmEBvgnEGTUakHZhH2IQB"/><polyline points="16 7 22 7 22 13" data-page-node-id="oGwNJVGepAaVIXAmvFk4GV"/></svg>
         </div>
-        <div class="v">48,321<small>req/s</small></div>
-        <div class="delta up">▲ 12.4% 较昨日</div>
+        <div class="v" data-page-node-id="CZrMLXNfu2GP7HEUOYmff6">48,321<small data-page-node-id="KoOjaqH80X4u05mGHwj8QB">req/s</small></div>
+        <div class="delta up" data-page-node-id="iwnGCRGkamUC9u9zBPt2On">▲ 12.4% 较昨日</div>
       </div>
-      <div class="stat-card">
-        <div class="t">收件箱写入延迟 P99
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#8b98ab" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <div class="stat-card" data-page-node-id="vktwNOBNMUUDuiBdXeUxgZ">
+        <div class="t" data-page-node-id="PJvBrxpeJQAv16zIUrS9iq">收件箱写入延迟 P99
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#8b98ab" stroke-width="2" data-page-node-id="HyN1oseUMTHVq8PD4HYkcQ"><circle cx="12" cy="12" r="10" data-page-node-id="pZBgqv6Bs0SY7zNOUvgX6O"/><polyline points="12 6 12 12 16 14" data-page-node-id="nbjWNeHilyp7ivPV8PqA6P"/></svg>
         </div>
-        <div class="v">8.6<small>ms</small></div>
-        <div class="delta up">▲ 0.8ms 较昨日</div>
+        <div class="v" data-page-node-id="w4xtezC1AIg3TGnX07y2Pw">8.6<small data-page-node-id="l7pWHVskWfoQSV68LT77Qv">ms</small></div>
+        <div class="delta up" data-page-node-id="piqBtPcYtBc6hHDkhs9iCt">▲ 0.8ms 较昨日</div>
       </div>
-      <div class="stat-card">
-        <div class="t">日活跃用户 (DAU)
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#8b98ab" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <div class="stat-card" data-page-node-id="94hZ13KdNHlAlc2NMEJrRs">
+        <div class="t" data-page-node-id="zknfWKw4ECzlVM52JCX5CE">日活跃用户 (DAU)
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#8b98ab" stroke-width="2" data-page-node-id="F3oaQS1uAuPC3WDRYEyRkh"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" data-page-node-id="7wq768qyf9UHDUwdEPkcqJ"/><circle cx="9" cy="7" r="4" data-page-node-id="WsFiUn95eZzVzGnHYJ4iEJ"/><path d="M23 21v-2a4 4 0 0 0-3-3.87" data-page-node-id="Fir5fOUa9akrZmCLcXpEAx"/><path d="M16 3.13a4 4 0 0 1 0 7.75" data-page-node-id="tvDTKntoBotmNlqfqgWbch"/></svg>
         </div>
-        <div class="v">2,384,905<small></small></div>
-        <div class="delta up">▲ 5.2% 较昨日</div>
+        <div class="v" data-page-node-id="rErZkumXfQPzhZYi3y0CLf">2,384,905<small data-page-node-id="EakB2DMHQDWNaJ61vhYOhp"></small></div>
+        <div class="delta up" data-page-node-id="N1ylmIojQx47XDljZkjrVL">▲ 5.2% 较昨日</div>
       </div>
-      <div class="stat-card">
-        <div class="t">当前热点内容数
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#8b98ab" stroke-width="2"><path d="M12 2s5 4.9 5 10a5 5 0 0 1-10 0c0-2 1-4 2-5 0 2 1 3 2 3 0-3 1-6 1-8Z"/></svg>
+      <div class="stat-card" data-page-node-id="i8UWenELTLNWHLLs5PFUji">
+        <div class="t" data-page-node-id="UDRf9wIQblOnSG0m87ZXrK">当前热点内容数
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#8b98ab" stroke-width="2" data-page-node-id="SzYUV4nVk1DFBmPfOWhka4"><path d="M12 2s5 4.9 5 10a5 5 0 0 1-10 0c0-2 1-4 2-5 0 2 1 3 2 3 0-3 1-6 1-8Z" data-page-node-id="DaSvdYAgphA1MTaHAZh8rZ"/></svg>
         </div>
-        <div class="v">37<small>条</small></div>
-        <div class="delta down">▼ 3 条已降级冷却</div>
+        <div class="v" data-page-node-id="ZRXlwHBt0V1qeoVGwnZnFL">37<small data-page-node-id="vHSdNv0d0j5ivFCEgJq7cJ">条</small></div>
+        <div class="delta down" data-page-node-id="JVYTeyGOI4YEsA0R7Jdd3N">▼ 3 条已降级冷却</div>
       </div>
     </div>
 
     <!-- 图表行 -->
-    <div class="chart-row">
-      <div class="panel">
-        <div class="p-head">
-          <div class="title">Feed 流量趋势（近 60 分钟）</div>
-          <div class="legend">
-            <span><i style="background:#3d7eff"></i>读 QPS</span>
-            <span><i style="background:#ff4d5e"></i>写 QPS</span>
+    <div class="chart-row" data-page-node-id="6EikZNnGMBs2r1gq2W6AuA">
+      <div class="panel" data-page-node-id="hHZPrmVGrOoYd3HkgjZrxf">
+        <div class="p-head" data-page-node-id="3HfdLGtoV3U5XNIAtQcKLU">
+          <div class="title" data-page-node-id="nvpulf79g2uVfWtLL04yeS">Feed 流量趋势（近 60 分钟）</div>
+          <div class="legend" data-page-node-id="zpxxxb6ieu2UOAwACGmdGs">
+            <span data-page-node-id="0KRIPkiu6UDz4mDkVoEmKf"><i style="background:#3d7eff" data-page-node-id="dvL2AcLW2IMknU5XmgB46N"></i>读 QPS</span>
+            <span data-page-node-id="q5Cb6voF2bjq36o2XRMZqn"><i style="background:#ff4d5e" data-page-node-id="Wdexi4T3s4RPpFRwR87e5m"></i>写 QPS</span>
           </div>
         </div>
-        <svg viewBox="0 0 640 220" width="100%" height="220" preserveAspectRatio="none">
-          <defs>
-            <linearGradient id="gRead" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#3d7eff" stop-opacity=".35"/>
-              <stop offset="100%" stop-color="#3d7eff" stop-opacity="0"/>
+        <svg viewBox="0 0 640 220" width="100%" height="220" preserveAspectRatio="none" data-page-node-id="g0k57LohRgtwc1pg5xBphN">
+          <defs data-page-node-id="VlZ4rmW5EWLI6j6ylcbrnF">
+            <linearGradient id="gRead" x1="0" y1="0" x2="0" y2="1" data-page-node-id="6cKoDFkghRREbiyTfAf82B">
+              <stop offset="0%" stop-color="#3d7eff" stop-opacity=".35" data-page-node-id="nQr2Uv5blD4is5svDpk23H"/>
+              <stop offset="100%" stop-color="#3d7eff" stop-opacity="0" data-page-node-id="ROMLWzl8rrcNDmaG4f4F0k"/>
             </linearGradient>
-            <linearGradient id="gWrite" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#ff4d5e" stop-opacity=".3"/>
-              <stop offset="100%" stop-color="#ff4d5e" stop-opacity="0"/>
+            <linearGradient id="gWrite" x1="0" y1="0" x2="0" y2="1" data-page-node-id="DA4Mqo1o31epT5Hub3gjem">
+              <stop offset="0%" stop-color="#ff4d5e" stop-opacity=".3" data-page-node-id="ARFFjQCc7uWPyNP6mcjia1"/>
+              <stop offset="100%" stop-color="#ff4d5e" stop-opacity="0" data-page-node-id="obk3GnXVAgUvk0de2oKzHc"/>
             </linearGradient>
           </defs>
           <!-- 网格 -->
-          <g stroke="#2d3646" stroke-width="1">
-            <line x1="0" y1="40" x2="640" y2="40"/>
-            <line x1="0" y1="90" x2="640" y2="90"/>
-            <line x1="0" y1="140" x2="640" y2="140"/>
-            <line x1="0" y1="190" x2="640" y2="190"/>
+          <g stroke="#2d3646" stroke-width="1" data-page-node-id="zDKbOZ3JOG5AQFZ8jsFgPg">
+            <line x1="0" y1="40" x2="640" y2="40" data-page-node-id="eT8QsWxGuDbSQ62thO9LyQ"/>
+            <line x1="0" y1="90" x2="640" y2="90" data-page-node-id="1H9UorBQGivGrHoE0SnDG1"/>
+            <line x1="0" y1="140" x2="640" y2="140" data-page-node-id="9vtt0zNBzda9qFecaAE8cY"/>
+            <line x1="0" y1="190" x2="640" y2="190" data-page-node-id="UXtmHsVck6yHO2ElqCkVex"/>
           </g>
           <!-- 读曲线 -->
-          <path d="M0,150 C40,140 60,120 100,118 C140,116 160,90 210,88 C260,86 280,60 330,58 C380,56 400,74 450,66 C500,58 520,40 570,36 C600,34 625,42 640,40 L640,220 L0,220 Z" fill="url(#gRead)"/>
-          <path d="M0,150 C40,140 60,120 100,118 C140,116 160,90 210,88 C260,86 280,60 330,58 C380,56 400,74 450,66 C500,58 520,40 570,36 C600,34 625,42 640,40" fill="none" stroke="#3d7eff" stroke-width="2.5"/>
+          <path d="M0,150 C40,140 60,120 100,118 C140,116 160,90 210,88 C260,86 280,60 330,58 C380,56 400,74 450,66 C500,58 520,40 570,36 C600,34 625,42 640,40 L640,220 L0,220 Z" fill="url(#gRead)" data-page-node-id="pma8T4QjdsrMN3z5xLR7DA"/>
+          <path d="M0,150 C40,140 60,120 100,118 C140,116 160,90 210,88 C260,86 280,60 330,58 C380,56 400,74 450,66 C500,58 520,40 570,36 C600,34 625,42 640,40" fill="none" stroke="#3d7eff" stroke-width="2.5" data-page-node-id="q8u7CoO69UumBID8XE69bb"/>
           <!-- 写曲线 -->
-          <path d="M0,190 C50,185 80,178 120,176 C160,174 190,160 230,158 C270,156 300,148 340,150 C380,152 410,138 450,136 C490,134 520,128 560,126 C600,124 625,120 640,118 L640,220 L0,220 Z" fill="url(#gWrite)"/>
-          <path d="M0,190 C50,185 80,178 120,176 C160,174 190,160 230,158 C270,156 300,148 340,150 C380,152 410,138 450,136 C490,134 520,128 560,126 C600,124 625,120 640,118" fill="none" stroke="#ff4d5e" stroke-width="2.5"/>
+          <path d="M0,190 C50,185 80,178 120,176 C160,174 190,160 230,158 C270,156 300,148 340,150 C380,152 410,138 450,136 C490,134 520,128 560,126 C600,124 625,120 640,118 L640,220 L0,220 Z" fill="url(#gWrite)" data-page-node-id="nQU847Cfh8iPZUItZqSbj4"/>
+          <path d="M0,190 C50,185 80,178 120,176 C160,174 190,160 230,158 C270,156 300,148 340,150 C380,152 410,138 450,136 C490,134 520,128 560,126 C600,124 625,120 640,118" fill="none" stroke="#ff4d5e" stroke-width="2.5" data-page-node-id="yl280LJFMHFA72GHwMPJ2U"/>
         </svg>
       </div>
 
-      <div class="panel">
-        <div class="p-head">
-          <div class="title">热点榜 TOP5（滑动窗口）</div>
-          <div class="tabs"><span class="on">实时</span><span>小时</span><span>日</span></div>
+      <div class="panel" data-page-node-id="sC2GE4mU2Ky9Ebwjv5YpQ0">
+        <div class="p-head" data-page-node-id="goCLx0pkPJoE25m4uzZzEG">
+          <div class="title" data-page-node-id="LMDpAuq3Z24ECydkun1Dhw">热点榜 TOP5（滑动窗口）</div>
+          <div class="tabs" data-page-node-id="u8AjcO47TQSXEKg315HXTI"><span class="on" data-page-node-id="5ZaNFxcfMYF0FYoyj7X1H4">实时</span><span data-page-node-id="RPhyCelUKOA0Gp2VhoVj12">小时</span><span data-page-node-id="GYKpbevXXLyJPBMjCZaeQQ">日</span></div>
         </div>
-        <table class="table">
-          <thead><tr><th>#</th><th>内容 ID</th><th>热度值</th><th>状态</th></tr></thead>
-          <tbody>
-            <tr><td>1</td><td>V_92840132</td><td>18,204</td><td><span class="hot-tag tag-fire">🔥 热点广播</span></td></tr>
-            <tr><td>2</td><td>V_77351098</td><td>15,872</td><td><span class="hot-tag tag-fire">🔥 热点广播</span></td></tr>
-            <tr><td>3</td><td>V_61093775</td><td>12,364</td><td><span class="hot-tag tag-fire">🔥 热点广播</span></td></tr>
-            <tr><td>4</td><td>V_58203441</td><td>9,127</td><td><span class="hot-tag tag-warm">升温中</span></td></tr>
-            <tr><td>5</td><td>V_44718062</td><td>7,038</td><td><span class="hot-tag tag-warm">升温中</span></td></tr>
+        <table class="table" data-page-node-id="0NIg3BbWntD43gptkHjNIc">
+          <thead data-page-node-id="D5kRwlLOMCG13DXdUAEF3Z"><tr data-page-node-id="7q4hEXS5WQseV1wYgNuarZ"><th data-page-node-id="EvNJbCAtFrCDT6In7xaxea">#</th><th data-page-node-id="otoV3BiVoG8iv0smcfC0vC">内容 ID</th><th data-page-node-id="d5MXyl1QM7veABFMHRBo77">热度值</th><th data-page-node-id="d8kSmNGXVJw5J5TyWcswgT">状态</th></tr></thead>
+          <tbody data-page-node-id="ZxGMbJ6YLBlcTi10GeaFyj">
+            <tr data-page-node-id="B2oyIIEgcfba6f2OSHHDW6"><td data-page-node-id="nx401LGy2plojAMG7XvZ5O">1</td><td data-page-node-id="UbMD3IosFgTYWgbrlT0Zg9">V_92840132</td><td data-page-node-id="l7v7T00ewIP9RlrAC6izDB">18,204</td><td data-page-node-id="tmrDI8fbAO596SdA5yPiHI"><span class="hot-tag tag-fire" data-page-node-id="Z1VEN7ycR79ABC3068BUOg">🔥 热点广播</span></td></tr>
+            <tr data-page-node-id="F89gZEOSbHro86agMjDFfi"><td data-page-node-id="NVlnSQWAWgFbARwYJqCfvO">2</td><td data-page-node-id="p9fACUTkhj41Mxv9J2mxVI">V_77351098</td><td data-page-node-id="WSCzRDh9nZDjZ68tbjrvlT">15,872</td><td data-page-node-id="aH0PBdOZdLI6iNWVegkbpm"><span class="hot-tag tag-fire" data-page-node-id="WMoDzLtQeaxhGty7nwNHU2">🔥 热点广播</span></td></tr>
+            <tr data-page-node-id="C0R5mdB9ZoViKN7Lr7KqGJ"><td data-page-node-id="pu9Ni2NmlAmcNZwRvkYF0M">3</td><td data-page-node-id="SWzXpnGqoHnd49ID0w1X3h">V_61093775</td><td data-page-node-id="w1F6tkGnrGf0yYxLbAz5T3">12,364</td><td data-page-node-id="73JpKaO4FaDmtsXpYdxrTd"><span class="hot-tag tag-fire" data-page-node-id="2rWpSUm6LsRFNuuk5siy1t">🔥 热点广播</span></td></tr>
+            <tr data-page-node-id="dlOOFVXYRzYgM7kzw0monk"><td data-page-node-id="jWUkBbG6GnQBYhbChphPKu">4</td><td data-page-node-id="C71LBaFABg3PHGmuN3S9UP">V_58203441</td><td data-page-node-id="cDUplsZyOuAQuYKBFFvWbZ">9,127</td><td data-page-node-id="KP8FGrJmL6Dk6Knq4KWFI3"><span class="hot-tag tag-warm" data-page-node-id="5AHjOXjtoYImeftuSqvNxO">升温中</span></td></tr>
+            <tr data-page-node-id="RIJ7jaZA28EgTvrgLLGVQK"><td data-page-node-id="K02soeAE6EexPCxaZHm1hW">5</td><td data-page-node-id="yoCDQcN1fj2IFr3ch1yATa">V_44718062</td><td data-page-node-id="YW9Kp2pduOSY8aFblD2vXW">7,038</td><td data-page-node-id="y2rio6ikIXNCLCcrEMaDAr"><span class="hot-tag tag-warm" data-page-node-id="t3EqIDQP5HgWmMfPe7JIWW">升温中</span></td></tr>
           </tbody>
         </table>
       </div>
     </div>
 
     <!-- 下两栏 -->
-    <div class="two-col">
-      <div class="panel">
-        <div class="p-head">
-          <div class="title">计数分桶负载（64 桶）</div>
-          <div class="legend"><span><i style="background:#3d7eff"></i>当前桶内积压计数事件</span></div>
+    <div class="two-col" data-page-node-id="mznJKvfAiQChEyGr34UKMu">
+      <div class="panel" data-page-node-id="DaSybNExBQd4SoWoK1f748">
+        <div class="p-head" data-page-node-id="oQ6yoanv69FSG7Hirh0w7J">
+          <div class="title" data-page-node-id="qgx8X8llhFlvqiB4H3onzh">计数分桶负载（64 桶）</div>
+          <div class="legend" data-page-node-id="t1noqcigCC0j9f0XOblxWr"><span data-page-node-id="zOMUBxl4GEXXGGwkReryvJ"><i style="background:#3d7eff" data-page-node-id="LKGkjpoSMHjSbK7NN8ACkh"></i>当前桶内积压计数事件</span></div>
         </div>
-        <div class="bucket-row"><span class="k">#07</span><div class="bar-bg"><div class="bar" style="width:92%"></div></div><span class="val">9,142</span></div>
-        <div class="bucket-row"><span class="k">#13</span><div class="bar-bg"><div class="bar" style="width:78%"></div></div><span class="val">7,755</span></div>
-        <div class="bucket-row"><span class="k">#29</span><div class="bar-bg"><div class="bar" style="width:64%"></div></div><span class="val">6,368</span></div>
-        <div class="bucket-row"><span class="k">#41</span><div class="bar-bg"><div class="bar" style="width:52%"></div></div><span class="val">5,173</span></div>
-        <div class="bucket-row"><span class="k">#58</span><div class="bar-bg"><div class="bar" style="width:36%"></div></div><span class="val">3,578</span></div>
-        <div class="bucket-row"><span class="k">#22</span><div class="bar-bg"><div class="bar" style="width:24%"></div></div><span class="val">2,386</span></div>
-        <div class="bucket-row"><span class="k">#45</span><div class="bar-bg"><div class="bar" style="width:15%"></div></div><span class="val">1,491</span></div>
+        <div class="bucket-row" data-page-node-id="Y00aPqCkx0rI9Mxas3sAYx"><span class="k" data-page-node-id="d9eRgYhdtRhwAIqkp2MNjl">#07</span><div class="bar-bg" data-page-node-id="aC4ugLhb27ZPAI15zbpZ1S"><div class="bar" style="width:92%" data-page-node-id="Xjjqi7nzi1nPlcJMhxQ2zM"></div></div><span class="val" data-page-node-id="4Yhlf1XBi8LHC0siznfKvd">9,142</span></div>
+        <div class="bucket-row" data-page-node-id="mDDtgkOFCHAu8AUIab0JVu"><span class="k" data-page-node-id="9yRxQX8SCgEQfI2urTEutt">#13</span><div class="bar-bg" data-page-node-id="BwmB7nXM9NBlcljM8y2Qur"><div class="bar" style="width:78%" data-page-node-id="lTLCPdF3GaKgUGZUxlfq36"></div></div><span class="val" data-page-node-id="dCXLPlVmilrC9GHSMYwBL7">7,755</span></div>
+        <div class="bucket-row" data-page-node-id="u2a97F6CVdYiq2DkAFfT59"><span class="k" data-page-node-id="H7yL9sunJMCRA3gAZ8b2kj">#29</span><div class="bar-bg" data-page-node-id="M1i3ahm0VxnAWxbN3S2XPK"><div class="bar" style="width:64%" data-page-node-id="bEix2Su3EUFivz7xnUv6de"></div></div><span class="val" data-page-node-id="0H3tYX4hsfwWu3ggtCbru5">6,368</span></div>
+        <div class="bucket-row" data-page-node-id="2eZJ3UIXRFF6TWzTsRYnnx"><span class="k" data-page-node-id="5RTYQGGYBpzfrAKwX8rG6Q">#41</span><div class="bar-bg" data-page-node-id="pOd8KXMBB4kaG59eSTlWcG"><div class="bar" style="width:52%" data-page-node-id="csUfIwdzem1N7DiIq8ZTHG"></div></div><span class="val" data-page-node-id="LhAkx55TVjqR0l8iy94Ogj">5,173</span></div>
+        <div class="bucket-row" data-page-node-id="ohLimh6VtZFJhHS0YJP57C"><span class="k" data-page-node-id="OpPWKd9lnnFf9sJLQiI3tN">#58</span><div class="bar-bg" data-page-node-id="tDAysN1ZF56ZULcs1JQvwz"><div class="bar" style="width:36%" data-page-node-id="kVyeqfnMA7rAvquEbihyIV"></div></div><span class="val" data-page-node-id="1qFffvjRA87IBZqkJiF8Aw">3,578</span></div>
+        <div class="bucket-row" data-page-node-id="86bqWXHjlsUTFcD0TJDdE7"><span class="k" data-page-node-id="OZaIjznqwNV9MwfrhZZAI0">#22</span><div class="bar-bg" data-page-node-id="nWd0mArNElUXixlnOMbHMZ"><div class="bar" style="width:24%" data-page-node-id="jrtrPwvuAEwHVQzOiSk2Po"></div></div><span class="val" data-page-node-id="sis0WfGoL3B3ArA7ATc7fE">2,386</span></div>
+        <div class="bucket-row" data-page-node-id="FaDannPAXwteqKp83s6C9V"><span class="k" data-page-node-id="aSxAPtEbCLLWTp38rGUAXU">#45</span><div class="bar-bg" data-page-node-id="JEt6iII0ONQFcx7F0I9hxG"><div class="bar" style="width:15%" data-page-node-id="zk6gk1DBINmZhkRXDNavWb"></div></div><span class="val" data-page-node-id="dqlYSQMvCjAhdpdBQD03nF">1,491</span></div>
       </div>
 
-      <div class="panel">
-        <div class="p-head">
-          <div class="title">核心组件状态</div>
-          <div class="tabs"><span class="on">健康</span><span>全部</span></div>
+      <div class="panel" data-page-node-id="5a3DAwf8uPQr1xP4vYuUAD">
+        <div class="p-head" data-page-node-id="Sx6xZ35cd9eeoJZ25DdUuw">
+          <div class="title" data-page-node-id="tosaCxOCk9wAgVZAPPA4mg">核心组件状态</div>
+          <div class="tabs" data-page-node-id="Qe6pl5xvqASHB0R9IN7cC3"><span class="on" data-page-node-id="bRx484xuKdH7pkiIKJwiT9">健康</span><span data-page-node-id="M3qxQjKdhQ9UM22epbWsm1">全部</span></div>
         </div>
-        <ul class="sys-status">
-          <li><span class="dot g">Redis 集群（收件箱 / 计数桶）</span><span style="color:var(--ok)">正常</span></li>
-          <li><span class="dot g">MySQL（批量落库 / 兜底快照）</span><span style="color:var(--ok)">正常</span></li>
-          <li><span class="dot g">MQ（SPI 内存实现）</span><span style="color:var(--ok)">正常</span></li>
-          <li><span class="dot g">Sentinel 规则加载（本地 JSON）</span><span style="color:var(--ok)">正常</span></li>
-          <li><span class="dot w">热点广播通道（3 条降级冷却中）</span><span style="color:var(--warn)">降级</span></li>
+        <ul class="sys-status" data-page-node-id="idENVeRJZS14eXSWQso1Zv">
+          <li data-page-node-id="sREuzRGsF8z1bbmurKwAwh"><span class="dot g" data-page-node-id="yVoWW0sBI3mYnxxNnf5Xwd">Redis 集群（收件箱 / 计数桶）</span><span style="color:var(--ok)" data-page-node-id="5cA2YohvJLqgrxLBnyLtmf">正常</span></li>
+          <li data-page-node-id="4B08RmkNTTegNeIBKeh1Mz"><span class="dot g" data-page-node-id="Jlf5ZQ78QeLYntvkxTZqgZ">MySQL（批量落库 / 兜底快照）</span><span style="color:var(--ok)" data-page-node-id="ZWWcBntMDTX3w4Rlgpkzbh">正常</span></li>
+          <li data-page-node-id="w4yJTBSWtVrNln7ozP0LM4"><span class="dot g" data-page-node-id="txthxXEkpQoeA6QHtlfbH6">MQ（SPI 内存实现）</span><span style="color:var(--ok)" data-page-node-id="GvjqDR2NSwfch7huRylFyI">正常</span></li>
+          <li data-page-node-id="br9Lie6cowHf50XNZWEkFP"><span class="dot g" data-page-node-id="ISAarRcbdhGnFJp3FxfrmM">Sentinel 规则加载（本地 JSON）</span><span style="color:var(--ok)" data-page-node-id="TyJEUEA96OgmR3YX3u6KxU">正常</span></li>
+          <li data-page-node-id="XDH3eBF7Tv62xh4FH8EbOL"><span class="dot w" data-page-node-id="CXjNkgBpoIaZiN4iA0Jebo">热点广播通道（3 条降级冷却中）</span><span style="color:var(--warn)" data-page-node-id="CbaRTALbycQ51NUHeNDREy">降级</span></li>
         </ul>
       </div>
     </div>
 
-    <!-- 内容图片管理 -->
-    <div class="panel" style="margin-top:20px">
-      <div class="p-head">
-        <div class="title">内容图片管理（当前用户：<span id="bannerUser">-</span>）</div>
-        <div class="legend"><span><i style="background:#8b98ab"></i>上传后进入待审核，审核通过后前端展示 · 每个用户只展示自己上传的图片</span></div>
+    <!-- 审核队列（真审核闸） -->
+    <div class="panel" style="margin-top:20px" data-page-node-id="bov7A0x9RUaFFrhBdeJJSm">
+      <div class="p-head" data-page-node-id="QNFt3pFb4meCbq71yMfCFw">
+        <div class="title" data-page-node-id="kXODEAYQ56DsjmWHrKwSDs">内容审核队列（待人工审核）</div>
+        <button class="mini-btn" onclick="loadReviewQueue()" data-page-node-id="DZvsLSdnpSyljdbH7UWmlt">刷新队列</button>
       </div>
-      <div class="banner-layout">
-        <div>
-          <div class="carousel-box" id="carouselBox">
-            <div class="carousel-empty" id="carouselEmpty">暂无图片，请先上传</div>
-          </div>
-          <div class="car-dots" id="carDots"></div>
-        </div>
-        <div>
-          <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            上传图片（支持多选）
-          </button>
-          <input type="file" id="fileInput" accept="image/*" multiple hidden>
-          <div class="upload-tip">支持 jpg / png / gif / webp，单张 ≤5MB，一次可选择多张；上传后进入待审核，审核通过后前端展示。</div>
-          <div class="thumb-strip" id="thumbStrip"></div>
-        </div>
-      </div>
+      <div class="upload-tip" data-page-node-id="cfk2ma29sN9Z7SJiQwiMmi">「真审核」模式：用户上传后停在 <b data-page-node-id="by841GUqtCkoDsq9A9Fywt">待审核</b>，须管理员在此
+        <b data-page-node-id="9MV2eRzgQIKBDolHCknIJ4">通过 / 驳回</b> 后才对公域可见（驳回后不展示）。通过即写入公域推荐流，驳回仅本人「我的内容」可见。</div>
+      <table class="table" id="reviewTable" data-page-node-id="4PuMv2iFNRZYyqx5UNhEvn">
+        <thead data-page-node-id="NESnIoPCMrVJ1894CF1Dmb"><tr data-page-node-id="JXei8VjKwlzdYTPE7O7v3i"><th data-page-node-id="C2GpQLML4CzobI0qtHq1yG">缩略图</th><th data-page-node-id="kQ6bijE1DlsHNnaW3H8aya">内容 ID</th><th data-page-node-id="60PZVrAYaAEG4d7JkMxJwS">上传时间</th><th data-page-node-id="kTes26KF9qubNSVt95PMU4">状态</th><th data-page-node-id="PUFe0HOnuwtDG4GEPtVXcM">操作</th></tr></thead>
+        <tbody id="reviewBody" data-page-node-id="wpFGtau0zCgmHwxFHyBFzp">
+          <tr data-page-node-id="axA49LpoZohRwU4NyJWh7K"><td colspan="5" style="color:var(--text-dim)" data-page-node-id="OOl2Bs0wbuaPyaYWUCVLEi">加载中…</td></tr>
+        </tbody>
+      </table>
     </div>
 
   </main>
@@ -659,155 +662,63 @@
     });
   });
 
-  // ================= 内容图片：多图上传 + 预览轮播（按登录用户隔离；审核口径见接口注释） =================
-  var CAROUSEL_INTERVAL = 10 * 1000; // 固定 10s，暂不支持自定义
-
+  // ================= 内容审核队列（真审核闸：管理员通过 / 驳回） =================
   // 当前登录用户（由 login.html 登录成功后写入；未登录直接打开时回退为 admin）
   var currentUser = localStorage.getItem('turbofeed:user') || 'admin';
-  // 每个用户独立的存储 key：只读写自己的图片
-  var STORE_KEY = 'turbofeed:banner:' + currentUser;
-
   document.getElementById('sideUserName').textContent = currentUser;
   document.getElementById('sideUserAvatar').textContent = currentUser.charAt(0).toUpperCase();
-  var bannerUserEl = document.getElementById('bannerUser');
-  if (bannerUserEl) bannerUserEl.textContent = currentUser;
 
-  var carouselImages = loadUserImages(); // [{ url, name }]，url 为 dataURL（可持久化）
-  var carIndex = 0;
-  var carTimer = null;
-
-  // 持久化当前用户的图片列表（localStorage 容量约 5MB，超限会抛异常）
-  function saveUserImages() {
-    try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(carouselImages));
-    } catch (e) {
-      alert('本地存储空间不足，最新图片未持久化（仅本次会话可见）。接入后端后由服务端按用户存储。');
-    }
-  }
-
-  function loadUserImages() {
-    try {
-      var raw = localStorage.getItem(STORE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch (e) {
-      return [];
-    }
-  }
-
-  // TODO: 后端上传接口 —— 具体逻辑自行实现（当前仅生成本地预览 dataURL）
-  // 建议接口：POST /api/media/upload（multipart/form-data，字段名 files，Authorization: Bearer <token> 携带登录凭证）
-  // 后端统一返回结构：{ code: 0, message: '成功', data: [...图片URL], timestamp: ... }
-  // 注意：UGC 口径下上传成功仅代表受理（进入待审核态），审核通过后内容才会在前端展示。
-  // 实现后把下方 FileReader 本地读取替换为真实请求，取 Result.data 作为 URL 数组即可。
-  // 后端上传接口：POST /api/media/upload（multipart/form-data，字段名 files）
-  // 统一返回结构 { code:0, data:[图片URL], ... }，data 为可访问地址（/media/... 经本地存储映射）
-  function uploadImages(files) {
-    var fd = new FormData();
-    Array.prototype.forEach.call(files, function (f) { fd.append('files', f); });
-    return fetch(API_BASE + '/api/media/upload', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + TOKEN }, // TOKEN 来自 POST /api/auth/login（见顶部登录守卫）
-      body: fd
+  // 拉取全平台待审核内容（跨分片广播，演示/小数据量）
+  function loadReviewQueue() {
+    fetch(API_BASE + '/api/admin/media/pending?size=50', {
+      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
     }).then(function (r) { return r.json(); })
-      .then(function (res) { return res.code === 0 ? res.data : Promise.reject(new Error(res.message)); });
-  }
-
-  document.getElementById('fileInput').addEventListener('change', function () {
-    var files = Array.prototype.slice.call(this.files || []);
-    if (!files.length) return;
-    uploadImages(files).then(function (urls) {
-      urls.forEach(function (u, i) {
-        carouselImages.push({
-          url: u,
-          name: files[i] ? files[i].name : ('image-' + (carouselImages.length + 1))
+      .then(function (res) {
+        var body = document.getElementById('reviewBody');
+        if (!res.data || res.data.length === 0) {
+          body.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim)">队列为空，没有待审核内容</td></tr>';
+          return;
+        }
+        body.innerHTML = '';
+        res.data.forEach(function (it) {
+          var tr = document.createElement('tr');
+          var thumb = '<div class="thumb" style="width:64px;height:44px"><img src="' + it.url + '" alt=""></div>';
+          var time = it.createdAt ? new Date(it.createdAt).toLocaleString() : '-';
+          tr.innerHTML = '<td>' + thumb + '</td>'
+            + '<td style="word-break:break-all">' + it.mediaId + '</td>'
+            + '<td>' + time + '</td>'
+            + '<td><span class="hot-tag tag-warm">待审核</span></td>'
+            + '<td>'
+            + '<button class="mini-btn ok" onclick="reviewMedia(\'' + it.mediaId + '\', true)">通过</button> '
+            + '<button class="mini-btn bad" onclick="reviewMedia(\'' + it.mediaId + '\', false)">驳回</button>'
+            + '</td>';
+          body.appendChild(tr);
         });
+      })
+      .catch(function (e) {
+        var body = document.getElementById('reviewBody');
+        body.innerHTML = '<tr><td colspan="5" style="color:var(--brand)">加载失败：' + e.message + '</td></tr>';
       });
-      saveUserImages();
-      renderCarousel();
-      renderThumbs();
-      startCarousel();
-    });
-    this.value = ''; // 清空选择，允许再次选择同一文件
-  });
-
-  function renderCarousel() {
-    var box = document.getElementById('carouselBox');
-    var empty = document.getElementById('carouselEmpty');
-    var dots = document.getElementById('carDots');
-    // 移除旧 img / 计数，保留 empty 占位
-    box.querySelectorAll('img, .carousel-count').forEach(function (el) { el.remove(); });
-    dots.innerHTML = '';
-    if (!carouselImages.length) {
-      empty.style.display = 'flex';
-      stopCarousel();
-      return;
-    }
-    empty.style.display = 'none';
-    if (carIndex >= carouselImages.length) carIndex = 0;
-    carouselImages.forEach(function (img, i) {
-      var el = document.createElement('img');
-      el.src = img.url;
-      if (i === carIndex) el.classList.add('show');
-      box.appendChild(el);
-      var dot = document.createElement('i');
-      if (i === carIndex) dot.classList.add('on');
-      dot.addEventListener('click', function () {
-        carIndex = i;
-        renderCarousel();
-        startCarousel(); // 手动切换后重置计时
-      });
-      dots.appendChild(dot);
-    });
-    var count = document.createElement('div');
-    count.className = 'carousel-count';
-    count.textContent = (carIndex + 1) + ' / ' + carouselImages.length + ' · 10s/张';
-    box.appendChild(count);
   }
 
-  function renderThumbs() {
-    var strip = document.getElementById('thumbStrip');
-    strip.innerHTML = '';
-    carouselImages.forEach(function (img, i) {
-      var t = document.createElement('div');
-      t.className = 'thumb';
-      var el = document.createElement('img');
-      el.src = img.url;
-      el.title = img.name;
-      t.appendChild(el);
-      var del = document.createElement('button');
-      del.className = 'del';
-      del.textContent = '✕';
-      del.title = '移除';
-      del.addEventListener('click', function () {
-        carouselImages.splice(i, 1);
-        if (carIndex >= carouselImages.length) carIndex = Math.max(0, carouselImages.length - 1);
-        saveUserImages();
-        renderCarousel();
-        renderThumbs();
-        startCarousel();
-      });
-      t.appendChild(del);
-      strip.appendChild(t);
-    });
+  // 审核执行：通过 / 驳回（真审核闸的翻转点）
+  function reviewMedia(mediaId, approve) {
+    fetch(API_BASE + '/api/admin/media/review?mediaId=' + encodeURIComponent(mediaId) + '&approve=' + approve, {
+      method: 'POST',
+      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0) {
+          loadReviewQueue(); // 操作后刷新队列
+        } else {
+          alert('审核失败：' + (res.message || '未知错误'));
+        }
+      })
+      .catch(function (e) { alert('审核请求失败：' + e.message); });
   }
 
-  function startCarousel() {
-    stopCarousel();
-    if (carouselImages.length < 2) return;
-    carTimer = setInterval(function () {
-      carIndex = (carIndex + 1) % carouselImages.length;
-      renderCarousel();
-    }, CAROUSEL_INTERVAL);
-  }
-
-  function stopCarousel() {
-    if (carTimer) { clearInterval(carTimer); carTimer = null; }
-  }
-
-  // 初始渲染当前用户自己的图片
-  renderCarousel();
-  renderThumbs();
-  startCarousel();
+  // 进入页面即加载一次审核队列
+  loadReviewQueue();
 </script>
 
 </body>

@@ -25,6 +25,17 @@ public interface MediaStorageClient {
     StoredMedia store(String userId, ImageFormat format, InputStream content, long size);
 
     /**
+     * 物理删除已存储的内容（用户删除时调用）。
+     *
+     * <p>实现须按 {@code mediaId} 定位并移除底层对象：MinIO 走 {@code removeObject}，
+     * 本地磁盘走 {@code Files.deleteIfExists}。删除失败（对象已不存在等）由调用方决定
+     * 是否继续逻辑删除，本接口不强制抛异常——实现内部 catch 后仅告警即可。</p>
+     *
+     * @param mediaId 内容唯一标识（形如 media/{userId}/{uuid}.{ext}，即存储 key / 对象名）
+     */
+    void delete(String mediaId);
+
+    /**
      * 存储结果。
      *
      * @param mediaId 内容唯一标识（形如 media/{userId}/{uuid}.{ext}），审核与查询的主键

@@ -242,6 +242,7 @@
 
   /* ========== 上传区域 ========== */
   .upload-zone {
+    display: block;
     border: 2px dashed var(--border);
     border-radius: 12px;
     padding: 32px;
@@ -255,12 +256,13 @@
     border-color: var(--accent);
     background: rgba(61,126,255,.08);
   }
-  .upload-zone input[type=file] {
+.upload-zone input[type=file] {
     position: absolute;
     inset: 0;
     opacity: 0;
     cursor: pointer;
-  }
+    z-index: 10;
+}
   .upload-zone .icon {
     width: 48px; height: 48px;
     margin: 0 auto 12px;
@@ -275,10 +277,15 @@
     color: var(--text);
     margin-bottom: 6px;
   }
-  .upload-zone .hint {
+.upload-zone .hint {
     font-size: 12px;
     color: var(--text-dim);
-  }
+}
+/* 提示层不拦截鼠标/拖拽事件，让点击/拖拽穿透到下方 input 或 uploadZone */
+.upload-zone .icon,
+.upload-zone .tip,
+.upload-zone .hint,
+.upload-zone .upload-progress { pointer-events: none; }
   .upload-progress {
     margin-top: 14px;
     display: none;
@@ -413,6 +420,10 @@
   .media-card .actions button:hover {
     border-color: var(--accent);
     color: var(--text);
+  }
+  .media-card .actions button.danger:hover {
+    border-color: var(--error);
+    color: var(--error);
   }
 
   /* ========== 状态徽章（工具栏统计） ========== */
@@ -576,8 +587,8 @@
         上传新内容
         <span class="sub" data-page-node-id="3A2GAzL9H1YYIBDBKi2FuS">支持 jpg / png / gif / webp，单张 ≤5MB，单次最多 9 张</span>
       </div>
-      <div class="upload-zone" id="uploadZone" data-page-node-id="vzntBspMsR26Gs14Alz8U6">
-        <input type="file" id="fileInput" accept="image/*" multiple data-page-node-id="37vBQXODbEoayfCfLi1ElR">
+      <label for="fileInput" class="upload-zone" id="uploadZone" data-page-node-id="vzntBspMsR26Gs14Alz8U6">
+        <input type="file" id="fileInput" accept="image/*" multiple onchange="console.log('file input change', this.files); doUpload(this.files); this.value='';" data-page-node-id="37vBQXODbEoayfCfLi1ElR">
         <div class="icon" data-page-node-id="Bvl2IugaPoZYmtIjtQJvWu">↑</div>
         <div class="tip" data-page-node-id="cbeKr4kRBAsIrEjhLn4blB">点击或拖拽图片到此处上传</div>
         <div class="hint" data-page-node-id="eeEAWMZrE6zadgOpE6RMXt">上传后进入待审核状态，审核通过后自动展示到 Feed 流</div>
@@ -585,7 +596,7 @@
           <span data-page-node-id="A8S9b6xaqutH7F4lbnjG9E">上传中...</span>
           <div class="bar" data-page-node-id="GRUcxZK8YPuNFGRkDETH4t"><i id="uploadBar" data-page-node-id="lTo5DMXrmsIjHYgFMqV5ND"></i></div>
         </div>
-      </div>
+      </label>
     </div>
 
     <!-- 我的内容 -->
@@ -759,7 +770,7 @@
       card.innerHTML =
         '<div class="thumb">' +
           (item.url
-            ? '<img src="' + item.url + '" alt="" onerror="this.style.display=\'none\';this.parentNode.innerHTML+=\'<div class=\\'empty-img\\'>加载失败</div>\'">'
+            ? '<img src="' + item.url + '" alt="">'
             : '<div class="empty-img">无预览</div>') +
           '<span class="status ' + stCls + '">' + stTxt + '</span>' +
         '</div>' +
@@ -769,6 +780,7 @@
           '<div class="actions">' +
             '<button onclick="openImage(\'' + (item.url || '') + '\')">查看</button>' +
             '<button onclick="copyUrl(\'' + (item.url || '') + '\')">复制链接</button>' +
+            '<button class="danger" onclick="deleteMedia(\'' + (item.mediaId || '') + '\')">删除</button>' +
           '</div>' +
         '</div>';
       grid.appendChild(card);
@@ -800,6 +812,31 @@
     try { document.execCommand('copy'); showToast('链接已复制', 'ok'); }
     catch (e) { showToast('复制失败', 'error'); }
     document.body.removeChild(ta);
+  }
+
+  // 删除自己的内容：物理删除（MinIO）+ 逻辑删除（MySQL status=DELETED）
+  function deleteMedia(mediaId) {
+    if (!mediaId) return;
+    if (!confirm('确定删除这条内容吗？删除后将从「我的内容」与公域发现流移除。')) return;
+    fetch(API_BASE + '/api/media?mediaId=' + encodeURIComponent(mediaId), {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + TOKEN }
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (res.code !== 0) {
+        showToast('删除失败：' + (res.message || '未知错误'), 'error');
+        return;
+      }
+      // 从本地列表移除并刷新统计与网格
+      allItems = allItems.filter(function (i) { return i.mediaId !== mediaId; });
+      updateStats();
+      renderGrid();
+      showToast('已删除', 'ok');
+    })
+    .catch(function (err) {
+      showToast('删除失败：' + (err.message || '网络错误'), 'error');
+    });
   }
 
   // 上传
@@ -835,13 +872,8 @@
     });
   }
 
-  // 上传事件
-  var fileInput = document.getElementById('fileInput');
+  // 上传事件（change 通过 input 行内 onchange 触发，避免部分浏览器下 JS 监听不生效）
   var uploadZone = document.getElementById('uploadZone');
-  fileInput.addEventListener('change', function () {
-    doUpload(this.files);
-    this.value = '';
-  });
 
   uploadZone.addEventListener('dragover', function (e) {
     e.preventDefault();

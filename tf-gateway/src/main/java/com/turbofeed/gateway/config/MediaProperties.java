@@ -58,6 +58,9 @@ public class MediaProperties {
     /** MQ 审核事件 topic / consumerGroup（turbofeed.media.mq.*；可被 application.yml 覆盖，保留与代码常量一致的默认名）。 */
     private Mq mq = new Mq();
 
+    /** 审核配置（turbofeed.media.review.*）：auto-pass 为演示占位自动放行，关闭后走人工审核闸。 */
+    private Review review = new Review();
+
     /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
      *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
     private boolean processingEnabled = false;
@@ -149,6 +152,10 @@ public class MediaProperties {
         /** 媒体桶名（应用启动时会预检，不存在则尝试创建） */
         private String bucket = "turbo-feed-media";
 
+        /** 桶匿名可读（本地/演示用）：true 时启动预检把桶策略设为公开读，
+         * 使返回的 publicUrlBase+key 可被浏览器直接加载。生产应改 false 并用预签名 URL。 */
+        private boolean publicRead = true;
+
         public String getEndpoint() {
             return endpoint;
         }
@@ -179,6 +186,14 @@ public class MediaProperties {
 
         public void setBucket(String bucket) {
             this.bucket = bucket;
+        }
+
+        public boolean isPublicRead() {
+            return publicRead;
+        }
+
+        public void setPublicRead(boolean publicRead) {
+            this.publicRead = publicRead;
         }
     }
 
@@ -303,6 +318,32 @@ public class MediaProperties {
 
         public void setConsumerGroup(String consumerGroup) {
             this.consumerGroup = consumerGroup;
+        }
+    }
+
+    /** 审核配置（turbofeed.media.review.*）。 */
+    public Review getReview() {
+        return review;
+    }
+
+    /**
+     * 审核配置（turbofeed.media.review.*）。
+     *
+     * <p>UGC 内容必须审核。默认 {@code auto-pass=false} 表示机审桩（AutoPassModeration）
+     * 不自动放行，上传后停在 PENDING，由管理员审核接口（{@code /api/admin/media/{mediaId}/review}）
+     * 放行/驳回——即「真审核」闸。设为 {@code true} 退回演示占位（机审直接过），仅供本地联调
+     * / 克隆即跑；生产务必关闭，否则 UGC 内容裸奔涉政涉黄。</p>
+     */
+    public static class Review {
+        /** 机审自动放行（true=占位直接过；false=人工审核闸，停在 PENDING）。默认 false。 */
+        private boolean autoPass = false;
+
+        public boolean isAutoPass() {
+            return autoPass;
+        }
+
+        public void setAutoPass(boolean autoPass) {
+            this.autoPass = autoPass;
         }
     }
 }

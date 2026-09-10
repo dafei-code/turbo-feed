@@ -66,6 +66,15 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- commons-lang3：覆盖 spring-boot-dependencies 3.4.3 BOM 锁定的 3.17.0。
+                 ShardingSphere 5.5.3 的 SystemSchemaManager 静态引用 org.apache.commons.lang3.Strings，
+                 该 class 在 commons-lang3 3.18.0 才引入（3.17.0 无 Strings.class）→ 否则 NoClassDefFoundError。
+                 本地 .m2 已有 3.18.0，无需联网下载。 -->
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-lang3</artifactId>
+                <version>3.18.0</version>
+            </dependency>
             <!-- Redisson -->
             <dependency>
                 <groupId>org.redisson</groupId>

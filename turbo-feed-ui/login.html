@@ -249,9 +249,12 @@
   </form>
 
   <div class="demo-tip">
-    <b>演示说明</b>：当前为静态 UI 预览版，后端逻辑未接入。<br>
-    任意输入点击登录即可跳转管理后台（前端假校验：用户名/密码非空）。
+    <b>演示说明</b>：已接入真实后端——使用你注册的手机号 + 密码登录，令牌存于本地后跳转。
   </div>
+
+  <p style="text-align:center;margin-top:16px;font-size:13px;color:var(--text-dim)">
+    还没有账号？<a href="register.html" style="color:var(--accent);text-decoration:none">立即注册 ›</a>
+  </p>
 </div>
 
 <div class="footer">
@@ -295,7 +298,7 @@
       // 令牌里的 sub 是系统内部 uid（非手机号），身份判定以令牌为准，不由前端透传。
       localStorage.setItem('turbofeed:token', result.data);
       localStorage.setItem('turbofeed:user', phone);
-      window.location.href = 'admin.html';
+      window.location.href = 'user.html';
     } catch (err) {
       showMsg('无法连接后端服务，请确认网关已启动：' + API_BASE);
     } finally {
