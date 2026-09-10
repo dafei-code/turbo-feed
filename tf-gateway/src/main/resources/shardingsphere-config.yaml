@@ -65,6 +65,29 @@ rules:
           standard:
             shardingColumn: user_id
             shardingAlgorithmName: hashMod
+      # 逻辑表 account_credit：分片键 user_id，与 user/media 同策略，
+      # 保证「同用户」的信用行与其 user 行、media 行落同片；ensure/deduct/restore 均 WHERE user_id=? 单分片命中。
+      account_credit:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: hashMod
+      # 逻辑表 report / appeal：分片键 media_id，
+      # 举报/申诉高频查询均按 media_id（insert(media_id) / resolve(WHERE media_id=?)）精准命中单分片；
+      # 管理员待处理列表(按 status)为广播，低频可接。
+      report:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: media_id
+            shardingAlgorithmName: hashMod
+      appeal:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: media_id
+            shardingAlgorithmName: hashMod
     # 分片算法（自动分片算法，仅 autoTables 引用；sharding-count = 总物理节点数 = 库数2 × 表数2 = 4）
     shardingAlgorithms:
       hashMod:
@@ -75,17 +98,6 @@ rules:
     keyGenerators:
       snowflake:
         type: SNOWFLAKE
-
-  # 单表规则：account_credit / report / appeal 三张「单表」路由到 ds_0（turbo_feed_1），不分片。
-  # 抖音式审核骨架新增的元数据：账号信用分级、举报、申诉均落单表，按业务主键(user_id/media_id)查询，无需跨片。
-  # ShardingSphere 5.5.x 要求未被 sharding 规则绑定的逻辑表必须登记在 SINGLE 规则下（或配置 defaultDataSource 自动接管），
-  # 否则启动报「Can not find table rule」/「Table doesn't exist」。defaultDataSource 指定默认库为 ds_0。
-  - !SINGLE
-    tables:
-      - account_credit
-      - report
-      - appeal
-    defaultDataSource: ds_0
 
 props:
   # 开发期打印实际落到的物理库/表与 SQL，便于核对路由；生产可关闭

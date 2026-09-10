@@ -83,24 +83,35 @@ CREATE TABLE `turbo_feed_1`.`media_2` (
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体元数据表(物理分片 turbo_feed_1.media_2)';
 
--- ==================== 单表（抖音式审核骨架）：account_credit / report / appeal ====================
--- 三张单表均落在 ds_0(turbo_feed_1)，由 ShardingSphere SINGLE 规则路由（见 shardingsphere-config.yaml）。
--- 与分片表不同，单表无物理下标，逻辑表名 == 物理表名。
+-- ==================== 分片表（抖音式审核骨架）：account_credit / report / appeal ====================
+-- 三张表不再走单表，改为与 user/media 同策略的 HASH_MOD 分片（sharding-count=4，2 库），
+-- 物理表命名 <逻辑表>_<0..3>，偶数下标(_0/_2)落 ds_0、奇数下标(_1/_3)落 ds_1，与 user/media 一致。
+-- 分片键：account_credit=user_id（与 user 同片）；report/appeal=media_id（举报/申诉高频查询均按 media_id 命中单分片）。
+-- 配置见 shardingsphere-config.yaml 的 autoTables（已移除 SINGLE 规则）。
 
--- 账号信用分级表：高信用(L2)先发后审入大池 / 普通(L1)先发后审入小池 / 低信用·新号(L0)先审后放。
-CREATE TABLE `turbo_feed_1`.`account_credit` (
-  `user_id`           BIGINT       NOT NULL                COMMENT '用户ID, 单表主键',
+-- 账号信用分级表（分片键 user_id）：高信用(L2)先发后审入大池 / 普通(L1)先发后审入小池 / 低信用·新号(L0)先审后放。
+CREATE TABLE `turbo_feed_1`.`account_credit_0` (
+  `user_id`           BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id), 与 user/media 同片',
   `credit_score`      INT          NOT NULL DEFAULT 100    COMMENT '信用分(0-100), 越低越严',
   `level`             TINYINT      NOT NULL DEFAULT 1      COMMENT '信用等级 0=L0(先审后放) 1=L1(小池) 2=L2(大池)',
   `strict_queue_flag` TINYINT      NOT NULL DEFAULT 0      COMMENT '0=普通 1=加严队列(近30天有下架, 所有内容先审后放)',
   `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`user_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(单表 ds_0)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(物理分片 turbo_feed_1.account_credit_0)';
 
--- 用户举报表：对任意已发布内容举报写本表；高危理由由服务层 fail-closed 立即下架。
-CREATE TABLE `turbo_feed_1`.`report` (
+CREATE TABLE `turbo_feed_1`.`account_credit_2` (
+  `user_id`           BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id), 与 user/media 同片',
+  `credit_score`      INT          NOT NULL DEFAULT 100    COMMENT '信用分(0-100), 越低越严',
+  `level`             TINYINT      NOT NULL DEFAULT 1      COMMENT '信用等级 0=L0(先审后放) 1=L1(小池) 2=L2(大池)',
+  `strict_queue_flag` TINYINT      NOT NULL DEFAULT 0      COMMENT '0=普通 1=加严队列(近30天有下架, 所有内容先审后放)',
+  `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(物理分片 turbo_feed_1.account_credit_2)';
+
+-- 用户举报表（分片键 media_id）：对任意已发布内容举报写本表；高危理由由服务层 fail-closed 立即下架。
+CREATE TABLE `turbo_feed_1`.`report_0` (
   `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '举报记录ID',
-  `media_id`          VARCHAR(255) NOT NULL                COMMENT '被举报内容ID',
+  `media_id`          VARCHAR(255) NOT NULL                COMMENT '被举报内容ID, 分片键',
   `reporter_user_id`  BIGINT       NOT NULL                COMMENT '举报人用户ID',
   `reason`            VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '举报理由(含涉政/暴恐/儿童等高危词→立即下架)',
   `status`            TINYINT      NOT NULL DEFAULT 0      COMMENT '0=待处理 1=已确认违规 2=已驳回',
@@ -108,19 +119,42 @@ CREATE TABLE `turbo_feed_1`.`report` (
   PRIMARY KEY (`id`),
   KEY `idx_media_status` (`media_id`, `status`),
   KEY `idx_reporter` (`reporter_user_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容举报表(单表 ds_0)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容举报表(物理分片 turbo_feed_1.report_0)';
 
--- 作者申诉表：作者对自身被驳回/下架内容申诉写本表；管理员复核翻案/维持。
-CREATE TABLE `turbo_feed_1`.`appeal` (
+CREATE TABLE `turbo_feed_1`.`report_2` (
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '举报记录ID',
+  `media_id`          VARCHAR(255) NOT NULL                COMMENT '被举报内容ID, 分片键',
+  `reporter_user_id`  BIGINT       NOT NULL                COMMENT '举报人用户ID',
+  `reason`            VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '举报理由(含涉政/暴恐/儿童等高危词→立即下架)',
+  `status`            TINYINT      NOT NULL DEFAULT 0      COMMENT '0=待处理 1=已确认违规 2=已驳回',
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '举报时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_media_status` (`media_id`, `status`),
+  KEY `idx_reporter` (`reporter_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容举报表(物理分片 turbo_feed_1.report_2)';
+
+-- 作者申诉表（分片键 media_id）：作者对自身被驳回/下架内容申诉写本表；管理员复核翻案/维持。
+CREATE TABLE `turbo_feed_1`.`appeal_0` (
   `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '申诉记录ID',
-  `media_id`          VARCHAR(255) NOT NULL                COMMENT '被申诉内容ID',
+  `media_id`          VARCHAR(255) NOT NULL                COMMENT '被申诉内容ID, 分片键',
   `author_user_id`    BIGINT       NOT NULL                COMMENT '申诉作者用户ID',
   `status`            TINYINT      NOT NULL DEFAULT 0      COMMENT '0=申诉中 1=翻案(恢复) 2=维持(驳回)',
   `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '申诉时间',
   PRIMARY KEY (`id`),
   KEY `idx_media_status` (`media_id`, `status`),
   KEY `idx_author` (`author_user_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容申诉表(单表 ds_0)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容申诉表(物理分片 turbo_feed_1.appeal_0)';
+
+CREATE TABLE `turbo_feed_1`.`appeal_2` (
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '申诉记录ID',
+  `media_id`          VARCHAR(255) NOT NULL                COMMENT '被申诉内容ID, 分片键',
+  `author_user_id`    BIGINT       NOT NULL                COMMENT '申诉作者用户ID',
+  `status`            TINYINT      NOT NULL DEFAULT 0      COMMENT '0=申诉中 1=翻案(恢复) 2=维持(驳回)',
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '申诉时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_media_status` (`media_id`, `status`),
+  KEY `idx_author` (`author_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容申诉表(物理分片 turbo_feed_1.appeal_2)';
 
 -- ==================== 库 2：turbo_feed_2（ds_1）===================
 -- ds_1 承载编号奇数下标的物理表：user_1/user_3、media_1/media_3
@@ -179,6 +213,73 @@ CREATE TABLE `turbo_feed_2`.`media_3` (
   KEY `idx_user_status` (`user_id`, `status`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体元数据表(物理分片 turbo_feed_2.media_3)';
+
+-- ==================== 分片表（抖音式审核骨架，ds_1 奇数下标）：account_credit / report / appeal ====================
+-- 与 ds_0 区对称：奇数下标(_1/_3)落 ds_1(turbo_feed_2)，分片键与 ds_0 区完全一致。
+
+CREATE TABLE `turbo_feed_2`.`account_credit_1` (
+  `user_id`           BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id), 与 user/media 同片',
+  `credit_score`      INT          NOT NULL DEFAULT 100    COMMENT '信用分(0-100), 越低越严',
+  `level`             TINYINT      NOT NULL DEFAULT 1      COMMENT '信用等级 0=L0(先审后放) 1=L1(小池) 2=L2(大池)',
+  `strict_queue_flag` TINYINT      NOT NULL DEFAULT 0      COMMENT '0=普通 1=加严队列(近30天有下架, 所有内容先审后放)',
+  `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(物理分片 turbo_feed_2.account_credit_1)';
+
+CREATE TABLE `turbo_feed_2`.`account_credit_3` (
+  `user_id`           BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id), 与 user/media 同片',
+  `credit_score`      INT          NOT NULL DEFAULT 100    COMMENT '信用分(0-100), 越低越严',
+  `level`             TINYINT      NOT NULL DEFAULT 1      COMMENT '信用等级 0=L0(先审后放) 1=L1(小池) 2=L2(大池)',
+  `strict_queue_flag` TINYINT      NOT NULL DEFAULT 0      COMMENT '0=普通 1=加严队列(近30天有下架, 所有内容先审后放)',
+  `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(物理分片 turbo_feed_2.account_credit_3)';
+
+CREATE TABLE `turbo_feed_2`.`report_1` (
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '举报记录ID',
+  `media_id`          VARCHAR(255) NOT NULL                COMMENT '被举报内容ID, 分片键',
+  `reporter_user_id`  BIGINT       NOT NULL                COMMENT '举报人用户ID',
+  `reason`            VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '举报理由(含涉政/暴恐/儿童等高危词→立即下架)',
+  `status`            TINYINT      NOT NULL DEFAULT 0      COMMENT '0=待处理 1=已确认违规 2=已驳回',
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '举报时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_media_status` (`media_id`, `status`),
+  KEY `idx_reporter` (`reporter_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容举报表(物理分片 turbo_feed_2.report_1)';
+
+CREATE TABLE `turbo_feed_2`.`report_3` (
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '举报记录ID',
+  `media_id`          VARCHAR(255) NOT NULL                COMMENT '被举报内容ID, 分片键',
+  `reporter_user_id`  BIGINT       NOT NULL                COMMENT '举报人用户ID',
+  `reason`            VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '举报理由(含涉政/暴恐/儿童等高危词→立即下架)',
+  `status`            TINYINT      NOT NULL DEFAULT 0      COMMENT '0=待处理 1=已确认违规 2=已驳回',
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '举报时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_media_status` (`media_id`, `status`),
+  KEY `idx_reporter` (`reporter_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容举报表(物理分片 turbo_feed_2.report_3)';
+
+CREATE TABLE `turbo_feed_2`.`appeal_1` (
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '申诉记录ID',
+  `media_id`          VARCHAR(255) NOT NULL                COMMENT '被申诉内容ID, 分片键',
+  `author_user_id`    BIGINT       NOT NULL                COMMENT '申诉作者用户ID',
+  `status`            TINYINT      NOT NULL DEFAULT 0      COMMENT '0=申诉中 1=翻案(恢复) 2=维持(驳回)',
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '申诉时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_media_status` (`media_id`, `status`),
+  KEY `idx_author` (`author_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容申诉表(物理分片 turbo_feed_2.appeal_1)';
+
+CREATE TABLE `turbo_feed_2`.`appeal_3` (
+  `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '申诉记录ID',
+  `media_id`          VARCHAR(255) NOT NULL                COMMENT '被申诉内容ID, 分片键',
+  `author_user_id`    BIGINT       NOT NULL                COMMENT '申诉作者用户ID',
+  `status`            TINYINT      NOT NULL DEFAULT 0      COMMENT '0=申诉中 1=翻案(恢复) 2=维持(驳回)',
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '申诉时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_media_status` (`media_id`, `status`),
+  KEY `idx_author` (`author_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容申诉表(物理分片 turbo_feed_2.appeal_3)';
 
 -- ==================== 演示账号种子数据（DB 重建后可直接登录） ====================
 -- 说明：网关登录现走 user 分片表 + BCrypt 校验；旧 application.yml 中 auth.demo-users
