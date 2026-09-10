@@ -179,3 +179,18 @@ CREATE TABLE `turbo_feed_2`.`media_3` (
   KEY `idx_user_status` (`user_id`, `status`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体元数据表(物理分片 turbo_feed_2.media_3)';
+
+-- ==================== 演示账号种子数据（DB 重建后可直接登录） ====================
+-- 说明：网关登录现走 user 分片表 + BCrypt 校验；旧 application.yml 中 auth.demo-users
+--      配置已废弃。重新执行本脚本后可用以下账号登录：
+--   13800138000 / 123456  → 命中 admin.phones 白名单，令牌角色 ADMIN
+--   13900139000 / 123456  → 普通用户，令牌角色 USER
+-- 密码均为 "123456" 的 BCrypt(cost=10) 哈希，生产环境务必移除这些种子。
+
+-- 管理员账号：id 1000000000000000000 % 4 = 0 → user_0(ds_0)
+INSERT INTO `turbo_feed_1`.`user_0` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `created_at`, `updated_at`)
+VALUES (1000000000000000000, '13800138000', '$2y$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoAdmin', '', 1, NOW(), NOW());
+
+-- 普通用户账号：id 1000000000000000001 % 4 = 1 → user_1(ds_1)
+INSERT INTO `turbo_feed_2`.`user_1` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `created_at`, `updated_at`)
+VALUES (1000000000000000001, '13900139000', '$2y$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoUser', '', 1, NOW(), NOW());

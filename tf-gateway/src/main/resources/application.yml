@@ -64,14 +64,11 @@ turbofeed:
   admin:
     phones:
       - "13800138000"
-  # 演示登录账号：键为手机号，值为账号信息（密码 + uid）；
+  # 演示账号：种子数据已写入 deploy/mysql/init-local.sql，重新执行脚本后即可登录：
+  #   管理员 13800138000 / 123456（命中 admin.phones → ADMIN 角色）
+  #   普通用户 13900139000 / 123456
   # 对标抖音：令牌 sub 携带 uid（身份层），手机号仅作登录凭证（凭证层），不进入令牌、不参与分片。
   # 生产改数据库 + user_phone_router(phone→uid) 映射 + 哈希存储
-  auth:
-    demo-users:
-      "13800138000":
-        password: "123456"
-        uid: 10001
   # 媒体上传限额：调整阈值只改配置不发版
   media:
     key-prefix: media
