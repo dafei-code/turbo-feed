@@ -2,7 +2,7 @@ package com.turbofeed.gateway.controller;
 
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.review.MediaReviewService;
-import com.turbofeed.gateway.shared.result.Result;
+import com.turbofeed.shared.result.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;

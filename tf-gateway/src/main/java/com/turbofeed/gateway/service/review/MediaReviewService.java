@@ -10,7 +10,7 @@ import com.turbofeed.gateway.service.feed.FeedTimelineStore;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.service.review.credit.CreditLevel;
-import com.turbofeed.gateway.shared.result.ErrorCode;
+import com.turbofeed.shared.result.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
