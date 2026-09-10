@@ -21,6 +21,9 @@ public enum ErrorCode {
     /** 未登录或登录态失效 */
     UNAUTHORIZED(40101, "未登录或凭证已失效"),
 
+    /** 账号未注册（登录时手机号查无记录；演示 UX 优先，开放账号枚举） */
+    ACCOUNT_NOT_REGISTERED(40102, "账号未注册，请先注册"),
+
     /** 已登录但无权限 */
     FORBIDDEN(40301, "无权限访问"),
 

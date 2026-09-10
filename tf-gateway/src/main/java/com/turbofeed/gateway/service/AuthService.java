@@ -39,8 +39,14 @@ public class AuthService {
             throw new BizException(ErrorCode.PARAM_ERROR, "手机号与密码不能为空");
         }
         Optional<UserJdbcRepository.UserIdHash> account = userJdbcRepository.findByPhone(phone);
-        // 账号不存在或密码不匹配，统一返回「手机号或密码错误」，避免时序侧信道泄露账号是否存在
-        if (account.isEmpty() || !passwordEncoder.matches(password, account.get().passwordHash())) {
+        // 账号不存在：明确提示「未注册」（演示 UX 优先）。
+        // 代价：开放手机号是否注册的枚举，放弃此前「账号不存在 / 密码错误」统一提示的防时序侧信道设计；
+        // 生产建议恢复统一「手机号或密码错误」。
+        if (account.isEmpty()) {
+            throw new BizException(ErrorCode.ACCOUNT_NOT_REGISTERED, "账号未注册，请先注册");
+        }
+        // 密码不匹配：返回「手机号或密码错误」（不额外暴露账号存在性之外的信息）。
+        if (!passwordEncoder.matches(password, account.get().passwordHash())) {
             throw new BizException(ErrorCode.UNAUTHORIZED, "手机号或密码错误");
         }
         if (account.get().status() == 2) {
