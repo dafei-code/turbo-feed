@@ -88,6 +88,18 @@ rules:
           standard:
             shardingColumn: media_id
             shardingAlgorithmName: hashMod
+      # 逻辑表 comment：分片键 media_id（与 media 按 user_id 分片正交），
+      # 保证「读某条内容下所有评论」单分片命中，不依赖 media 所在库即可定位评论；
+      # 楼中楼一级列表按 media_id+root_id+created_at 走索引，避免扫全分片。
+      comment:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: media_id
+            shardingAlgorithmName: hashMod
+        keyGenerateStrategy:
+          column: comment_id
+          keyGeneratorName: snowflake
     # 分片算法（自动分片算法，仅 autoTables 引用；sharding-count = 总物理节点数 = 库数2 × 表数2 = 4）
     shardingAlgorithms:
       hashMod:

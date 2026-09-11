@@ -39,6 +39,9 @@ public enum ErrorCode {
     /** 同一用户已有上传任务进行中（并发护栏拒绝） */
     UPLOAD_IN_PROGRESS(42903, "已有上传任务进行中，请稍后再试"),
 
+    /** 内容命中敏感词（描述/评论/文件名等走 AC 自动机扫描后 fail-closed 拒绝） */
+    SENSITIVE_WORD_HIT(42904, "内容包含敏感词"),
+
     /** 系统内部错误 */
     INTERNAL_ERROR(50000, "系统内部错误"),
 

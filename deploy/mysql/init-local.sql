@@ -63,6 +63,8 @@ CREATE TABLE `turbo_feed_1`.`media_0` (
   `url`        VARCHAR(512) NOT NULL                COMMENT '可访问地址',
   `status`     TINYINT       NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED',
   `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO',
+  `caption`     VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '描述/标题（抖音式文案；解析后结构化标记在 caption_mark）',
+  `caption_mark` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '解析后的结构化标记 JSON：@用户 / #话题 / [image:idx:filename]，前端直接消费',
   `file_size`  BIGINT        NOT NULL DEFAULT 0      COMMENT '字节数',
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '上传时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -77,6 +79,8 @@ CREATE TABLE `turbo_feed_1`.`media_2` (
   `url`        VARCHAR(512) NOT NULL                COMMENT '可访问地址',
   `status`     TINYINT       NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED',
   `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO',
+  `caption`     VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '描述/标题（抖音式文案；解析后结构化标记在 caption_mark）',
+  `caption_mark` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '解析后的结构化标记 JSON：@用户 / #话题 / [image:idx:filename]，前端直接消费',
   `file_size`  BIGINT        NOT NULL DEFAULT 0      COMMENT '字节数',
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '上传时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -196,6 +200,8 @@ CREATE TABLE `turbo_feed_2`.`media_1` (
   `url`        VARCHAR(512) NOT NULL                COMMENT '可访问地址',
   `status`     TINYINT       NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED',
   `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO',
+  `caption`     VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '描述/标题（抖音式文案；解析后结构化标记在 caption_mark）',
+  `caption_mark` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '解析后的结构化标记 JSON：@用户 / #话题 / [image:idx:filename]，前端直接消费',
   `file_size`  BIGINT        NOT NULL DEFAULT 0      COMMENT '字节数',
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '上传时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -210,6 +216,8 @@ CREATE TABLE `turbo_feed_2`.`media_3` (
   `url`        VARCHAR(512) NOT NULL                COMMENT '可访问地址',
   `status`     TINYINT       NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED',
   `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO',
+  `caption`     VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '描述/标题（抖音式文案；解析后结构化标记在 caption_mark）',
+  `caption_mark` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '解析后的结构化标记 JSON：@用户 / #话题 / [image:idx:filename]，前端直接消费',
   `file_size`  BIGINT        NOT NULL DEFAULT 0      COMMENT '字节数',
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '上传时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -284,6 +292,95 @@ CREATE TABLE `turbo_feed_2`.`appeal_3` (
   KEY `idx_media_status` (`media_id`, `status`),
   KEY `idx_author` (`author_user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容申诉表(物理分片 turbo_feed_2.appeal_3)';
+
+-- ==================== 评论表（comment_0..comment_3，分片键 media_id，HASH_MOD 4 节点） ====================
+-- 设计：comment 独立于 media（独立包、独立读写路径），按 media_id 分片保证
+--       「读某条内容下所有评论」单分片命中，与 media(user_id) 分片键正交——不依赖
+--       content 所在库即可定位评论。楼中楼用 root_id(顶层=commentId) + parent_id(直接父)
+--       双指针：一级列表 root_id=commentId，二级回复按 root_id 聚合按 created_at 排。
+-- 配置见 shardingsphere-config.yaml 的 comment autoTable。
+CREATE TABLE `turbo_feed_1`.`comment_0` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论表(物理分片 turbo_feed_1.comment_0)';
+
+CREATE TABLE `turbo_feed_1`.`comment_2` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论表(物理分片 turbo_feed_1.comment_2)';
+
+CREATE TABLE `turbo_feed_2`.`comment_1` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论表(物理分片 turbo_feed_2.comment_1)';
+
+CREATE TABLE `turbo_feed_2`.`comment_3` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论表(物理分片 turbo_feed_2.comment_3)';
+
+-- ==================== 敏感词库（sensitive_word，单表放 ds_0，ShardingSphere 未配置规则的表走默认 ds_0） ====================
+-- 词库小（KB~MB 级），单表足够；写少读多（启动 + 30s 定时 + 手动触发全量加载到 AC 自动机）。
+-- revision 单调递增，节点用「本地 revision vs DB MAX(revision)」判断是否需要重载；
+-- 检测到变更则全量重建 AC（词库 < 10k 时全量重建成本 < 1ms，生产大词库可演进为增量合并）。
+-- category 用于分类（政治/色情/广告/自定义），分类 Trie 后续可扩展为多棵子树。
+CREATE TABLE `turbo_feed_1`.`sensitive_word` (
+  `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `word`       VARCHAR(64)  NOT NULL                COMMENT '敏感词',
+  `category`   VARCHAR(32)  NOT NULL DEFAULT 'DEFAULT' COMMENT '分类: POLITICS/PORN/VIOLENCE/AD/DEFAULT',
+  `enabled`    TINYINT(1)   NOT NULL DEFAULT 1      COMMENT '0=禁用 1=启用',
+  `revision`   BIGINT       NOT NULL DEFAULT 1      COMMENT '修订号, 每次写操作 +1 用于变更检测',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_word` (`word`),
+  KEY `idx_revision` (`revision`),
+  KEY `idx_enabled` (`enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感词库(单表, AC 自动机加载源)';
 
 -- ==================== 演示账号种子数据（DB 重建后可直接登录） ====================
 -- 说明：网关登录现走 user 分片表 + BCrypt 校验；旧 application.yml 中 auth.demo-users

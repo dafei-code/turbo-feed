@@ -103,14 +103,16 @@ public class MediaController {
      * 由 Service 层 {@code UserContextHolder.requireUserId()} 取用。</p>
      *
      * @param files     多个图片文件
+     * @param caption   抖音式描述/标题（@用户 / #话题 / [image:idx:filename]，本批共享；可选）
      * @param requestId 客户端幂等键（可选，请求头 X-Request-Id；幂等去重落地时使用）
      * @return 统一返回结构，data 为上传成功后的图片 URL 列表（审核通过后生效）
      */
     @PostMapping("/upload")
     public Result<List<String>> upload(
             @RequestParam("files") MultipartFile[] files,
+            @RequestParam(value = "caption", required = false) String caption,
             @RequestHeader(value = "X-Request-Id", required = false) String requestId) {
-        return Result.ok(mediaUploadService.upload(files, requestId));
+        return Result.ok(mediaUploadService.upload(files, caption, requestId));
     }
 
     /**
@@ -175,6 +177,27 @@ public class MediaController {
     @DeleteMapping
     public Result<Void> delete(@RequestParam("mediaId") String mediaId) {
         mediaUploadService.delete(mediaId, UserContextHolder.requireUserId());
+        return Result.ok();
+    }
+
+    /**
+     * 更新媒体描述/标题（用户编辑已上传内容的文案）。
+     *
+     * <p>走与上传一致的敏感词 fail-closed 校验：原始文本过 AC 自动机，命中即拒绝。
+     * 解析后的 caption_mark（@/#/[image:idx]）由服务端落库，前端只读展示。
+     * 该操作不影响审核状态（描述修改 ≠ 内容违规降级）。</p>
+     *
+     * <p>mediaId 走 query：形如 {@code media/{userId}/{uuid}.{ext}} 含斜杠，
+     * 不能做路径变量（PathPattern 把斜杠当段分隔符）。</p>
+     *
+     * @param mediaId 内容唯一标识
+     * @param caption 新描述/标题（空串清空）
+     */
+    @PostMapping("/caption")
+    public Result<Void> updateCaption(
+            @RequestParam("mediaId") String mediaId,
+            @RequestParam("caption") String caption) {
+        mediaUploadService.updateCaption(mediaId, UserContextHolder.requireUserId(), caption);
         return Result.ok();
     }
 }

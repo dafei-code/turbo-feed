@@ -13,12 +13,14 @@ import com.turbofeed.gateway.service.event.MediaEventPublisher;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
 import com.turbofeed.gateway.service.feed.FeedTimelineStore;
 import com.turbofeed.gateway.service.idempotency.UploadIdempotency;
+import com.turbofeed.gateway.service.moderation.SensitiveWordService;
 import com.turbofeed.gateway.service.processing.ImageProcessingChain;
 import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
 import com.turbofeed.gateway.service.review.MediaStatus;
 import com.turbofeed.gateway.service.validation.UploadValidation;
 import com.turbofeed.gateway.service.validation.UploadValidationChain;
 import com.turbofeed.gateway.storage.MediaStorageClient;
+import com.turbofeed.gateway.util.CaptionMarkParser;
 import com.turbofeed.shared.result.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -64,6 +66,8 @@ public class MediaUploadService {
     private final MediaJdbcRepository mediaRepository;
     private final FeedTimelineStore feedTimelineStore;
     private final StringRedisTemplate redisTemplate;
+    private final CaptionMarkParser captionMarkParser;
+    private final SensitiveWordService sensitiveWordService;
 
     /** 单条状态缓存前缀（与 MediaReviewService 一致，删除时精确失效） */
     private static final String STATUS_KEY_PREFIX = "tf:media:status:";
@@ -104,7 +108,7 @@ public class MediaUploadService {
      */
     @SentinelResource(value = SentinelRateLimitConfig.UPLOAD_RESOURCE,
             entryType = EntryType.IN, blockHandler = "uploadBlocked")
-    public List<String> upload(MultipartFile[] files, String requestId) {
+    public List<String> upload(MultipartFile[] files, String caption, String requestId) {
         String userId = UserContextHolder.requireUserId();
 
         // 用户维度限流（机器维度已由 Sentinel 注解外层放行）
@@ -123,14 +127,20 @@ public class MediaUploadService {
             throw new BizException(ErrorCode.UPLOAD_IN_PROGRESS, "请求处理中，请勿重复提交");
         }
 
+        // 描述/标题：抖音式文案（@用户 / #话题 / [image:idx:filename]），
+        // 同步敏感词 fail-closed；解析为 caption_mark 落库。一次上传一个 caption 共享给本批所有文件。
+        String rawCaption = caption == null ? "" : caption;
+        sensitiveWordService.requireClean(rawCaption);
+        CaptionMarkParser.ParseResult captionMark = captionMarkParser.parse(rawCaption);
+
         UploadValidation context = null;
         try {
             context = validationChain.validate(userId, files);
             List<String> urls = new ArrayList<>(files.length);
             for (int i = 0; i < files.length; i++) {
-                urls.add(storeOne(userId, files[i], context.format(i), requestId));
+                urls.add(storeOne(userId, files[i], context.format(i), requestId, rawCaption, captionMark.markJson()));
             }
-            log.info("媒体上传受理: userId={}, count={}, requestId={}", userId, urls.size(), requestId);
+            log.info("媒体上传受理: userId={}, count={}, requestId={}, captionLen={}", userId, urls.size(), requestId, rawCaption.length());
             idempotency.store(userId, requestId, urls);
             return urls;
         } finally {
@@ -149,7 +159,7 @@ public class MediaUploadService {
      * 同返回类型、同类 public 实例方法。不吞 BlockException 而是转成统一业务异常
      * {@link BizException}(RATE_LIMITED)，由全局异常处理器输出标准错误响应。</p>
      */
-    public List<String> uploadBlocked(MultipartFile[] files, String requestId, BlockException e) {
+    public List<String> uploadBlocked(MultipartFile[] files, String caption, String requestId, BlockException e) {
         UserContext context = UserContextHolder.get();
         String userId = context != null ? context.userId() : "anonymous";
         log.warn("上传限流触发: userId={}, requestId={}, rule={}", userId, requestId, e.getClass().getSimpleName());
@@ -157,7 +167,8 @@ public class MediaUploadService {
     }
 
     /** 单文件：可选处理 -&gt; 存储 -&gt; 发布事件，返回 URL（格式由校验链产出，不再重复嗅探）。 */
-    private String storeOne(String userId, MultipartFile file, ImageFormat format, String requestId) {
+    private String storeOne(String userId, MultipartFile file, ImageFormat format, String requestId,
+                            String caption, String captionMark) {
         byte[] processed = maybeProcess(file, format);
         try (InputStream content = processed != null
                 ? new ByteArrayInputStream(processed)
@@ -169,7 +180,7 @@ public class MediaUploadService {
             // insert 以 media_id 主键幂等（ON DUPLICATE KEY UPDATE），与 handleUploaded 兜底插互不冲突；
             // 即便事件丢失，media 表已留 PENDING 记录，可经巡检对账补审 / 清理。
             mediaRepository.insert(stored.mediaId(), Long.parseLong(userId), stored.url(),
-                    MediaStatus.PENDING, Instant.now());
+                    MediaStatus.PENDING, caption, captionMark, Instant.now());
             eventPublisher.publish(new MediaUploadedEvent(
                     stored.mediaId(), userId, stored.url(), requestId, Instant.now()));
             return stored.url();
@@ -233,5 +244,24 @@ public class MediaUploadService {
             log.warn("状态缓存失效失败（不影响主流程）: mediaId={}, {}", mediaId, e.getMessage());
         }
         log.info("内容已删除（物理+逻辑）: mediaId={}, userId={}", mediaId, userId);
+    }
+
+    /**
+     * 更新媒体描述/标题（用户编辑已上传内容的文案）。
+     *
+     * <p>流程：原始文本过敏感词 fail-closed → 解析为 caption_mark → 落库。
+     * 带 user_id 分片键，仅本人内容可改（与 delete 同源防护）。该方法不重置
+     * 审核状态——描述修改不影响内容流转（合规要求：涉政违规仅下架而非拒重传）。</p>
+     *
+     * @param mediaId 内容唯一标识（含斜杠）
+     * @param userId  归属用户（来自 JWT，非客户端可控）
+     * @param caption 新描述/标题（可为 null / 空表示清空）
+     */
+    public void updateCaption(String mediaId, String userId, String caption) {
+        String raw = caption == null ? "" : caption;
+        sensitiveWordService.requireClean(raw);
+        CaptionMarkParser.ParseResult pr = captionMarkParser.parse(raw);
+        mediaRepository.updateCaption(mediaId, Long.parseLong(userId), raw, pr.markJson());
+        log.info("媒体描述已更新: mediaId={}, userId={}, captionLen={}", mediaId, userId, raw.length());
     }
 }

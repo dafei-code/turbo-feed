@@ -49,16 +49,37 @@ public class MediaJdbcRepository {
             rs.getString("media_id"),
             rs.getString("url"),
             toStatus(rs.getInt("status")),
-            rs.getTimestamp("created_at").toInstant());
+            rs.getTimestamp("created_at").toInstant(),
+            rs.getString("caption"),
+            rs.getString("caption_mark"));
 
     /** 落库一条媒体记录（受理态）。media_id 为主键，重投天然幂等。 */
-    public void insert(String mediaId, long userId, String url, MediaStatus status, Instant createdAt) {
+    public void insert(String mediaId, long userId, String url, MediaStatus status,
+                       String caption, String captionMark, Instant createdAt) {
         jdbcTemplate.update(
-                "INSERT INTO media (media_id, user_id, url, status, media_type, file_size, created_at) "
-                        + "VALUES (?, ?, ?, ?, 'IMAGE', 0, ?) "
-                        + "ON DUPLICATE KEY UPDATE status = VALUES(status), url = VALUES(url)",
-                mediaId, userId, url, toCode(status), java.sql.Timestamp.from(createdAt));
+                "INSERT INTO media (media_id, user_id, url, status, media_type, file_size, caption, caption_mark, created_at) "
+                        + "VALUES (?, ?, ?, ?, 'IMAGE', 0, ?, ?, ?) "
+                        + "ON DUPLICATE KEY UPDATE status = VALUES(status), url = VALUES(url), "
+                        + "caption = VALUES(caption), caption_mark = VALUES(caption_mark)",
+                mediaId, userId, url, toCode(status),
+                caption == null ? "" : caption,
+                captionMark == null ? "" : captionMark,
+                java.sql.Timestamp.from(createdAt));
         log.debug("媒体落库: mediaId={}, userId={}, status={}", mediaId, userId, status);
+    }
+
+    /**
+     * 更新媒体描述/标题（用户编辑已上传内容的文案）。
+     *
+     * <p>带 {@code user_id} 分片键精准路由；空 caption / captionMark 写空串。
+     * 该方法不重置 status——描述修改不影响审核流转。</p>
+     */
+    public void updateCaption(String mediaId, long userId, String caption, String captionMark) {
+        jdbcTemplate.update(
+                "UPDATE media SET caption = ?, caption_mark = ? WHERE media_id = ? AND user_id = ?",
+                caption == null ? "" : caption,
+                captionMark == null ? "" : captionMark,
+                mediaId, userId);
     }
 
     /** 审核状态流转（PENDING -> APPROVED/REJECTED）。带 user_id 分片键精准路由。 */
@@ -77,7 +98,7 @@ public class MediaJdbcRepository {
      */
     public List<MediaItem> listByUser(long userId, MediaStatus statusFilter, int limit, long offset) {
         StringBuilder sql = new StringBuilder(
-                "SELECT media_id, url, status, created_at FROM media WHERE user_id = ?");
+                "SELECT media_id, url, status, created_at, caption, caption_mark FROM media WHERE user_id = ?");
         List<Object> args = new ArrayList<>();
         args.add(userId);
         if (statusFilter != null) {
@@ -108,7 +129,7 @@ public class MediaJdbcRepository {
      */
     public List<MediaItem> listApprovedGlobal(int limit, long offset) {
         return jdbcTemplate.query(
-                "SELECT media_id, url, status, created_at FROM media "
+                "SELECT media_id, url, status, created_at, caption, caption_mark FROM media "
                         + "WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 MEDIA_ROW_MAPPER, toCode(MediaStatus.APPROVED), limit, offset);
     }
@@ -120,7 +141,7 @@ public class MediaJdbcRepository {
      */
     public MediaItem findMedia(String mediaId, long userId) {
         List<MediaItem> items = jdbcTemplate.query(
-                "SELECT media_id, url, status, created_at FROM media WHERE media_id = ? AND user_id = ?",
+                "SELECT media_id, url, status, created_at, caption, caption_mark FROM media WHERE media_id = ? AND user_id = ?",
                 MEDIA_ROW_MAPPER, mediaId, userId);
         return items.isEmpty() ? null : items.get(0);
     }
@@ -137,7 +158,7 @@ public class MediaJdbcRepository {
      */
     public List<MediaItem> listPendingGlobal(int limit, long offset) {
         return jdbcTemplate.query(
-                "SELECT media_id, url, status, created_at FROM media "
+                "SELECT media_id, url, status, created_at, caption, caption_mark FROM media "
                         + "WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 MEDIA_ROW_MAPPER, toCode(MediaStatus.PENDING), limit, offset);
     }
