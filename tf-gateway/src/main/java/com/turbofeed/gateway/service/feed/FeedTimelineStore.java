@@ -48,18 +48,30 @@ public class FeedTimelineStore {
     private static final int MERGE_BUCKETS = 3;
     /** 单桶最多拉取条数（防单天批准量过大时归并开销爆炸）。 */
     private static final int PER_BUCKET_CAP = 500;
+    /** 流量池层级上限（L1 小池 / L3 大池，演示 3 级）。 */
+    private static final int MAX_POOL_LEVELS = 3;
 
-    /** 审核通过：写时间线（denormalized MediaItem JSON），fail-open。仅 APPROVED 入时间线。 */
-    public void append(MediaItem item) {
+    /**
+     * 审核通过：按信用池写时间线（denormalized MediaItem JSON），fail-open。仅 APPROVED 入对应池。
+     *
+     * <p>key 形如 {@code tf:feed:tl:{pool}:{yyyyMMdd}}，与 {@link #readPage} 的读路径维度一致。</p>
+     */
+    public void append(MediaItem item, int poolLevel) {
         if (item.status() != MediaStatus.APPROVED) {
             return;
         }
+        int pool = poolLevel < 1 ? 1 : Math.min(poolLevel, MAX_POOL_LEVELS);
         try {
-            String key = TL_PREFIX + bucketOf(item.createdAt());
+            String key = TL_PREFIX + pool + ":" + bucketOf(item.createdAt());
             redisTemplate.opsForZSet().add(key, objectMapper.writeValueAsString(item), item.createdAt().toEpochMilli());
         } catch (Exception e) {
-            log.warn("时间线写入失败（不影响审核主流程）: mediaId={}, {}", item.mediaId(), e.getMessage());
+            log.warn("时间线写入失败（不影响审核主流程）: mediaId={}, pool={}, {}", item.mediaId(), pool, e.getMessage());
         }
+    }
+
+    /** 兼容重载：未指定池时落 L1 小池。 */
+    public void append(MediaItem item) {
+        append(item, 1);
     }
 
     /**
@@ -119,23 +131,26 @@ public class FeedTimelineStore {
     public void remove(String mediaId) {
         LocalDate today = LocalDate.now();
         for (int d = 0; d < MERGE_BUCKETS; d++) {
-            String key = TL_PREFIX + today.minusDays(d).format(DateTimeFormatter.BASIC_ISO_DATE);
-            try {
-                Set<String> jsons = redisTemplate.opsForZSet()
-                        .reverseRangeByScore(key, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, 0, PER_BUCKET_CAP);
-                if (jsons == null) continue;
-                for (String json : jsons) {
-                    try {
-                        MediaItem it = objectMapper.readValue(json, MediaItem.class);
-                        if (mediaId.equals(it.mediaId())) {
-                            redisTemplate.opsForZSet().remove(key, json);
+            String date = today.minusDays(d).format(DateTimeFormatter.BASIC_ISO_DATE);
+            for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
+                String key = TL_PREFIX + pool + ":" + date;
+                try {
+                    Set<String> jsons = redisTemplate.opsForZSet()
+                            .reverseRangeByScore(key, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, 0, PER_BUCKET_CAP);
+                    if (jsons == null) continue;
+                    for (String json : jsons) {
+                        try {
+                            MediaItem it = objectMapper.readValue(json, MediaItem.class);
+                            if (mediaId.equals(it.mediaId())) {
+                                redisTemplate.opsForZSet().remove(key, json);
+                            }
+                        } catch (Exception ignore) {
+                            // 单条损坏不影响整体
                         }
-                    } catch (Exception ignore) {
-                        // 单条损坏不影响整体
                     }
+                } catch (Exception e) {
+                    log.warn("时间线移除失败（不影响主流程）: mediaId={}, key={}, {}", mediaId, key, e.getMessage());
                 }
-            } catch (Exception e) {
-                log.warn("时间线移除失败（不影响主流程）: mediaId={}, key={}, {}", mediaId, key, e.getMessage());
             }
         }
     }
