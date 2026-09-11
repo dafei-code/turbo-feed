@@ -25,6 +25,11 @@ public class AdminAuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        // CORS 预检（OPTIONS）不带令牌，由 Spring CORS 配置处理，此处直接放行。
+        // 否则预检被 requireAdmin 拒绝会导致浏览器不发真实请求（审核页拉不到数据）。
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
         // 匿名 -> UNAUTHORIZED；已登录非管理员 -> FORBIDDEN；其余放行。
         // 异常由 GlobalExceptionHandler 翻译为 Result，不在此自行写响应。
         UserContextHolder.requireAdmin();
