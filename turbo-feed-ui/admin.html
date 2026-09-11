@@ -638,15 +638,16 @@
   // 后端网关地址：静态页与后端不同源，故写全址。换端口 / 部署时只改这一处。
   var API_BASE = 'http://localhost:8080';
 
-  // 登录守卫：/api/media/** 均校验 Bearer 令牌，无令牌直接回登录页，
-  // 避免用户绕过登录进来后上传才报 401（报错时机太晚、原因不明）。
+  // 登录守卫：/api/admin/** 后端按 JWT 权限二次校验，页面层先做快捷拦截。
+  // 仅 ADMIN（系统管理员）可进入本管理后台；REVIEWER 仅能进审核工作台 review.html；USER 回退普通用户页。
+  // 旧令牌未写入 role 时放行（由后端兜底校验），避免锁死历史会话。
   var TOKEN = localStorage.getItem('turbofeed:token');
+  var ROLE = localStorage.getItem('turbofeed:role');
   if (!TOKEN) {
     window.location.href = 'login.html';
-  } else if (localStorage.getItem('turbofeed:role') === 'USER') {
-    // 非管理员（已确认角色为 USER）不得进入审核后台，回退普通用户页。
-    // 后端 /api/admin/** 仍按 JWT 中的 role 二次拦截，页面层仅做快捷拦截。
-    // 旧令牌未写入 role 时放行，由后端兜底校验。
+  } else if (ROLE === 'REVIEWER') {
+    window.location.href = 'review.html';
+  } else if (ROLE === 'USER') {
     window.location.href = 'user.html';
   }
 

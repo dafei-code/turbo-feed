@@ -1,5 +1,7 @@
 package com.turbofeed.gateway.security;
 
+import java.util.Set;
+
 /**
  * 当前请求的认证身份（不可变值对象）。
  *
@@ -27,5 +29,15 @@ public record UserContext(String userId, Role role) {
     /** 是否管理员（供鉴权快捷判断）。 */
     public boolean isAdmin() {
         return role == Role.ADMIN;
+    }
+
+    /** 该身份拥有的全部权限（来自角色映射，不可变）。 */
+    public Set<Permission> permissions() {
+        return role.permissions();
+    }
+
+    /** 是否拥有指定权限（RBAC 原子校验入口）。 */
+    public boolean hasPermission(Permission permission) {
+        return role.hasPermission(permission);
     }
 }

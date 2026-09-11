@@ -1,29 +1,53 @@
 package com.turbofeed.gateway.security;
 
+import java.util.EnumSet;
+import java.util.Set;
+
 /**
  * 角色枚举（JWT 载荷携带，服务端解析）。
  *
- * <p>demo 阶段角色由登录时手机号是否命中管理员白名单派生（见 {@link AdminProperties}）；
- * 生产应改为 user 表 role 列 + RBAC。枚举仅承载「编码 <-> 运行时实例」映射，
- * 未知编码一律降级为 {@link #USER}（最小权限原则），不允许未知角色越权。</p>
+ * <p>demo 阶段角色由登录时手机号是否命中白名单派生（见 {@link AdminProperties} /
+ * {@code ReviewerProperties}）；生产应改为 user 表 role 列 + RBAC。每个角色绑定一组
+ * {@link Permission}，接口按权限校验而非按角色名——新增角色只需在此加枚举值 +
+ * 一行权限映射，业务代码零侵入。</p>
+ *
+ * <p>未知编码一律降级为 {@link #USER}（最小权限原则），不允许未知角色越权。</p>
  */
 public enum Role {
 
-    /** 普通用户（默认，最小权限） */
-    USER("USER"),
+    /** 普通用户（默认，最小权限，无后台权限） */
+    USER("USER", Set.of()),
 
-    /** 管理员（可访问 /api/admin/**） */
-    ADMIN("ADMIN");
+    /** 审核员：可审内容、高危下架、看板只读，无系统管理权限 */
+    REVIEWER("REVIEWER", Set.of(
+            Permission.CONTENT_REVIEW,
+            Permission.CONTENT_TAKEDOWN,
+            Permission.DASHBOARD_VIEW)),
+
+    /** 系统管理员：拥有全部权限 */
+    ADMIN("ADMIN", Set.copyOf(EnumSet.allOf(Permission.class)));
 
     private final String code;
+    private final Set<Permission> permissions;
 
-    Role(String code) {
+    Role(String code, Set<Permission> permissions) {
         this.code = code;
+        this.permissions = permissions;
     }
 
     /** 用于写入 JWT 声明的稳定编码。 */
     public String code() {
         return code;
+    }
+
+    /** 该角色拥有的权限集合（不可变）。 */
+    public Set<Permission> permissions() {
+        return permissions;
+    }
+
+    /** 是否拥有指定权限。 */
+    public boolean hasPermission(Permission permission) {
+        return permissions.contains(permission);
     }
 
     /** 从 JWT 声明编码解析角色；null / 未知一律降级 USER。 */

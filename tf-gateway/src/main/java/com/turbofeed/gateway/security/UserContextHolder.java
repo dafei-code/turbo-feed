@@ -65,6 +65,31 @@ public final class UserContextHolder {
         }
     }
 
+    /**
+     * RBAC 原子权限校验：调用点声明所需 {@link Permission}（全部满足才放行）。
+     * 鉴权失败时抛 {@link BizException}：
+     * <ul>
+     *   <li>匿名（未登录）-> {@code UNAUTHORIZED}（请先登录）；</li>
+     *   <li>已登录但缺少任一所需权限 -> {@code FORBIDDEN}（无权限访问）。</li>
+     * </ul>
+     * 供 {@link PermissionInterceptor}（读取 {@link RequirePermission} 注解）在 preHandle 调用。
+     * 新增角色只需在 {@link Role} 里加一行权限映射，业务接口用注解声明权限，此处无需改动。
+     */
+    public static void requirePermission(Permission... required) {
+        UserContext context = CONTEXT.get();
+        if (context == null) {
+            throw new BizException(ErrorCode.UNAUTHORIZED, "请先登录");
+        }
+        if (required == null || required.length == 0) {
+            return; // 无权限要求：已登录即可
+        }
+        for (Permission permission : required) {
+            if (!context.hasPermission(permission)) {
+                throw new BizException(ErrorCode.FORBIDDEN, "无权限访问：" + permission);
+            }
+        }
+    }
+
     /** 清理上下文（请求结束兜底，防止线程池串号）。 */
     public static void clear() {
         CONTEXT.remove();

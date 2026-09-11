@@ -170,8 +170,13 @@
 
   // 登录守卫：审核接口校验 Bearer 令牌，无令牌直接回登录页。
   var TOKEN = localStorage.getItem('turbofeed:token');
+  var ROLE = localStorage.getItem('turbofeed:role');
   if (!TOKEN) {
     window.location.href = 'login.html';
+  } else if (ROLE === 'USER') {
+    // 普通用户无审核权限，回退普通用户页；后端 /api/admin/media/** 仍按权限二次拦截。
+    // 旧令牌未写入 role 时放行（ADMIN/REVIEWER 或未知），由后端兜底校验。
+    window.location.href = 'user.html';
   }
 
   // 当前登录用户（login.html 登录成功后写入；未登录直接打开时回退为 reviewer）

@@ -1,6 +1,8 @@
 package com.turbofeed.gateway.controller;
 
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
+import com.turbofeed.gateway.security.Permission;
+import com.turbofeed.gateway.security.RequirePermission;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.MediaReviewService;
 import com.turbofeed.gateway.service.review.MediaStatus;
@@ -22,10 +24,11 @@ import java.util.List;
  * 提供「审核队列查询 + 通过/驳回」两个操作，把内容翻成 APPROVED / REJECTED 终态——
  * 即抖音级「机审 + 人审」中的人审入口（机审占位实现见 {@code AutoPassModeration}）。</p>
  *
- * <p><b>鉴权（已落地）</b>：{@code /api/admin/**} 已由 {@link com.turbofeed.gateway.security.AdminAuthInterceptor}
- * （注册于 {@code WebConfig#addInterceptors}）在 preHandle 强制校验管理员角色——非 ADMIN 令牌
- * 或匿名请求一律 {@code 40301 / 40101}（由 {@code GlobalExceptionHandler} 翻译为 {@code Result}），
- * 任意登录用户不再能审核。</p>
+ * <p><b>鉴权（RBAC 已落地）</b>：{@code /api/admin/**} 已由 {@link com.turbofeed.gateway.security.PermissionInterceptor}
+ * （注册于 {@code WebConfig#addInterceptors}）在 preHandle 按 {@link RequirePermission} 注解做权限校验——
+ * 审核员(REVIEWER，含 CONTENT_REVIEW/CONTENT_TAKEDOWN/DASHBOARD_VIEW)与系统管理员(ADMIN，全权限)可操作，
+ * 普通用户(USER)或匿名请求一律 {@code 40301 / 40101}（由 {@code GlobalExceptionHandler} 翻译为 {@code Result}）。
+ * 方法级注解声明具体所需权限，新增角色只需在 {@code Role} 映射权限，此处无需改动。</p>
  *
  * <p><b>mediaId 传参方式</b>：mediaId 形如 {@code media/{userId}/{uuid}.{ext}} 本身含斜杠，
  * 不能做路径变量（PathPattern 会把斜杠当段分隔符），一律走 query 参数原样携带。</p>
@@ -46,6 +49,7 @@ public class AdminMediaController {
      * @return 待审核内容列表（mediaId / url / status / createdAt）
      */
     @GetMapping("/pending")
+    @RequirePermission(Permission.CONTENT_REVIEW)
     public Result<List<MediaItem>> pending(
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "20") int size) {
@@ -63,6 +67,7 @@ public class AdminMediaController {
      * @return 审核后的终态
      */
     @PostMapping("/review")
+    @RequirePermission(Permission.CONTENT_REVIEW)
     public Result<MediaStatus> review(
             @RequestParam("mediaId") String mediaId,
             @RequestParam("approve") boolean approve) {
@@ -77,6 +82,7 @@ public class AdminMediaController {
      * @param confirmed true=确认违规（下架）/ false=举报不成立（驳回）
      */
     @PostMapping("/report-review")
+    @RequirePermission(Permission.CONTENT_TAKEDOWN)
     public Result<MediaStatus> reportReview(
             @RequestParam("mediaId") String mediaId,
             @RequestParam("confirmed") boolean confirmed) {
@@ -91,6 +97,7 @@ public class AdminMediaController {
      * @param upheld   true=翻案（恢复）/ false=维持原拒绝/下架
      */
     @PostMapping("/appeal-review")
+    @RequirePermission(Permission.CONTENT_REVIEW)
     public Result<MediaStatus> appealReview(
             @RequestParam("mediaId") String mediaId,
             @RequestParam("upheld") boolean upheld) {
