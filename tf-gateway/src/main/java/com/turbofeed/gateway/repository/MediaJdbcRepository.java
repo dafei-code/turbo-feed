@@ -53,14 +53,21 @@ public class MediaJdbcRepository {
             rs.getString("caption"),
             rs.getString("caption_mark"));
 
-    /** 落库一条媒体记录（受理态）。media_id 为主键，重投天然幂等。 */
+    /**
+     * 落库一条媒体记录（受理态）。{@code media_id} 为主键，重投天然幂等。
+     *
+     * <p><b>重复键为何不回写 caption</b>：描述/标题的<b>初始写入方</b>是上传服务
+     * （{@code MediaUploadService.storeOne}），<b>修改方</b>只有 {@link #updateCaption}。
+     * 审核兜底插入（{@code MediaReviewService.handleUploaded}）只负责把受理态落库，
+     * 若在此处回写 caption，MQ 异步投递期间用户对描述的编辑会被事件里的旧值覆盖（丢更新）；
+     * 故重复键仅刷新 status/url。</p>
+     */
     public void insert(String mediaId, long userId, String url, MediaStatus status,
                        String caption, String captionMark, Instant createdAt) {
         jdbcTemplate.update(
                 "INSERT INTO media (media_id, user_id, url, status, media_type, file_size, caption, caption_mark, created_at) "
                         + "VALUES (?, ?, ?, ?, 'IMAGE', 0, ?, ?, ?) "
-                        + "ON DUPLICATE KEY UPDATE status = VALUES(status), url = VALUES(url), "
-                        + "caption = VALUES(caption), caption_mark = VALUES(caption_mark)",
+                        + "ON DUPLICATE KEY UPDATE status = VALUES(status), url = VALUES(url)",
                 mediaId, userId, url, toCode(status),
                 caption == null ? "" : caption,
                 captionMark == null ? "" : captionMark,

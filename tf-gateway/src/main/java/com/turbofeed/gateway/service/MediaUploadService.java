@@ -182,7 +182,7 @@ public class MediaUploadService {
             mediaRepository.insert(stored.mediaId(), Long.parseLong(userId), stored.url(),
                     MediaStatus.PENDING, caption, captionMark, Instant.now());
             eventPublisher.publish(new MediaUploadedEvent(
-                    stored.mediaId(), userId, stored.url(), requestId, Instant.now()));
+                    stored.mediaId(), userId, stored.url(), caption, captionMark, requestId, Instant.now()));
             return stored.url();
         } catch (IOException e) {
             log.error("读取上传内容失败: userId={}, size={}", userId, file.getSize(), e);

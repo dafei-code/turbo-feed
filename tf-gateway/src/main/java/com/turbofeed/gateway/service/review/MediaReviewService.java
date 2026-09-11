@@ -58,13 +58,14 @@ public class MediaReviewService {
             if (existing == MediaStatus.APPROVED) {
                 CreditLevel level = accountCreditService.ensure(userId);
                 feedTimelineStore.append(
-                        new MediaItem(event.mediaId(), event.url(), MediaStatus.APPROVED, event.occurredAt()),
+                        toTimelineItem(event),
                         level.poolLevel());
             }
             return;
         }
-        // 首投：落库受理态
-        mediaRepository.insert(event.mediaId(), userId, event.url(), MediaStatus.PENDING, event.occurredAt());
+        // 首投：落库受理态（兜底插入；正常路径已由上传服务先落库，命中主键即幂等更新）
+        mediaRepository.insert(event.mediaId(), userId, event.url(), MediaStatus.PENDING,
+                event.caption(), event.captionMark(), event.occurredAt());
 
         // —— 机审初筛（始终执行）——
         MediaStatus machine = contentModeration.moderate(event.mediaId(), userId, event.url());
@@ -75,7 +76,7 @@ public class MediaReviewService {
             if (target == MediaStatus.APPROVED) {
                 CreditLevel level = accountCreditService.ensure(userId);
                 feedTimelineStore.append(
-                        new MediaItem(event.mediaId(), event.url(), MediaStatus.APPROVED, event.occurredAt()),
+                        toTimelineItem(event),
                         level.poolLevel());
             }
             return;
@@ -99,7 +100,7 @@ public class MediaReviewService {
         MediaStatus target = review(event.mediaId(), userId, true);
         if (target == MediaStatus.APPROVED) {
             feedTimelineStore.append(
-                    new MediaItem(event.mediaId(), event.url(), MediaStatus.APPROVED, event.occurredAt()),
+                    toTimelineItem(event),
                     level.poolLevel());
         }
     }
@@ -134,7 +135,8 @@ public class MediaReviewService {
             if (item != null) {
                 CreditLevel level = accountCreditService.ensure(userId);
                 feedTimelineStore.append(
-                        new MediaItem(item.mediaId(), item.url(), MediaStatus.APPROVED, item.createdAt()),
+                        new MediaItem(item.mediaId(), item.url(), MediaStatus.APPROVED, item.createdAt(),
+                                item.caption(), item.captionMark()),
                         level.poolLevel());
             }
         }
@@ -200,7 +202,8 @@ public class MediaReviewService {
             if (item != null) {
                 CreditLevel level = accountCreditService.ensure(authorId);
                 feedTimelineStore.append(
-                        new MediaItem(item.mediaId(), item.url(), MediaStatus.APPROVED, item.createdAt()),
+                        new MediaItem(item.mediaId(), item.url(), MediaStatus.APPROVED, item.createdAt(),
+                                item.caption(), item.captionMark()),
                         level.poolLevel());
             }
             accountCreditService.onAppealUpheld(authorId);
@@ -210,6 +213,17 @@ public class MediaReviewService {
             log.info("申诉维持原状: mediaId={}", mediaId);
         }
         appealRepository.resolve(mediaId, upheld);
+    }
+
+    /**
+     * 事件 → 公域时间线条目（物化进 Redis ZSET 的 {@link MediaItem} JSON，含描述/标题）。
+     *
+     * <p>描述随事件透传而非回查 DB：审核发布是热路径，避免为拿 caption 多一次分片查询；
+     * 事件与首落库携带同一份 caption/captionMark，物化结果与库中一致，Feed 直接可展示。</p>
+     */
+    private static MediaItem toTimelineItem(MediaUploadedEvent event) {
+        return new MediaItem(event.mediaId(), event.url(), MediaStatus.APPROVED,
+                event.occurredAt(), event.caption(), event.captionMark());
     }
 
     private static boolean isHighRisk(String reason) {
