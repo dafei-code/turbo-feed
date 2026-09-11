@@ -32,21 +32,23 @@ public class UserJdbcRepository {
 
     /** 落库一条用户记录。id 为分片键，ShardingSphere 按 id 精准路由。 */
     public void insert(User user) {
+        // role 为 null（如注册路径未显式指定）时按最小权限 USER 落库，避免空角色。
+        String role = (user.getRole() == null || user.getRole().isBlank()) ? "USER" : user.getRole();
         jdbcTemplate.update(
-                "INSERT INTO user (id, phone, password_hash, nickname, status) VALUES (?, ?, ?, ?, ?)",
-                user.getId(), user.getPhone(), user.getPasswordHash(), user.getNickname(), user.getStatus());
+                "INSERT INTO user (id, phone, password_hash, nickname, status, role) VALUES (?, ?, ?, ?, ?, ?)",
+                user.getId(), user.getPhone(), user.getPasswordHash(), user.getNickname(), user.getStatus(), role);
     }
 
-    /** 登录定位：按手机号取 id + 密码哈希 + 状态（无分片键，广播合并后取首行）。 */
+    /** 登录定位：按手机号取 id + 密码哈希 + 状态 + 角色（无分片键，广播合并后取首行）。 */
     public Optional<UserIdHash> findByPhone(String phone) {
         List<UserIdHash> list = jdbcTemplate.query(
-                "SELECT id, password_hash, status FROM user WHERE phone = ?",
-                (rs, rn) -> new UserIdHash(rs.getLong("id"), rs.getString("password_hash"), rs.getInt("status")),
+                "SELECT id, password_hash, status, role FROM user WHERE phone = ?",
+                (rs, rn) -> new UserIdHash(rs.getLong("id"), rs.getString("password_hash"), rs.getInt("status"), rs.getString("role")),
                 phone);
         return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
     }
 
-    /** 登录用轻量投影：仅取登录必需的三列，避免把整行用户对象暴露给 Service。 */
-    public record UserIdHash(Long id, String passwordHash, int status) {
+    /** 登录用轻量投影：仅取登录必需的字段，避免把整行用户对象暴露给 Service。 */
+    public record UserIdHash(Long id, String passwordHash, int status, String role) {
     }
 }

@@ -1,7 +1,5 @@
 package com.turbofeed.gateway.service;
 
-import com.turbofeed.gateway.config.AdminProperties;
-import com.turbofeed.gateway.config.ReviewerProperties;
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.repository.UserJdbcRepository;
 import com.turbofeed.gateway.security.JwtUtil;
@@ -26,8 +24,6 @@ public class AuthService {
 
     private final UserJdbcRepository userJdbcRepository;
     private final JwtUtil jwtUtil;
-    private final AdminProperties adminProperties;
-    private final ReviewerProperties reviewerProperties;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     /**
@@ -54,15 +50,11 @@ public class AuthService {
         if (account.get().status() == 2) {
             throw new BizException(ErrorCode.UNAUTHORIZED, "账号已禁用");
         }
-        // 令牌内携带 UID 而非手机号（对标抖音账号体系）；
-        // demo 阶段角色由手机号白名单派生（ADMIN 优先，其次 REVIEWER，其余 USER）；
-        // 生产改 user 表 role 列 + RBAC，移除本段白名单判断。
-        String role;
-        if (adminProperties.getPhones().contains(phone)) {
-            role = "ADMIN";
-        } else if (reviewerProperties.getPhones().contains(phone)) {
-            role = "REVIEWER";
-        } else {
+        // 令牌内携带 UID 而非手机号（对标抖音账号体系）。
+        // 角色来自 user 表 role 列（真 RBAC），登录直接读库派生，不在配置里维护白名单；
+        // DB 缺省为 USER（最小权限），空角色也兜底为 USER，杜绝越权签发。
+        String role = account.get().role();
+        if (role == null || role.isBlank()) {
             role = "USER";
         }
         return jwtUtil.generateToken(String.valueOf(account.get().id()), role);

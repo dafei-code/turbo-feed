@@ -14,6 +14,7 @@ public class User {
     private String passwordHash;
     private String nickname;
     private Integer status;
+    private String role;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -66,6 +67,15 @@ public class User {
 
     public void setStatus(Integer status) {
         this.status = status;
+    }
+
+    /** 角色（USER / REVIEWER / ADMIN），来自 user 表 role 列，登录时直接读库派生 JWT。 */
+    public String getRole() {
+        return role;
+    }
+
+    public void setRole(String role) {
+        this.role = role;
     }
 
     public LocalDateTime getCreatedAt() {

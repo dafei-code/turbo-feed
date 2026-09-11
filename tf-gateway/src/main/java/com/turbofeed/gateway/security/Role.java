@@ -6,8 +6,8 @@ import java.util.Set;
 /**
  * 角色枚举（JWT 载荷携带，服务端解析）。
  *
- * <p>demo 阶段角色由登录时手机号是否命中白名单派生（见 {@link AdminProperties} /
- * {@code ReviewerProperties}）；生产应改为 user 表 role 列 + RBAC。每个角色绑定一组
+ * <p>角色由 user 表 role 列承载（真 RBAC），登录时 {@code AuthService} 直接读库派生 JWT，
+ * 不在配置里维护任何白名单（工程规范：默认配置不写 demo / 敏感字面量）。每个角色绑定一组
  * {@link Permission}，接口按权限校验而非按角色名——新增角色只需在此加枚举值 +
  * 一行权限映射，业务代码零侵入。</p>
  *

@@ -9,7 +9,7 @@ import java.util.Set;
  * {@link UserContextHolder} 绑定到当前线程。业务层只读，不承载派发/回写职责。</p>
  *
  * @param userId 用户 ID（来自 JWT sub 声明，服务端解析，客户端不可指定）
- * @param role   角色（来自 JWT role 声明，demo 由手机号白名单派生；生产改 user 表 role 列）
+ * @param role   角色（来自 JWT role 声明，由 user 表 role 列读库派生，真 RBAC）
  */
 public record UserContext(String userId, Role role) {
 

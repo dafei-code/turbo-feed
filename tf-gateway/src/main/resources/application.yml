@@ -58,25 +58,14 @@ turbofeed:
   jwt:
     secret: turbofeed-demo-secret-change-me
     expire-seconds: 86400
-  # 管理员配置（demo 阶段）：手机号白名单派生 ADMIN 角色。
-  # 登录时手机号命中 phones 即签发 ADMIN 令牌，可访问 /api/admin/**；
-  # 生产应替换为 user 表 role 列 + RBAC，移除本白名单。
-  admin:
-    phones:
-      - "13800138000"
-  # 审核员配置（demo 阶段）：手机号白名单派生 REVIEWER 角色。
-  # 登录时手机号命中 phones 即签发 REVIEWER 令牌，可访问内容审核工作台（/api/admin/media/* 的审核类接口），
-  # 但无系统管理权限（USER_MANAGE/SYSTEM_CONFIG/CREDIT_MANAGE 不在 REVIEWER 权限集内）；
-  # 生产应替换为 user 表 role 列 + RBAC（与 admin.phones 合并为统一角色来源）。
-  reviewer:
-    phones:
-      - "13700137000"
-  # 演示账号：种子数据已写入 deploy/mysql/init-local.sql，重新执行脚本后即可登录：
-  #   管理员   13800138000 / 123456（命中 admin.phones    → ADMIN 角色，进 admin.html）
-  #   审核员   13700137000 / 123456（命中 reviewer.phones  → REVIEWER 角色，进 review.html）
-  #   普通用户 13900139000 / 123456（无白名单命中          → USER 角色，进 user.html）
+  # 角色来源（真 RBAC）：用户角色由 user 表 role 列承载（USER / REVIEWER / ADMIN），
+  # 登录时直接读库派生 JWT，不在配置里维护任何手机号白名单——保持默认配置纯净、无 demo 字面量。
+  # 生产改数据库 + user_phone_router(phone→uid) 映射 + 哈希存储；角色变更走数据运维而非改配置。
+  # 演示账号：种子数据已写入 deploy/mysql/init-local.sql（role 列已写入），重新执行脚本后即可登录：
+  #   管理员   13800138000 / 123456（role=ADMIN，进 admin.html）
+  #   审核员   13700137000 / 123456（role=REVIEWER，进 review.html）
+  #   普通用户 13900139000 / 123456（role=USER，进 user.html）
   # 对标抖音：令牌 sub 携带 uid（身份层），手机号仅作登录凭证（凭证层），不进入令牌、不参与分片。
-  # 生产改数据库 + user_phone_router(phone→uid) 映射 + 哈希存储
   # 媒体上传限额：调整阈值只改配置不发版
   media:
     key-prefix: media

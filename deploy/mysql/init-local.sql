@@ -34,6 +34,7 @@ CREATE TABLE `turbo_feed_1`.`user_0` (
   `nickname`      VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '昵称',
   `avatar_url`    VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '头像URL(对象存储)',
   `status`        TINYINT      NOT NULL DEFAULT 1      COMMENT '1=正常 2=禁用 3=待激活',
+  `role`          VARCHAR(20)  NOT NULL DEFAULT 'USER' COMMENT '角色: USER/REVIEWER/ADMIN（RBAC 权限来源，登录直接读库派生 JWT）',
   `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
@@ -48,6 +49,7 @@ CREATE TABLE `turbo_feed_1`.`user_2` (
   `nickname`      VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '昵称',
   `avatar_url`    VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '头像URL(对象存储)',
   `status`        TINYINT      NOT NULL DEFAULT 1      COMMENT '1=正常 2=禁用 3=待激活',
+  `role`          VARCHAR(20)  NOT NULL DEFAULT 'USER' COMMENT '角色: USER/REVIEWER/ADMIN（RBAC 权限来源，登录直接读库派生 JWT）',
   `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
@@ -165,6 +167,7 @@ CREATE TABLE `turbo_feed_2`.`user_1` (
   `nickname`      VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '昵称',
   `avatar_url`    VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '头像URL(对象存储)',
   `status`        TINYINT      NOT NULL DEFAULT 1      COMMENT '1=正常 2=禁用 3=待激活',
+  `role`          VARCHAR(20)  NOT NULL DEFAULT 'USER' COMMENT '角色: USER/REVIEWER/ADMIN（RBAC 权限来源，登录直接读库派生 JWT）',
   `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
@@ -179,6 +182,7 @@ CREATE TABLE `turbo_feed_2`.`user_3` (
   `nickname`      VARCHAR(64)  NOT NULL DEFAULT ''     COMMENT '昵称',
   `avatar_url`    VARCHAR(255) NOT NULL DEFAULT ''     COMMENT '头像URL(对象存储)',
   `status`        TINYINT      NOT NULL DEFAULT 1      COMMENT '1=正常 2=禁用 3=待激活',
+  `role`          VARCHAR(20)  NOT NULL DEFAULT 'USER' COMMENT '角色: USER/REVIEWER/ADMIN（RBAC 权限来源，登录直接读库派生 JWT）',
   `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
@@ -284,22 +288,22 @@ CREATE TABLE `turbo_feed_2`.`appeal_3` (
 -- ==================== 演示账号种子数据（DB 重建后可直接登录） ====================
 -- 说明：网关登录现走 user 分片表 + BCrypt 校验；旧 application.yml 中 auth.demo-users
 --      配置已废弃。重新执行本脚本后可用以下账号登录：
---   13800138000 / 123456  → 命中 admin.phones 白名单，令牌角色 ADMIN（系统管理员，进 admin.html）
---   13700137000 / 123456  → 命中 reviewer.phones 白名单，令牌角色 REVIEWER（审核员，进 review.html）
---   13900139000 / 123456  → 普通用户，令牌角色 USER（进 user.html）
+--   13800138000 / 123456  → role=ADMIN（系统管理员，进 admin.html，角色来自 user 表 role 列）
+--   13700137000 / 123456  → role=REVIEWER（审核员，进 review.html，角色来自 user 表 role 列）
+--   13900139000 / 123456  → role=USER（普通用户，进 user.html，角色来自 user 表 role 列）
 -- 密码均为 "123456" 的 BCrypt(cost=10) 哈希，生产环境务必移除这些种子。
 
 -- 管理员账号：id 1000000000000000000 % 4 = 0 → user_0(ds_0)
 -- 密码 "123456" 的 BCrypt(cost=10) 哈希，必须使用 $2a$ 前缀（Spring BCryptPasswordEncoder/jBCrypt 仅原生接受 $2a$，
 -- $2y$/$2b$ 会在 hashpw 抛 Invalid salt revision）。本机用 htpasswd -B 生成的是 $2y$，改前缀为 $2a$ 即可（纯 ASCII 短口令等价）。
-INSERT INTO `turbo_feed_1`.`user_0` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `created_at`, `updated_at`)
-VALUES (1000000000000000000, '13800138000', '$2a$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoAdmin', '', 1, NOW(), NOW());
+INSERT INTO `turbo_feed_1`.`user_0` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `role`, `created_at`, `updated_at`)
+VALUES (1000000000000000000, '13800138000', '$2a$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoAdmin', '', 1, 'ADMIN', NOW(), NOW());
 
 -- 审核员账号：id 1000000000000000002 % 4 = 2 → user_2(ds_0)
--- 角色不在 user 表，而由登录时手机号是否命中 reviewer.phones 白名单派生（见 AuthService.login）。
-INSERT INTO `turbo_feed_1`.`user_2` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `created_at`, `updated_at`)
-VALUES (1000000000000000002, '13700137000', '$2a$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoReviewer', '', 1, NOW(), NOW());
+-- 角色直接写在 user 表 role 列（真 RBAC），登录时 AuthService 读库派生 JWT，不在配置里维护白名单。
+INSERT INTO `turbo_feed_1`.`user_2` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `role`, `created_at`, `updated_at`)
+VALUES (1000000000000000002, '13700137000', '$2a$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoReviewer', '', 1, 'REVIEWER', NOW(), NOW());
 
 -- 普通用户账号：id 1000000000000000001 % 4 = 1 → user_1(ds_1)
-INSERT INTO `turbo_feed_2`.`user_1` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `created_at`, `updated_at`)
-VALUES (1000000000000000001, '13900139000', '$2a$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoUser', '', 1, NOW(), NOW());
+INSERT INTO `turbo_feed_2`.`user_1` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `role`, `created_at`, `updated_at`)
+VALUES (1000000000000000001, '13900139000', '$2a$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoUser', '', 1, 'USER', NOW(), NOW());
