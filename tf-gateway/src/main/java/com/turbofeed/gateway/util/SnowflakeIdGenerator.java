@@ -3,8 +3,13 @@ package com.turbofeed.gateway.util;
 /**
  * 雪花算法 ID 生成器（应用层生成 user 表分片键 id）。
  *
- * <p>仅单实例演示用，固定 workerId / datacenterId；多实例部署需从配置或环境变量注入，
- * 避免不同实例在同一毫秒产生相同 id。与 media 表使用的业务 media_id 相互独立。</p>
+ * <p><b>实例标识必须逐实例区分</b>：ID 由 {@code (时间戳, datacenterId, workerId, sequence)} 拼成，
+ * 多实例共用同一组 workerId/datacenterId 时，<b>同一毫秒会生成相同 ID</b>（主键冲突）。
+ * 由 {@code config.SnowflakeConfig} 以单例 Bean 装配，取值来自
+ * {@code turbofeed.snowflake.worker-id / datacenter-id}（各 0~31），生产用环境变量注入。</p>
+ *
+ * <p>与 media 表使用的业务 media_id 相互独立（media_id 由存储层生成，
+ * 形如 {@code media/{userId}/{uuid}.{ext}}）。</p>
  */
 public class SnowflakeIdGenerator {
 

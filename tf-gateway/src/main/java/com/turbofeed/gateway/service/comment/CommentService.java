@@ -32,7 +32,8 @@ public class CommentService {
 
     private final CommentJdbcRepository commentRepository;
     private final SensitiveWordService sensitiveWordService;
-    private final SnowflakeIdGenerator snowflakeIdGenerator = new SnowflakeIdGenerator();
+    /** 雪花 ID 生成器由 {@code SnowflakeConfig} 装配（workerId/datacenterId 必须逐实例区分）。 */
+    private final SnowflakeIdGenerator snowflakeIdGenerator;
 
     private static final int MAX_CONTENT_LEN = 1024;
 

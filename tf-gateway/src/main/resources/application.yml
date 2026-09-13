@@ -58,6 +58,12 @@ turbofeed:
   jwt:
     secret: turbofeed-demo-secret-change-me
     expire-seconds: 86400
+  # 雪花 ID 的实例标识（各 0~31）。多实例部署必须逐实例注入不同取值：
+  # 同一组取值会让两个实例在同一毫秒生成相同的 ID，user 表主键插入直接冲突（注册失败）。
+  # 默认 1/1 仅供单实例本地开发，K8s 可用 StatefulSet 序号 / POD_NAME 尾号派生。
+  snowflake:
+    worker-id: ${TURBOFEED_SNOWFLAKE_WORKER_ID:1}
+    datacenter-id: ${TURBOFEED_SNOWFLAKE_DATACENTER_ID:1}
   # 角色来源（真 RBAC）：用户角色由 user 表 role 列承载（USER / REVIEWER / ADMIN），
   # 登录时直接读库派生 JWT，不在配置里维护任何手机号白名单——保持默认配置纯净、无 demo 字面量。
   # 生产改数据库 + user_phone_router(phone→uid) 映射 + 哈希存储；角色变更走数据运维而非改配置。
