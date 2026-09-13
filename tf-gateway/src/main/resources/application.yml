@@ -64,6 +64,19 @@ turbofeed:
   snowflake:
     worker-id: ${TURBOFEED_SNOWFLAKE_WORKER_ID:1}
     datacenter-id: ${TURBOFEED_SNOWFLAKE_DATACENTER_ID:1}
+  # Feed 引擎（tf-feed-engine，默认 8082）调用配置：Feed 时间线读模型已迁至独立部署单元，
+  # 网关只做转发 + 降级决策，不再持有任何 Feed 读模型或推荐流缓存
+  feed:
+    engine:
+      # 当前为直连形态（克隆即跑）；引入 Nacos 服务发现 + LoadBalancer 后，此项退化为兜底/调试用
+      base-url: ${TURBOFEED_FEED_ENGINE_BASE_URL:http://localhost:8082}
+      # 同步调用必须设超时：引擎故障时若无限等待，网关线程池会被慢调用耗尽（雪崩入口）
+      connect-timeout: 500ms
+      read-timeout: 2s
+    # 引擎不可用时的降级口径：
+    #   empty（默认）= 返回空列表 + WARN 日志，绝不跨分片广播 —— 生产必须保持此值
+    #   local-scan  = 回源 listApprovedGlobal 广播查询全部分片（等价拆分前行为，仅本地/演示）
+    degraded-mode: ${TURBOFEED_FEED_DEGRADED_MODE:empty}
   # 角色来源（真 RBAC）：用户角色由 user 表 role 列承载（USER / REVIEWER / ADMIN），
   # 登录时直接读库派生 JWT，不在配置里维护任何手机号白名单——保持默认配置纯净、无 demo 字面量。
   # 生产改数据库 + user_phone_router(phone→uid) 映射 + 哈希存储；角色变更走数据运维而非改配置。

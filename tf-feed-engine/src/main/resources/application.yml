@@ -2,18 +2,53 @@
 spring:
   application:
     name: tf-feed-engine
-  # Redisson 自动配置暂排除：Redis 环境就绪后删除本段（并补 spring.data.redis.* 连接配置）
-  # 不排除时，starter 默认连 localhost:6379，无 Redis 环境下启动即失败
-  autoconfigure:
-    exclude:
-      - org.redisson.spring.starter.RedissonAutoConfigurationV2
-      - org.redisson.spring.starter.RedissonAutoConfiguration
+
+  # Redis（Lettuce，懒连接）：Feed 时间线读模型与推荐流旁路缓存的宿主
+  #   · tf:feed:tl:{pool}:{yyyyMMdd}  —— 公域时间线分桶 ZSET（score = 入流时刻毫秒）
+  #   · tf:feed:idx:{mediaId}         —— 反查索引（精确 ZREM 下架，摆脱桶内扫描）
+  #   · tf:feed:rec:{page}:{size}     —— 推荐流旁路缓存（TTL 15s）
+  # 本地未启动 Redis 不影响应用启动（Lettuce 懒建连）；/actuator/health 的 redis 组件会显示
+  # DOWN，故下方 management.health.redis.enabled=false 保证整体健康状态不被拉低（克隆即跑）。
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 500ms
+      lettuce:
+        pool:
+          # Feed 读取是「高扇出、小报文」型负载，连接池主要吸收突发并发；写入侧（审核发布）
+          # 为低频命令。依赖 commons-pool2（lettuce-core 的 optional 依赖不传递，
+          # 已在 tf-feed-engine pom 显式声明）。
+          enabled: true
+          max-active: 32        # 最大连接数（并发上限，读多写少故高于网关）
+          max-idle: 16          # 最大空闲连接
+          min-idle: 2           # 最小空闲连接（预热，避免冷启动建连抖动）
+          max-wait: 1000ms      # 获取连接最大等待（超时即失败，快速失败而非线程堆积）
+        shutdown-timeout: 100ms
+      # 生产集群 / 哨兵示例（二选一取消注释，并删除上面的单机 host/port）：
+      # cluster:
+      #   nodes:
+      #     - 10.0.0.1:6379
+      #     - 10.0.0.2:6379
+      #     - 10.0.0.3:6379
+      #   max-redirects: 3
+      # sentinel:
+      #   master: turbo-feed-redis
+      #   nodes:
+      #     - 10.0.0.1:26379
+      #     - 10.0.0.2:26379
+      #     - 10.0.0.3:26379
 
 server:
   port: 8082
 
-# 健康检查仅暴露基础端点（K8s 探活）；接 Prometheus 时再开放 prometheus 端点
 management:
+  # Redis 未就绪前关闭其健康指示器，避免 /actuator/health 整体被拉成 DOWN（克隆即跑）；
+  # 本地启动 Redis 后改为 true（或直接删除此段）
+  health:
+    redis:
+      enabled: false
+  # 健康检查仅暴露基础端点（K8s 探活）；接 Prometheus 时再开放 prometheus 端点
   endpoints:
     web:
       exposure:
