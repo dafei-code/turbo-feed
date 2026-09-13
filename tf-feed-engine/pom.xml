@@ -34,14 +34,41 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
-        <!-- Redis 客户端（收件箱 List / outbox ZSET / 活跃度 ZSET） -->
+        <!-- Redis 客户端（Lettuce）：时间线 ZSET 与推荐流旁路缓存只需 RedisTemplate 级原子命令
+             （ZADD / ZREM / ZREVRANGEBYSCORE），不需要分布式锁与 Redisson 的丰富数据结构，
+             故不引入 redisson-spring-boot-starter。
+
+             ⚠️ 踩坑记录：redisson-spring-boot-starter 虽然传递了 spring-boot-starter-data-redis，
+             但把它内部的 lettuce-core 与 jedis 一并 <excluded> 掉了——只留自动配置、不留任何客户端
+             实现。此时 RedisAutoConfiguration 加载 LettuceConnectionConfiguration 会抛
+             ClassNotFoundException: io.lettuce.core.RedisClient，应用启动即失败。
+             因此这里直接声明官方 starter（自带 lettuce-core），依赖面更小、语义更直白。
+
+             Lettuce 连接懒建立：本地未启动 Redis 不影响应用启动 -->
         <dependency>
-            <groupId>org.redisson</groupId>
-            <artifactId>redisson-spring-boot-starter</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <!-- Lettuce 连接池依赖：commons-pool2 是 lettuce-core 的 optional 依赖，不会随
+             spring-boot-starter-data-redis 传递引入；application.yml 启用了
+             lettuce.pool.enabled=true，必须显式声明，否则启动报
+             NoClassDefFoundError: org/apache/commons/pool2/impl/GenericObjectPoolConfig。
+             版本由 spring-boot-dependencies BOM 托管，无需写 version。 -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-pool2</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <!-- Lombok：@Slf4j / @RequiredArgsConstructor。骨架期本模块只有启动类、无需简化注解，
+             随 Feed 时间线实现落地而引入，与 tf-gateway 保持一致的工程风格。
+             版本由 spring-boot-dependencies BOM 托管；optional 不参与传递、不打入可执行 jar -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
         </dependency>
     </dependencies>
 

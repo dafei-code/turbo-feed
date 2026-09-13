@@ -15,4 +15,27 @@
     <description>公共模型与 SPI：User / FeedItem / LikeEvent / MqProvider / InboxStore / CounterStore</description>
 
     <!-- 纯模型与 SPI 模块，零第三方依赖，保证被所有模块引用时不引入传递依赖 -->
+
+    <build>
+        <plugins>
+            <!-- 开启 -parameters：契约 record（如 FeedItemView）的 JSON 反序列化依赖「类文件中
+                 保留形参名」——Jackson 的 ParameterNamesModule 通过 Parameter#getName() 读取
+                 record 规范构造器的形参名，而未经此配置时形参名只编译为 arg0/arg1，反序列化
+                 会抛 InvalidDefinitionException（网关侧 MediaItem 当初为此才加了 @JsonProperty）。
+
+                 为什么只在 tf-shared 开：形参名随 FeedItemView.class 一并被下游
+                 （tf-feed-engine / tf-gateway）读取，本刀范围内下游无需各自开启；同时避免为
+                 一个契约问题去改根 pom 的全局编译参数。
+
+                 为什么不加 jackson-annotations：本模块定位「零第三方依赖」，加注解等于给所有
+                 引用方（含 tf-counter）引入一个非必要传递依赖。 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

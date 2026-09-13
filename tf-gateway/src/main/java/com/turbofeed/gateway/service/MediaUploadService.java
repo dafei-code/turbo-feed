@@ -11,7 +11,7 @@ import com.turbofeed.gateway.security.UserContext;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.event.MediaEventPublisher;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
-import com.turbofeed.gateway.service.feed.FeedTimelineStore;
+import com.turbofeed.gateway.client.FeedEngineClient;
 import com.turbofeed.gateway.service.idempotency.UploadIdempotency;
 import com.turbofeed.gateway.service.moderation.SensitiveWordService;
 import com.turbofeed.gateway.service.processing.ImageProcessingChain;
@@ -64,7 +64,7 @@ public class MediaUploadService {
     private final UploadRateLimiter rateLimiter;
     private final UploadIdempotency idempotency;
     private final MediaJdbcRepository mediaRepository;
-    private final FeedTimelineStore feedTimelineStore;
+    private final FeedEngineClient feedEngineClient;
     private final StringRedisTemplate redisTemplate;
     private final CaptionMarkParser captionMarkParser;
     private final SensitiveWordService sensitiveWordService;
@@ -235,8 +235,10 @@ public class MediaUploadService {
         }
         // 2) 逻辑删除：MySQL 标记 DELETED（带 user_id 分片键，仅删本人内容）
         mediaRepository.delete(mediaId, Long.parseLong(userId));
-        // 3) 清理公域时间线（若曾 APPROVED 入流），删除后立即移出发现流
-        feedTimelineStore.remove(mediaId);
+        // 3) 清理公域时间线（若曾 APPROVED 入流）：投递到 tf-feed-engine 精确摘除，删除后立即移出发现流。
+        //    fail-open：引擎不可用时仅告警，不阻断删除——内容已物理+逻辑删除，
+        //    可见性残留由引擎侧兜底清理与推荐流缓存 TTL（15s）收敛
+        feedEngineClient.remove(mediaId);
         // 4) 失效单条状态缓存（旁路缓存 fail-open）
         try {
             redisTemplate.delete(STATUS_KEY_PREFIX + mediaId);

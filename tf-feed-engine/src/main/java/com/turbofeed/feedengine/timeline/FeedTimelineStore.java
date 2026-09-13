@@ -1,8 +1,7 @@
-package com.turbofeed.gateway.service.feed;
+package com.turbofeed.feedengine.timeline;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.turbofeed.gateway.service.query.MediaItem;
-import com.turbofeed.gateway.service.review.MediaStatus;
+import com.turbofeed.shared.model.FeedItemView;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -20,22 +19,24 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 公域发现流时间线读模型（写时物化，替代跨分片广播扫描）。
+ * 公域发现流时间线读模型（写时物化）。
  *
- * <p><b>问题</b>：原 {@code MediaJdbcRepository#listApprovedGlobal} 不带分片键，
- * ShardingSphere 广播到全部分片归并——百亿行下每翻一页都全表扫，直接拖垮所有分片。</p>
+ * <p><b>从 tf-gateway 迁入</b>：本类原属网关 {@code com.turbofeed.gateway.service.feed}，
+ * 是"Feed 引擎推模式"在网关进程内的雏形。服务拆分（见 docs/architecture/service-split.md）
+ * 后，Feed 时间线的物化与读取整体归位到本引擎——网关只保留 HTTP 接入与审核状态机，
+ * 通过内部接口投递变更，不再直接持有任何 Feed 读模型。</p>
  *
- * <p><b>方案</b>：审核通过（APPROVED）时，把非范式 {@link MediaItem} 写入 Redis ZSET
- * {@code tf:feed:tl:{pool}:{yyyyMMdd}}，score = 入流时刻毫秒。读路径 {@link #readPage}
- * 合并近 {@code MERGE_BUCKETS} 天分桶并按 score 归并，每请求 O(log n) 级、
- * <b>完全不碰 media 分片库</b>。这就是 README 里"Feed 引擎推模式"的网关内雏形：
- * 可见性从"读时扫描"变为"写时产生"。</p>
+ * <p><b>解决的问题</b>：原 {@code MediaJdbcRepository#listApprovedGlobal} 不带分片键，
+ * ShardingSphere 广播到全部分片归并——百亿行下每翻一页都全表扫，直接拖垮所有分片。
+ * 本类把可见性从"读时扫描"变为"写时产生"：审核通过即写入 Redis ZSET
+ * {@code tf:feed:tl:{pool}:{yyyyMMdd}}，读路径合并近 {@link #MERGE_BUCKETS} 天分桶按 score
+ * 归并，每请求 O(log n) 级、完全不碰 media 分片库。</p>
  *
- * <p><b>分桶维度 = 入流（过审）时刻，不是上传时刻</b>：早期实现用 {@link MediaItem#createdAt()}
- * （上传时间）决定桶与 score，于是「上传后隔天才过审」的内容落进旧桶，而读路径只并最近
- * {@code MERGE_BUCKETS} 天 → 该内容<b>永远不会出现在发现流</b>。现统一以
- * {@code Instant.now()}（审核通过入流时刻）分桶与打分，保证「今天过审 → 今天可见」；
- * {@link MediaItem#createdAt()} 仅作为展示用的发布时间，不参与分桶与排序。</p>
+ * <p><b>分桶维度 = 入流（过审）时刻，不是上传时刻</b>：早期实现用
+ * {@link FeedItemView#createdAt()}（上传时间）决定桶与 score，于是「上传后隔天才过审」的内容
+ * 落进旧桶，而读路径只并最近 {@code MERGE_BUCKETS} 天 → 该内容<b>永远不会出现在发现流</b>。
+ * 现统一以 {@code Instant.now()}（过审入流时刻）分桶与打分，保证「今天过审 → 今天可见」；
+ * {@code createdAt} 仅作为展示用的发布时间，不参与分桶与排序。</p>
  *
  * <p><b>可删除性（合规要求）</b>：ZSET member 是 JSON 串，无法凭 mediaId 直接 {@code ZREM}。
  * 早期实现靠扫描每桶<b>最新 {@code PER_BUCKET_CAP} 条</b>定位目标，桶内超出该量的内容
@@ -46,8 +47,9 @@ import java.util.Set;
  * <p><b>容量</b>：桶与反查索引统一按 {@link #BUCKET_TTL} 过期，避免逐日累积的 ZSET
  * 无限膨胀（发现流只看最新，过期桶整体淘汰即可）。</p>
  *
- * <p><b>fail-open</b>：写入/读取异常均只告警不抛，绝不影响审核主流程；Redis 不可用时
- * 查询侧回源分片库（降级态，见 {@code MediaQueryService}）。</p>
+ * <p><b>fail-open</b>：写入/读取异常均只告警不抛，绝不影响调用方主流程。注意本类位于引擎侧
+ * 后，"读不到"不再回源分片库（引擎无 DB 依赖），降级口径由网关按
+ * {@code turbofeed.feed.degraded-mode} 决定。</p>
  */
 @Slf4j
 @Service
@@ -72,13 +74,14 @@ public class FeedTimelineStore {
     private static final String IDX_SEP = "\u0001";
 
     /**
-     * 审核通过：按信用池写时间线（denormalized MediaItem JSON），fail-open。仅 APPROVED 入对应池。
+     * 审核通过：按信用池写时间线（denormalized {@link FeedItemView} JSON），fail-open。
+     * 仅 {@code status=APPROVED} 入对应池。
      *
-     * <p>分桶与 score 均取<b>当前入流时刻</b>（过审时刻），不取 {@link MediaItem#createdAt()}。
+     * <p>分桶与 score 均取<b>当前入流时刻</b>（过审时刻），不取 {@code createdAt}。
      * 写入前先摘掉该内容可能存在的旧位置，避免「申诉翻案 / 重复过审」让同一内容在流里出现两次。</p>
      */
-    public void append(MediaItem item, int poolLevel) {
-        if (item.status() != MediaStatus.APPROVED) {
+    public void append(FeedItemView item, int poolLevel) {
+        if (item == null || !item.approved()) {
             return;
         }
         int pool = poolLevel < 1 ? 1 : Math.min(poolLevel, MAX_POOL_LEVELS);
@@ -91,12 +94,12 @@ public class FeedTimelineStore {
             redisTemplate.expire(key, BUCKET_TTL);
             redisTemplate.opsForValue().set(IDX_PREFIX + item.mediaId(), key + IDX_SEP + member, BUCKET_TTL);
         } catch (Exception e) {
-            log.warn("时间线写入失败（不影响审核主流程）: mediaId={}, pool={}, {}", item.mediaId(), pool, e.getMessage());
+            log.warn("时间线写入失败（不影响主流程）: mediaId={}, pool={}, {}", item.mediaId(), pool, e.getMessage());
         }
     }
 
     /** 兼容重载：未指定池时落 L1 小池。 */
-    public void append(MediaItem item) {
+    public void append(FeedItemView item) {
         append(item, 1);
     }
 
@@ -104,14 +107,14 @@ public class FeedTimelineStore {
      * 游标分页读取公域发现流（入流时间倒序）。合并近 {@code MERGE_BUCKETS} 天分桶，
      * 每桶取最新 {@code PER_BUCKET_CAP} 条归并后切片。
      *
-     * <p>归并按 ZSET score（入流时刻）排序，而不是 {@link MediaItem#createdAt()}（上传时间）——
+     * <p>归并按 ZSET score（入流时刻）排序，而不是 {@code createdAt}（上传时间）——
      * 否则「早传晚审」的内容会被排到当日列表末尾，等于隐形。</p>
      *
      * @param page 页码（从 0 开始）
      * @param size 单页条数
      * @return 时间倒序的内容列表（当前页）；空表示无更多内容或 Redis 不可用
      */
-    public List<MediaItem> readPage(int page, int size) {
+    public List<FeedItemView> readPage(int page, int size) {
         int limit = size <= 0 ? 20 : size;
         long offset = (long) Math.max(page, 0) * limit;
         List<ZSetOperations.TypedTuple<String>> candidates = new ArrayList<>();
@@ -129,21 +132,21 @@ public class FeedTimelineStore {
                         candidates.addAll(tuples);
                     }
                 } catch (Exception e) {
-                    log.warn("时间线读取失败（降级回源由调用方处理）: key={}, {}", key, e.getMessage());
+                    log.warn("时间线读取失败: key={}, {}", key, e.getMessage());
                     return List.of();
                 }
             }
         }
         candidates.sort(Comparator.comparingDouble(
                 (ZSetOperations.TypedTuple<String> t) -> t.getScore() == null ? 0d : t.getScore()).reversed());
-        List<MediaItem> items = new ArrayList<>(candidates.size());
+        List<FeedItemView> items = new ArrayList<>(candidates.size());
         for (ZSetOperations.TypedTuple<String> tuple : candidates) {
             String json = tuple.getValue();
             if (json == null) {
                 continue;
             }
             try {
-                items.add(objectMapper.readValue(json, MediaItem.class));
+                items.add(objectMapper.readValue(json, FeedItemView.class));
             } catch (Exception ignore) {
                 // 单条损坏不影响整体
             }
@@ -163,12 +166,14 @@ public class FeedTimelineStore {
      * <p>优先走反查索引做精确 {@code ZREM}——与桶内条数无关，因此对「桶内超过
      * {@code PER_BUCKET_CAP} 条」的内容同样有效（这正是早期扫描实现的失效场景）。
      * 索引缺失时退回遍历最近 {@code MERGE_BUCKETS} 天桶的尽力扫描（仅覆盖每桶最新
-     * {@code PER_BUCKET_CAP} 条，历史数据可能漏删）。fail-open：任一异常只告警不抛，
-     * 不阻断删除主流程。</p>
+     * {@code PER_BUCKET_CAP} 条，历史数据可能漏删）。fail-open：任一异常只告警不抛。</p>
      *
      * @param mediaId 内容唯一标识
      */
     public void remove(String mediaId) {
+        if (mediaId == null) {
+            return;
+        }
         try {
             if (detach(mediaId, IDX_PREFIX + mediaId)) {
                 return;
@@ -224,7 +229,7 @@ public class FeedTimelineStore {
                     }
                     for (String json : jsons) {
                         try {
-                            MediaItem it = objectMapper.readValue(json, MediaItem.class);
+                            FeedItemView it = objectMapper.readValue(json, FeedItemView.class);
                             if (mediaId.equals(it.mediaId())) {
                                 redisTemplate.opsForZSet().remove(key, json);
                             }
