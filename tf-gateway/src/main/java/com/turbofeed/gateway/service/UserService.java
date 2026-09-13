@@ -22,7 +22,8 @@ import java.util.Map;
 public class UserService {
 
     private final UserJdbcRepository userJdbcRepository;
-    private final SnowflakeIdGenerator snowflakeIdGenerator = new SnowflakeIdGenerator();
+    /** 雪花 ID 生成器由 {@code SnowflakeConfig} 装配（workerId/datacenterId 必须逐实例区分）。 */
+    private final SnowflakeIdGenerator snowflakeIdGenerator;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     public Map<String, Object> register(String phone, String password, String nickname) {
