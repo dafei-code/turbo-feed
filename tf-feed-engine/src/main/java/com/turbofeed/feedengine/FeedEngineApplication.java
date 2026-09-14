@@ -4,7 +4,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /**
- * Feed 推拉结合引擎入口（独立部署单元，默认端口 8082）。
+ * Feed 推拉结合引擎入口（独立部署单元，默认端口 8083）。
  *
  * <p>职责：收件箱（Redis List + LTRIM）/ 大 V outbox（ZSET）/ 活跃度分层
  * / 扇出 Worker / 多路归并聚合。</p>

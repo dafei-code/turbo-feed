@@ -49,8 +49,8 @@ public class FeedEngineProperties {
     /** Feed 引擎连接参数。 */
     public static class Engine {
 
-        /** 引擎基址，如 http://localhost:8082（默认端口见 service-split.md §3）。 */
-        private String baseUrl = "http://localhost:8082";
+        /** 引擎基址，如 http://localhost:8083（默认端口见 service-split.md §3）。 */
+        private String baseUrl = "http://localhost:8083";
 
         /** 连接超时：建连失败要快速失败，避免网关线程被慢引擎拖住。 */
         private Duration connectTimeout = Duration.ofMillis(500);

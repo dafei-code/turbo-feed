@@ -1,7 +1,7 @@
 # tf-feed-engine 技术文档
 
 > Feed 推拉结合核心引擎。
-> 形态：独立 Spring Boot 服务（端口 8082，`com.turbofeed.feedengine`）。
+> 形态：独立 Spring Boot 服务（端口 8083，`com.turbofeed.feedengine`）。
 > **当前状态：设计骨架**（主类 + 配置就位，业务实现待填充），本文档同时是设计蓝图。
 
 ## 1. 设计目标
@@ -29,7 +29,7 @@
 
 ## 3. 当前实现状态
 
-- ✅ `FeedEngineApplication` 主类、application.yml（8082 / actuator / Redisson 自动配置暂 exclude）
+- ✅ `FeedEngineApplication` 主类、application.yml（8083 / actuator / Redisson 自动配置暂 exclude）
 - ✅ pom：web + actuator + repackage + Redisson
 - ⬜ 扇出 Worker / 收件箱 / outbox / 分层 / 归并——待实现，落地时更新本文档
 

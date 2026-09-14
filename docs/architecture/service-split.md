@@ -25,7 +25,7 @@
 |---|---|---|---|---|
 | tf-gateway | 独立服务（可执行 jar） | 8080 | HTTP 接入：认证 + 媒体上传 + Sentinel 流量防护 + 审核状态机。**不持有任何 Feed 读模型** | web / sentinel / rocketmq / actuator / shardingsphere-jdbc |
 | tf-counter | 独立服务（可执行 jar） | **8081** | 分布式计数：Redis 分桶 + MQ 削峰 + 批量落库 + 三级缓存 | redisson / jdbc / h2 / caffeine |
-| tf-feed-engine | 独立服务（可执行 jar） | **8082** | Feed 推拉核心：**公域时间线读模型（多池 ZSET + 反查索引 + 推荐流旁路缓存）** / 收件箱 / outbox / 活跃度分层 / 多路归并 | data-redis(lettuce) / caffeine |
+| tf-feed-engine | 独立服务（可执行 jar） | **8083** | Feed 推拉核心：**公域时间线读模型（多池 ZSET + 反查索引 + 推荐流旁路缓存）** / 收件箱 / outbox / 活跃度分层 / 多路归并 | data-redis(lettuce) / caffeine |
 | tf-hotspot | **进程内 SDK（库）** | - | 热 Key 探测 + 广播 + 本地 L1 缓存，嵌入 counter / feed-engine 进程 | caffeine |
 | tf-shared | 契约库 | - | Result / ErrorCode / 跨服务 DTO（如 FeedItemView） | 零依赖 |
 | tf-benchmark | 压测模块 | - | 压测器 + 报告生成 | 独立 |
@@ -58,15 +58,15 @@
 mvn clean package
 java -jar tf-gateway/target/tf-gateway-0.1.0-SNAPSHOT.jar       # 8080
 java -jar tf-counter/target/tf-counter-0.1.0-SNAPSHOT.jar       # 8081
-java -jar tf-feed-engine/target/tf-feed-engine-0.1.0-SNAPSHOT.jar  # 8082
+java -jar tf-feed-engine/target/tf-feed-engine-0.1.0-SNAPSHOT.jar  # 8083
 
 curl http://localhost:8080/actuator/health   # UP
 curl http://localhost:8081/actuator/health   # UP
-curl http://localhost:8082/actuator/health   # UP
+curl http://localhost:8083/actuator/health   # UP
 
 # 引擎内部接口自检（无需网关，需 Redis）
-curl "http://localhost:8082/internal/feed/recommended?page=0&size=20"
-curl -X POST "http://localhost:8082/internal/feed/timeline/remove?mediaId=media/1/x.jpg"
+curl "http://localhost:8083/internal/feed/recommended?page=0&size=20"
+curl -X POST "http://localhost:8083/internal/feed/timeline/remove?mediaId=media/1/x.jpg"
 ```
 
 ## 7. 演进路线
