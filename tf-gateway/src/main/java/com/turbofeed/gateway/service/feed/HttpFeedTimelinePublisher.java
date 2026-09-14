@@ -28,7 +28,7 @@ public class HttpFeedTimelinePublisher implements FeedTimelinePublisher {
     }
 
     @Override
-    public void remove(String mediaId) {
-        feedEngineClient.remove(mediaId);
+    public void remove(String timelineKey) {
+        feedEngineClient.remove(timelineKey);
     }
 }

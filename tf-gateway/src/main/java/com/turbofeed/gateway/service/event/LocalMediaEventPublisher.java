@@ -24,6 +24,6 @@ public class LocalMediaEventPublisher implements MediaEventPublisher {
     @Override
     public void publish(MediaUploadedEvent event) {
         applicationEventPublisher.publishEvent(event);
-        log.debug("本地事件发布: mediaId={}", event.mediaId());
+        log.debug("本地事件发布: postId={}, images={}", event.postId(), event.imageCount());
     }
 }

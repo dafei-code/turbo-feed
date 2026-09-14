@@ -25,7 +25,7 @@ public class ReviewListener {
     @Async("reviewExecutor")
     @EventListener
     public void onMediaUploaded(MediaUploadedEvent event) {
-        log.info("本地事件消费: mediaId={}, userId={}", event.mediaId(), event.userId());
+        log.info("本地事件消费: postId={}, images={}, userId={}", event.postId(), event.imageCount(), event.userId());
         reviewService.handleUploaded(event);
     }
 }

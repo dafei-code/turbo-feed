@@ -44,16 +44,20 @@ public class RocketMqFeedTimelinePublisher implements FeedTimelinePublisher {
         }
         FeedItemView view = FeedItemMapper.toContract(item);
         FeedTimelineEvent event = FeedTimelineEvent.append(view, poolLevel);
+        // hashKey 必须与 remove 用同一个键（view.timelineKey()：有 postId 用 postId，历史数据回退 mediaId），
+        // 否则同一帖的 append 与 remove 会落不同队列、失去顺序保证，
+        // 出现「remove 先执行、append 后执行 → 已下架内容重新出现」的内容安全事故。
         // syncSendOrderly 失败（no route / 超时 / 连接失败）直接抛异常 → 由调用方事务回滚
-        rocketMQTemplate.syncSendOrderly(topic, event, item.mediaId());
+        rocketMQTemplate.syncSendOrderly(topic, event, view.timelineKey());
     }
 
     @Override
-    public void remove(String mediaId) {
-        if (mediaId == null) {
+    public void remove(String timelineKey) {
+        if (timelineKey == null) {
             return;
         }
-        FeedTimelineEvent event = FeedTimelineEvent.remove(mediaId);
-        rocketMQTemplate.syncSendOrderly(topic, event, mediaId);
+        FeedTimelineEvent event = FeedTimelineEvent.remove(timelineKey);
+        // 与 append 同键，保证同一帖严格有序
+        rocketMQTemplate.syncSendOrderly(topic, event, timelineKey);
     }
 }

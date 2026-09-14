@@ -39,10 +39,16 @@ import java.util.Set;
  * 现统一以 {@code Instant.now()}（过审入流时刻）分桶与打分，保证「今天过审 → 今天可见」；
  * {@code createdAt} 仅作为展示用的发布时间，不参与分桶与排序。</p>
  *
- * <p><b>可删除性（合规要求）</b>：ZSET member 是 JSON 串，无法凭 mediaId 直接 {@code ZREM}。
+ * <p><b>一个成员 = 一个帖子（一帖多图）</b>：物化单位是<b>帖子</b>而非单张图——同一次上传批次的
+ * N 张图（{@link FeedItemView#images()}）共用一条成员串，前端据此渲染 9 图轮播。因此本类所有
+ * 「定位一条内容」的地方统一使用 {@link FeedItemView#timelineKey()}（有 {@code postId} 用 postId，
+ * 历史单图成员串回退 {@code mediaId}）作为幂等键与反查索引键；调用方不要各自拼装这个键，
+ * 否则新旧数据会落在两个不同索引上，出现「下架无效、内容仍可见」。</p>
+ *
+ * <p><b>可删除性（合规要求）</b>：ZSET member 是 JSON 串，无法凭帖身份直接 {@code ZREM}。
  * 早期实现靠扫描每桶<b>最新 {@code PER_BUCKET_CAP} 条</b>定位目标，桶内超出该量的内容
- * <b>删不掉也下不了架</b>——这对内容安全是硬伤。现为每条内容维护反查索引
- * {@code tf:feed:idx:{mediaId} => {桶key}<SOH>{member}}，删除/下架走精确 {@code ZREM}，
+ * <b>删不掉也下不了架</b>——这对内容安全是硬伤。现为每个帖子维护反查索引
+ * {@code tf:feed:idx:{timelineKey} => {桶key}<SOH>{member}}，删除/下架走精确 {@code ZREM}，
  * 与桶内条数无关；索引缺失（历史数据/已过期）时才退回尽力扫描。</p>
  *
  * <p><b>容量</b>：桶与反查索引统一按 {@link #BUCKET_TTL} 过期，避免逐日累积的 ZSET
@@ -63,7 +69,7 @@ public class FeedTimelineStore {
     private final ObjectMapper objectMapper;
 
     private static final String TL_PREFIX = "tf:feed:tl:";
-    /** 反查索引前缀：mediaId -> 所在桶 key + 成员串（用于精确 ZREM）。 */
+    /** 反查索引前缀：帖身份（postId，历史数据回退 mediaId）-&gt; 所在桶 key + 成员串（用于精确 ZREM）。 */
     private static final String IDX_PREFIX = "tf:feed:idx:";
     /** 合并最近 N 天分桶（覆盖发现流"看最新"诉求，同时限制归并成本）。 */
     private static final int MERGE_BUCKETS = 3;
@@ -102,17 +108,19 @@ public class FeedTimelineStore {
         int pool = poolLevel < 1 ? 1 : Math.min(poolLevel, MAX_POOL_LEVELS);
         Instant approvedAt = Instant.now();
         String key = TL_PREFIX + pool + ":" + bucketOf(approvedAt);
+        // 帖身份：有 postId 用 postId，历史单图数据回退 mediaId（见 FeedItemView#timelineKey）
+        String timelineKey = item.timelineKey();
         String member;
         try {
             member = objectMapper.writeValueAsString(item);
         } catch (JsonProcessingException e) {
             // 严格路径：序列化失败必须上抛，交由 MQ 重试 / DLQ，绝不可静默吞掉。
-            throw new IllegalStateException("Feed 时间线序列化失败（不入时间线）: mediaId=" + item.mediaId(), e);
+            throw new IllegalStateException("Feed 时间线序列化失败（不入时间线）: key=" + timelineKey, e);
         }
-        detach(item.mediaId(), null);
+        detach(timelineKey, null);
         redisTemplate.opsForZSet().add(key, member, approvedAt.toEpochMilli());
         redisTemplate.expire(key, BUCKET_TTL);
-        redisTemplate.opsForValue().set(IDX_PREFIX + item.mediaId(), key + IDX_SEP + member, BUCKET_TTL);
+        redisTemplate.opsForValue().set(IDX_PREFIX + timelineKey, key + IDX_SEP + member, BUCKET_TTL);
     }
 
     /** 兼容重载：未指定池时落 L1 小池。 */
@@ -178,20 +186,21 @@ public class FeedTimelineStore {
     }
 
     /**
-     * 从公域时间线移除某条内容（用户删除、举报下架、申诉中暂不可见时调用）。
+     * 从公域时间线移除某个<b>帖子</b>（用户删除、举报下架、申诉中暂不可见时调用）。
      *
      * <p>优先走反查索引做精确 {@code ZREM}——与桶内条数无关，因此对「桶内超过
      * {@code PER_BUCKET_CAP} 条」的内容同样有效（这正是早期扫描实现的失效场景）。
      * 索引缺失时退回遍历最近 {@code MERGE_BUCKETS} 天桶的尽力扫描（仅覆盖每桶最新
      * {@code PER_BUCKET_CAP} 条，历史数据可能漏删）。fail-open：任一异常只告警不抛。</p>
      *
-     * @param mediaId 内容唯一标识
+     * @param timelineKey 帖身份（{@code FeedItemView#timelineKey()}：有 postId 用 postId，
+     *                    历史单图数据回退 mediaId）。<b>必须与投递时一致</b>，否则反查索引对不上、下架失效
      */
-    public void remove(String mediaId) {
+    public void remove(String timelineKey) {
         try {
-            removeStrict(mediaId);
+            removeStrict(timelineKey);
         } catch (Exception e) {
-            log.warn("时间线移除失败（不影响主流程）: mediaId={}, {}", mediaId, e.getMessage());
+            log.warn("时间线移除失败（不影响主流程）: key={}, {}", timelineKey, e.getMessage());
         }
     }
 
@@ -199,15 +208,17 @@ public class FeedTimelineStore {
      * 严格移除入口（B2 顺序消息消费者使用）：不做 try/catch，异常向上抛，
      * 由 MQ 框架触发重试 / 进入 DLQ。优先走反查索引精确 {@code ZREM}，
      * 索引缺失时退回尽力扫描。
+     *
+     * @param timelineKey 帖身份——必须与 {@code append} 时写入的键一致（{@code FeedItemView#timelineKey()}）
      */
-    public void removeStrict(String mediaId) {
-        if (mediaId == null) {
+    public void removeStrict(String timelineKey) {
+        if (timelineKey == null) {
             return;
         }
-        if (detach(mediaId, IDX_PREFIX + mediaId)) {
+        if (detach(timelineKey, IDX_PREFIX + timelineKey)) {
             return;
         }
-        scanRemoveStrict(mediaId);
+        scanRemoveStrict(timelineKey);
     }
 
     /**
@@ -219,11 +230,11 @@ public class FeedTimelineStore {
      * @param idxKeyToDelete 需要一并删除的索引 key；{@code null} 表示保留
      * @return 是否命中索引（false 表示该内容没有索引，调用方可决定是否退回扫描）
      */
-    private boolean detach(String mediaId, String idxKeyToDelete) {
-        if (mediaId == null) {
+    private boolean detach(String timelineKey, String idxKeyToDelete) {
+        if (timelineKey == null) {
             return false;
         }
-        String idxKey = IDX_PREFIX + mediaId;
+        String idxKey = IDX_PREFIX + timelineKey;
         String location = redisTemplate.opsForValue().get(idxKey);
         if (location == null) {
             return false;
@@ -246,7 +257,7 @@ public class FeedTimelineStore {
      * 否则消费者会误以为处理成功而 ACK，下架被静默丢失（与本方法存在的意义相悖）。
      * 只对「单条成员串 JSON 损坏」保持容忍：那是数据问题，重试不会变好，跳过该条继续扫其余。</p>
      */
-    private void scanRemoveStrict(String mediaId) {
+    private void scanRemoveStrict(String timelineKey) {
         LocalDate today = LocalDate.now();
         for (int d = 0; d < MERGE_BUCKETS; d++) {
             String date = today.minusDays(d).format(DateTimeFormatter.BASIC_ISO_DATE);
@@ -266,7 +277,9 @@ public class FeedTimelineStore {
                         log.warn("时间线成员串损坏，跳过该条: key={}, {}", key, e.getMessage());
                         continue;
                     }
-                    if (mediaId.equals(it.mediaId())) {
+                    // 用帖身份比对（历史单图成员串没有 postId，timelineKey() 会回退到 mediaId），
+                    // 因此新旧数据都能被同一次扫描命中，不需要分两套匹配逻辑。
+                    if (timelineKey.equals(it.timelineKey())) {
                         redisTemplate.opsForZSet().remove(key, json);
                     }
                 }

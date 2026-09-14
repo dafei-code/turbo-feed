@@ -688,10 +688,22 @@
         body.innerHTML = '';
         res.data.forEach(function (it) {
           var tr = document.createElement('tr');
-          var thumb = '<div class="thumb" style="width:64px;height:44px"><img src="' + it.url + '" alt=""></div>';
+          // 帖子视图：整帖一审，审核员需看到帖内全部图片（首 3 张铺开，其余折叠为 +n），
+          // 否则同一帖的后续图片就成了审核盲区。历史单图行（无 images）回退 url。
+          var imgs = (it.images && it.images.length) ? it.images : (it.url ? [it.url] : []);
+          var thumb = '<div class="thumb-strip">' +
+            imgs.slice(0, 3).map(function (u) {
+              return '<div class="thumb" style="flex:0 0 auto">' +
+                '<img src="' + u + '" alt="" style="cursor:zoom-in" onclick="window.open(\'' + u + '\', \'_blank\')">' +
+              '</div>';
+            }).join('') +
+            (imgs.length > 3 ? '<span style="font-size:11px;color:var(--text-dim);align-self:center">+' + (imgs.length - 3) + '</span>' : '') +
+          '</div>';
           var time = it.createdAt ? new Date(it.createdAt).toLocaleString() : '-';
+          var key = it.postId || it.mediaId;
           tr.innerHTML = '<td>' + thumb + '</td>'
-            + '<td style="word-break:break-all">' + it.mediaId + '</td>'
+            + '<td style="word-break:break-all">' + key
+            + (imgs.length > 1 ? '<div style="font-size:11px;color:var(--text-dim)">整帖 ' + imgs.length + ' 张图</div>' : '') + '</td>'
             + '<td>' + time + '</td>'
             + '<td><span class="hot-tag tag-warm">待审核</span></td>'
             + '<td>'

@@ -35,16 +35,17 @@ public class MediaReviewConsumer implements RocketMQListener<MediaUploadedEvent>
 
     @Override
     public void onMessage(MediaUploadedEvent event) {
-        log.info("MQ 消费媒体上传事件: mediaId={}, userId={}", event.mediaId(), event.userId());
-        // 媒体行落库与审核翻转统一在 handleUploaded 内完成（insert PENDING -> review APPROVED），
+        log.info("MQ 消费帖子上传事件: postId={}, images={}, userId={}",
+                event.postId(), event.imageCount(), event.userId());
+        // 整帖 N 行落库与整帖审核翻转统一在 handleUploaded 内完成（insert PENDING -> review APPROVED），
         // 与本地事件模式共用单一入口；查询走 media 表，无需此处再建内存索引。
         try {
             reviewService.handleUploaded(event);
         } catch (Exception e) {
             // 抛异常 → RocketMQ 按 maxReconsumeTimes 重投；重投耗尽进入死信队列 %DLQ%{consumerGroup}，
             // 由人工 / 巡检对账处理。审核逻辑已幂等，重投不会产生重复终态。
-            log.error("审核消费失败，触发 RocketMQ 重试/DLQ: mediaId={}, userId={}",
-                    event.mediaId(), event.userId(), e);
+            log.error("审核消费失败，触发 RocketMQ 重试/DLQ: postId={}, images={}, userId={}",
+                    event.postId(), event.imageCount(), event.userId(), e);
             throw e;
         }
     }

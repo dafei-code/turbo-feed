@@ -96,19 +96,24 @@ public class MediaController {
     private final MediaQueryService mediaQueryService;
 
     /**
-     * 内容图片上传（UGC，审核后展示）。
+     * 内容图片上传（UGC，审核后展示）。<b>一次请求 = 一个帖子（1..9 张图）</b>。
      *
      * <p>上传成功仅代表"文件已受理、进入待审核态"，审核通过后才会出现在前端。
      * 身份不经过方法签名：Filter 已将 JWT 解析的 userId 绑定到线程上下文，
      * 由 Service 层 {@code UserContextHolder.requireUserId()} 取用。</p>
      *
-     * @param files     多个图片文件
-     * @param caption   抖音式描述/标题（@用户 / #话题 / [image:idx:filename]，本批共享；可选）
-     * @param requestId 客户端幂等键（可选，请求头 X-Request-Id；幂等去重落地时使用）
-     * @return 统一返回结构，data 为上传成功后的图片 URL 列表（审核通过后生效）
+     * <p><b>返回结构（抖音式图文）</b>：{@code data} 是<b>帖子视图</b>
+     * （{@link MediaItem}：{@code postId} + 按 {@code seq} 排序的 {@code images} + {@code status}），
+     * 而不是早前的 URL 字符串数组。一次上传的 N 张图属于同一帖，前端据此渲染 9 图轮播；
+     * 若只回 URL 数组，帖子身份会在响应里丢失，前端无法把「同一批」的图归到一起。</p>
+     *
+     * @param files     多个图片文件（1..9 张，上限 {@code turbofeed.media.max-batch-count}）
+     * @param caption   抖音式描述/标题（@用户 / #话题 / [image:idx:filename]，<b>整帖共享</b>；可选）
+     * @param requestId 客户端幂等键（可选，请求头 X-Request-Id；窗口内重复提交返回首次结果）
+     * @return 统一返回结构，data 为帖子视图（审核通过后生效）
      */
     @PostMapping("/upload")
-    public Result<List<String>> upload(
+    public Result<MediaItem> upload(
             @RequestParam("files") MultipartFile[] files,
             @RequestParam(value = "caption", required = false) String caption,
             @RequestHeader(value = "X-Request-Id", required = false) String requestId) {
