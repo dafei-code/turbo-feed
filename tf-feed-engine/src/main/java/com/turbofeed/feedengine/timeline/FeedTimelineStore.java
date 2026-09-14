@@ -1,5 +1,6 @@
 package com.turbofeed.feedengine.timeline;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.shared.model.FeedItemView;
 import lombok.RequiredArgsConstructor;
@@ -47,8 +48,10 @@ import java.util.Set;
  * <p><b>容量</b>：桶与反查索引统一按 {@link #BUCKET_TTL} 过期，避免逐日累积的 ZSET
  * 无限膨胀（发现流只看最新，过期桶整体淘汰即可）。</p>
  *
- * <p><b>fail-open</b>：写入/读取异常均只告警不抛，绝不影响调用方主流程。注意本类位于引擎侧
- * 后，"读不到"不再回源分片库（引擎无 DB 依赖），降级口径由网关按
+ * <p><b>fail-open（默认路径）</b>：{@link #append}/{@link #remove} 写入/读取异常均只告警不抛，
+ * 绝不影响调用方主流程，HTTP 兜底投递路径仍用它。需强一致（异常上抛以触发 MQ 重试/DLQ）时，
+ * 调用方改用 {@link #appendStrict}/{@link #removeStrict}（B2 顺序消息消费者即用此路径）。
+ * 注意本类位于引擎侧后，"读不到"不再回源分片库（引擎无 DB 依赖），降级口径由网关按
  * {@code turbofeed.feed.degraded-mode} 决定。</p>
  */
 @Slf4j
@@ -81,21 +84,35 @@ public class FeedTimelineStore {
      * 写入前先摘掉该内容可能存在的旧位置，避免「申诉翻案 / 重复过审」让同一内容在流里出现两次。</p>
      */
     public void append(FeedItemView item, int poolLevel) {
+        try {
+            appendStrict(item, poolLevel);
+        } catch (Exception e) {
+            log.warn("时间线写入失败（不影响主流程）: mediaId={}, pool={}, {}", item == null ? "null" : item.mediaId(), poolLevel, e.getMessage());
+        }
+    }
+
+    /**
+     * 严格写入入口（B2 顺序消息消费者使用）：不做 try/catch，异常向上抛，
+     * 由 MQ 框架触发重试 / 进入 DLQ。{@code item} 为空或未过审时无声返回（不入时间线）。
+     */
+    public void appendStrict(FeedItemView item, int poolLevel) {
         if (item == null || !item.approved()) {
             return;
         }
         int pool = poolLevel < 1 ? 1 : Math.min(poolLevel, MAX_POOL_LEVELS);
         Instant approvedAt = Instant.now();
         String key = TL_PREFIX + pool + ":" + bucketOf(approvedAt);
+        String member;
         try {
-            String member = objectMapper.writeValueAsString(item);
-            detach(item.mediaId(), null);
-            redisTemplate.opsForZSet().add(key, member, approvedAt.toEpochMilli());
-            redisTemplate.expire(key, BUCKET_TTL);
-            redisTemplate.opsForValue().set(IDX_PREFIX + item.mediaId(), key + IDX_SEP + member, BUCKET_TTL);
-        } catch (Exception e) {
-            log.warn("时间线写入失败（不影响主流程）: mediaId={}, pool={}, {}", item.mediaId(), pool, e.getMessage());
+            member = objectMapper.writeValueAsString(item);
+        } catch (JsonProcessingException e) {
+            // 严格路径：序列化失败必须上抛，交由 MQ 重试 / DLQ，绝不可静默吞掉。
+            throw new IllegalStateException("Feed 时间线序列化失败（不入时间线）: mediaId=" + item.mediaId(), e);
         }
+        detach(item.mediaId(), null);
+        redisTemplate.opsForZSet().add(key, member, approvedAt.toEpochMilli());
+        redisTemplate.expire(key, BUCKET_TTL);
+        redisTemplate.opsForValue().set(IDX_PREFIX + item.mediaId(), key + IDX_SEP + member, BUCKET_TTL);
     }
 
     /** 兼容重载：未指定池时落 L1 小池。 */
@@ -171,18 +188,26 @@ public class FeedTimelineStore {
      * @param mediaId 内容唯一标识
      */
     public void remove(String mediaId) {
+        try {
+            removeStrict(mediaId);
+        } catch (Exception e) {
+            log.warn("时间线移除失败（不影响主流程）: mediaId={}, {}", mediaId, e.getMessage());
+        }
+    }
+
+    /**
+     * 严格移除入口（B2 顺序消息消费者使用）：不做 try/catch，异常向上抛，
+     * 由 MQ 框架触发重试 / 进入 DLQ。优先走反查索引精确 {@code ZREM}，
+     * 索引缺失时退回尽力扫描。
+     */
+    public void removeStrict(String mediaId) {
         if (mediaId == null) {
             return;
         }
-        try {
-            if (detach(mediaId, IDX_PREFIX + mediaId)) {
-                return;
-            }
-        } catch (Exception e) {
-            log.warn("时间线移除失败（不影响主流程）: mediaId={}, {}", mediaId, e.getMessage());
+        if (detach(mediaId, IDX_PREFIX + mediaId)) {
             return;
         }
-        scanRemove(mediaId);
+        scanRemoveStrict(mediaId);
     }
 
     /**
@@ -214,31 +239,36 @@ public class FeedTimelineStore {
         return true;
     }
 
-    /** 反查索引缺失时的尽力扫描：仅覆盖每桶最新 {@code PER_BUCKET_CAP} 条。 */
-    private void scanRemove(String mediaId) {
+    /**
+     * 反查索引缺失时的尽力扫描（严格路径使用）：仅覆盖每桶最新 {@code PER_BUCKET_CAP} 条。
+     *
+     * <p><b>严格语义</b>：不像 fail-open 版本那样吞掉基础设施异常 —— Redis 读取 / ZREM 失败必须上抛，
+     * 否则消费者会误以为处理成功而 ACK，下架被静默丢失（与本方法存在的意义相悖）。
+     * 只对「单条成员串 JSON 损坏」保持容忍：那是数据问题，重试不会变好，跳过该条继续扫其余。</p>
+     */
+    private void scanRemoveStrict(String mediaId) {
         LocalDate today = LocalDate.now();
         for (int d = 0; d < MERGE_BUCKETS; d++) {
             String date = today.minusDays(d).format(DateTimeFormatter.BASIC_ISO_DATE);
             for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
                 String key = TL_PREFIX + pool + ":" + date;
-                try {
-                    Set<String> jsons = redisTemplate.opsForZSet()
-                            .reverseRangeByScore(key, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, 0, PER_BUCKET_CAP);
-                    if (jsons == null) {
+                Set<String> jsons = redisTemplate.opsForZSet()
+                        .reverseRangeByScore(key, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, 0, PER_BUCKET_CAP);
+                if (jsons == null) {
+                    continue;
+                }
+                for (String json : jsons) {
+                    FeedItemView it;
+                    try {
+                        it = objectMapper.readValue(json, FeedItemView.class);
+                    } catch (JsonProcessingException e) {
+                        // 单条成员串损坏：数据问题而非基础设施故障，重试无意义 → 跳过继续
+                        log.warn("时间线成员串损坏，跳过该条: key={}, {}", key, e.getMessage());
                         continue;
                     }
-                    for (String json : jsons) {
-                        try {
-                            FeedItemView it = objectMapper.readValue(json, FeedItemView.class);
-                            if (mediaId.equals(it.mediaId())) {
-                                redisTemplate.opsForZSet().remove(key, json);
-                            }
-                        } catch (Exception ignore) {
-                            // 单条损坏不影响整体
-                        }
+                    if (mediaId.equals(it.mediaId())) {
+                        redisTemplate.opsForZSet().remove(key, json);
                     }
-                } catch (Exception e) {
-                    log.warn("时间线移除失败（不影响主流程）: mediaId={}, key={}, {}", mediaId, key, e.getMessage());
                 }
             }
         }

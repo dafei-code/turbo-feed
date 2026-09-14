@@ -13,6 +13,11 @@ spring:
     redis:
       host: localhost
       port: 6379
+      # 密码外部化：默认空串 = 无密码（受网络隔离保护的 Redis 的常见形态）。
+      # 启用带密码的 Redis 时用环境变量注入，绝不把真实密码写进提交到仓库的默认配置。
+      # 未注入而 Redis 实际要求鉴权时，命令会直接返回 NOAUTH Authentication required
+      # （写路径 fail-open 只告警；B2 顺序消费路径会抛异常 → 进重试/DLQ，不会静默丢）。
+      password: ${TURBOFEED_REDIS_PASSWORD:}
       timeout: 500ms
       lettuce:
         pool:
@@ -53,3 +58,15 @@ management:
     web:
       exposure:
         include: health,info
+
+turbofeed:
+  # Feed 时间线投递开关：默认 false（走同步 HTTP 兜底，克隆即跑）。
+  # 启用真 MQ 需同时激活 application-mq.yml（--spring.profiles.active=mq），
+  # 否则 FeedTimelineConsumer / RocketMqFeedTimelinePublisher 不装配。
+  mq:
+    enabled: ${TURBOFEED_MQ_ENABLED:false}
+  feed:
+    timeline:
+      # Feed 时间线事件 Topic 与消费组（append / remove 共用，靠 body.action 区分，保证同一 mediaId 顺序）
+      topic: turbofeed-feed-timeline
+      consumer-group: turbofeed-feed-timeline-group

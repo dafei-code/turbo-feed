@@ -1,0 +1,47 @@
+# tf-feed-engine 的 RocketMQ 连接配置（仅 --spring.profiles.active=mq 时加载）。
+#
+# ── 为什么单独成文件，而不是写在 application.yml 里 ──────────────────────────
+# rocketmq-spring-boot-starter 的 RocketMQAutoConfiguration 用
+#   @ConditionalOnProperty(prefix = "rocketmq", value = {"name-server", "producer.group"})
+# 决定是否创建生产者 Bean。该注解没有 havingValue，因此属性「存在但等于空串」
+# 同样算命中 —— Bean 照样被创建，RocketMQTemplate#afterPropertiesSet 照样调用
+# producer.start()（该方法对 producer 无 try/catch，异常直接冒泡成应用启动失败；
+# 只有 consumer.start() 那段被 try/catch 吞掉）。见 javap 字节码实证（与 tf-gateway 同源）。
+# 也就是说，把 name-server 写成 `${TURBOFEED_ROCKETMQ_NAME_SERVER:}` 这种空占位符，
+# 做不到「不创建 Bean」。
+# 唯一可靠的办法是让属性在本 profile 未激活时「真正缺席」—— 只有 nameServer == null 时，
+# starter 才会命中它自己的跳过分支：
+#   "The necessary spring property 'rocketmq.name-server' is not defined,
+#    all rockertmq beans creation are skipped!"
+#
+# ── 启用方式 ────────────────────────────────────────────────────────────────
+#   java -jar tf-feed-engine.jar --spring.profiles.active=mq
+#   或  SPRING_PROFILES_ACTIVE=mq
+# 只把 turbofeed.mq.enabled 置 true（TURBOFEED_MQ_ENABLED=true）而不激活本 profile
+# 是不够的：那样 MQ 实现类会装配，但 RocketMQ 消费者容器 Bean 依赖 name-server 不存在，启动即失败。
+# 本文件同时把开关置 true，保证「profile 开 = MQ 开」这一件事只有一处真相。
+#
+# ── 引擎只消费，不需要 producer.group ──────────────────────────────────────
+# 引擎侧 FeedTimelineConsumer 仅做顺序消费、不发消息，故不声明 rocketmq.producer.group。
+# 但 rocketmq.* 仍必须放在本 profile 文件里：starter 的 @ConditionalOnProperty(value="name-server")
+# 没有 havingValue，「属性存在但为空串」同样会创建 Bean（消费者容器 consumer.start() 那段虽被 try/catch 吞掉，
+# 但 name-server 空串仍会导致 setNamesrvAddr 不被调用、消费端报 "connect to null failed"）。
+# 只有 nameServer == null 时 starter 才会跳过全部 RocketMQ Bean。
+#
+# NameServer 默认指向本机开发实例（127.0.0.1:9876，与仓库根 docker-compose.yml 的 tf-rocketmq-namesrv 对应）。
+# 生产/其他环境用 TURBOFEED_ROCKETMQ_NAME_SERVER 覆盖，不必改本文件。
+
+turbofeed:
+  mq:
+    # 本 profile 激活即代表「要用真 MQ」，开关随之置 true ——
+    # 避免「profile 开了但开关没开」导致 FeedTimelineConsumer 不装配。
+    enabled: true
+
+# name-server 两处都显式声明：顶层（全局兜底）+ consumer。
+# PUSH 消费者在 rocketmq-spring-boot-starter 里优先读 rocketmq.consumer.name-server，
+# 仅配顶层会导致消费端 setNamesrvAddr 不被调用、启动报 "connect to null failed"；
+# 两处齐设可兼容不同 starter 版本的属性解析路径。引擎只消费，无需 producer.name-server。
+rocketmq:
+  name-server: ${TURBOFEED_ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+  consumer:
+    name-server: ${TURBOFEED_ROCKETMQ_NAME_SERVER:127.0.0.1:9876}

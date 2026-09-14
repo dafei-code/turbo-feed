@@ -18,6 +18,9 @@ spring:
     redis:
       host: localhost
       port: 6379
+      # 密码外部化：默认空串 = 无密码。启用带密码的 Redis 时用 TURBOFEED_REDIS_PASSWORD 注入，
+      # 不把真实密码写进默认配置；未注入而 Redis 要求鉴权时会直接 NOAUTH（不静默降级）。
+      password: ${TURBOFEED_REDIS_PASSWORD:}
       timeout: 500ms
       lettuce:
         pool:

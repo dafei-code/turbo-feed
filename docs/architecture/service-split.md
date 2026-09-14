@@ -2,6 +2,7 @@
 
 > 状态：2026-08-28 已落地结构拆分；引擎业务实现按迭代路线逐模块填充。
 > 进展：**B1 已落地**——Feed 时间线读模型迁入 tf-feed-engine，网关改远程调用 + 降级（见 §8）。
+> 进展：**B2 已落地**——Feed 时间线投递从同步 HTTP 改为 RocketMQ 顺序消息（append/remove 共用单 topic、ORDERLY 消费，见 §9）。
 > 变更记录：见 [docs/changelog/](../changelog/)，每次变更一份 md。
 
 ## 1. 背景与动机
@@ -37,7 +38,7 @@
 | gateway → feed-engine（读） | 同步 HTTP（RestClient + 显式超时） | **已落地**：`GET /internal/feed/recommended`，网关侧 `FeedEngineClient` |
 | gateway → feed-engine（写） | 同步 HTTP（RestClient + 超时，fail-open） | **已落地**：`POST /internal/feed/timeline/{append,remove}` |
 | gateway → counter | 同步 HTTP | 未落地（计数尚未拆出） |
-| gateway → 引擎（事件类） | 异步 RocketMQ（`turbofeed.mq.enabled` 条件切换，本地事件兜底） | 事件总线已在 gateway 落地；**Feed 时间线投递仍走同步 HTTP，改 MQ 见 §8 待办** |
+| gateway → 引擎（事件类） | 异步 RocketMQ（`turbofeed.mq.enabled` 条件切换，本地事件兜底） | 事件总线已在 gateway 落地；**B2 已落地：Feed 时间线投递改 RocketMQ 顺序消息**（见 §9），`turbofeed.mq.enabled=false`（默认/缺失）走 HTTP 兜底 |
 | 引擎 → 引擎 | 异步事件为主，避免同步链路放大故障 | 按业务出现时定 |
 
 **服务发现**：当前直连 `host:port`（`turbofeed.feed.engine.base-url`）；Phase 2 引入 Nacos 后该配置退化为兜底。
@@ -75,7 +76,8 @@ curl -X POST "http://localhost:8083/internal/feed/timeline/remove?mediaId=media/
 |---|---|
 | 已完成 | 结构拆分：3 个独立可执行服务 + 端口规划 + actuator 健康检查 |
 | 已完成 | **B1：Feed 时间线读模型迁入 tf-feed-engine**；gateway 引 HTTP 客户端（RestClient 直连 + 超时 + fail-open）；契约 `FeedItemView` 下沉 tf-shared；降级口径 `turbofeed.feed.degraded-mode` |
-| 下一步 | Feed 时间线投递改 **RocketMQ 可靠投递**（含重试/幂等，替代同步 HTTP 的静默丢失窗口）；traceId 全链路日志（Phase 1 方案已定） |
+| 已完成 | **B2：Feed 时间线投递改 RocketMQ 顺序消息**；gateway 侧 `FeedTimelinePublisher` 双实现（HTTP 兜底 / MQ 顺序），引擎侧 `FeedTimelineConsumer` 走严格写入入口（异常上抛触发重试/DLQ）；9 处调用点全部经 publisher |
+| 下一步 | traceId 全链路日志（Phase 1 方案已定）；计数（tf-counter）写路径与 DB 拆分 |
 | Phase 2 | Nacos 服务发现 + LoadBalancer + Prometheus / Grafana + Loki 日志集中 |
 | Phase 3 | 多机房容灾与降级预案 |
 
@@ -110,6 +112,46 @@ curl -X POST "http://localhost:8083/internal/feed/timeline/remove?mediaId=media/
 
 **已知取舍（B1 明确接受）**：
 
-- 写侧为**同步 HTTP + fail-open**：引擎抖动时内容会静默不入流。语义与拆分前"网关本地写 Redis 失败仅告警"
-  等价，不构成回归；可靠性由 B2 的 MQ 投递解决。
+- 写侧（B1 时期）为**同步 HTTP + fail-open**：引擎抖动时内容会静默不入流。语义与拆分前"网关本地写 Redis 失败仅告警"
+  等价，不构成回归；**该静默丢失窗口已被 B2 的 RocketMQ 顺序消息投递消除**——MQ 不可用 → 发布器 fail-fast 抛异常 → 审核/删除事务回滚 → 对外可见失败，而非悄悄不入流。
 - 引擎 `/internal/**` 当前**无鉴权**，依赖内网信任与网络隔离；生产需补服务间令牌或 mTLS。
+
+## 9. B2 落地明细（Feed 时间线投递改 RocketMQ 顺序消息）
+
+**解决的问题**：B1 写侧是"同步 HTTP + fail-open"，引擎抖动时内容静默不入流（无重试、无削峰、调用方拿不到失败）。
+B2 把 append / remove 改成 RocketMQ 可靠投递，消除该静默丢失窗口。
+
+**事件契约**：`tf-shared` 新增 `FeedTimelineEvent`（零依赖 record，无 Jackson 注解，靠 `-parameters` 反序列化）：
+`mediaId / action / poolLevel / item(FeedItemView) / occurredAt`，常量 `ACTION_APPEND` / `ACTION_REMOVE`，
+工厂 `append(item, poolLevel)` / `remove(mediaId)`（remove 时 item 为 null）。
+**刻意不提供 `isAppend()` / `isRemove()` 这类 is 前缀布尔方法**：record 的布尔方法会被 Jackson 当作 getter
+序列化出多余的 `"append":true,"remove":false` 字段，污染消息格式并埋下严格反序列化失败的隐患
+（与 `Result<T>.isSuccess()` 同类问题）。判断动作请直接比较 `ACTION_APPEND` / `ACTION_REMOVE` 常量。
+
+**顺序性（关键，不可妥协）**：append 与 remove **共用同一 topic `turbofeed-feed-timeline`、同一消费者**，
+靠消息体 `action` 区分，**绝不按 action 拆 tag / 拆消费者**——否则同一 mediaId 的 append 与 remove 会落不同队列、
+失去顺序保证，出现「remove 先执行、append 后执行 → 已下架内容重新出现」的内容安全事故。
+发送侧 `RocketMQTemplate#syncSendOrderly(destination, payload, hashKey=mediaId)`，
+消费侧 `@RocketMQMessageListener(consumeMode=ConsumeMode.ORDERLY)`，保证同一 mediaId 严格按序。
+
+**双路径（`turbofeed.mq.enabled` 条件切换）**：gateway 侧抽象 `FeedTimelinePublisher`，
+两个实现互斥激活（`@ConditionalOnProperty`）：
+- `HttpFeedTimelinePublisher`（`havingValue=false`，`matchIfMissing=true`，默认/缺失走此）：委托原 `FeedEngineClient` 同步 HTTP，保留 B1 兜底，克隆即跑无 MQ 也能启动；
+- `RocketMqFeedTimelinePublisher`（`havingValue=true`）：`FeedItemMapper` 把 `MediaItem` 转 `FeedItemView`，
+  构造 `FeedTimelineEvent`，`syncSendOrderly` 投递。**fail-fast（关键）**：投递失败直接抛异常、不写任何降级/本地兜底，
+  由审核 / 删除路径的 `@Transactional` 回滚保证不丢——降级会掩盖失败，让 MQ 的持久化/重试/削峰全部失效。
+- 9 处调用点（MediaReviewService 5 次 append + 3 次 remove、MediaUploadService 1 次 remove）全部改为经 `FeedTimelinePublisher`，
+  仅 `HttpFeedTimelinePublisher` 仍直接调 `FeedEngineClient.append/remove`；读路径 `FeedEngineClient.recommended` 保留。
+
+**引擎严格写入入口（必须做，否则 B2 白做）**：`FeedTimelineStore.append/remove` 仍是 fail-open（HTTP 兜底路径复用），
+新增 `appendStrict(item, poolLevel)` / `removeStrict(mediaId)` 把写逻辑抽成「会抛」实现——不做 try/catch，异常向上抛。
+`FeedTimelineConsumer` 只调严格入口并 `log.error` 后原样 rethrow；配合 `maxReconsumeTimes=5`，
+消费失败由 RocketMQ 重投、重投耗尽进死信队列 `%DLQ%{consumerGroup}`（人工/巡检对账）。
+若消费者误用 fail-open 的 `append/remove`，异常被吞、重试与 DLQ 永不触发，静默丢失只是从 HTTP 搬到 MQ（等于白做 B2）。
+`append` 无声返回（item 为空/未过审不入流）在严格路径同样保留。
+
+**配置**：引擎 `pom.xml` 引 `rocketmq-spring-boot-starter`（版本由 root pom dependencyManagement 锁定 2.3.5）；
+`application.yml` 加 `turbofeed.mq.enabled: ${TURBOFEED_MQ_ENABLED:false}` + `feed.timeline.topic/consumer-group`（默认占位），
+`application-mq.yml` 设 `turbofeed.mq.enabled: true` 并配 `rocketmq.name-server`（引擎只消费、无 `producer.group`）。
+`rocketmq.*` 必须留在 profile 文件——`RocketMQAutoConfiguration` 的 `@ConditionalOnProperty(value="name-server")` 无 `havingValue`，
+缺失则不装配，不会因默认文件带空值而误启。
