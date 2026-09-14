@@ -1,10 +1,13 @@
 package com.turbofeed.gateway.config;
 
+import com.turbofeed.gateway.service.review.ContentModeration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.util.unit.DataSize;
 
 import com.turbofeed.gateway.service.review.ModerationMode;
+
+import java.util.List;
 
 /**
  * 媒体上传配置（turbofeed.media.*）。

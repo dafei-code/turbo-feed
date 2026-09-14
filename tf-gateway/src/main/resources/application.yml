@@ -60,10 +60,12 @@ turbofeed:
     expire-seconds: 86400
   # 雪花 ID 的实例标识（各 0~31）。多实例部署必须逐实例注入不同取值：
   # 同一组取值会让两个实例在同一毫秒生成相同的 ID，user 表主键插入直接冲突（注册失败）。
-  # 默认 1/1 仅供单实例本地开发，K8s 可用 StatefulSet 序号 / POD_NAME 尾号派生。
+  # K8s 可用 StatefulSet 序号 / POD_NAME 尾号派生后注入环境变量。
+  # 刻意「无默认值」：缺失即启动失败（SnowflakeConfig#requireInstanceId），
+  # 单实例本地开发也必须显式给一次，避免 1/1 兜底在多实例下静默复发撞主键。
   snowflake:
-    worker-id: ${TURBOFEED_SNOWFLAKE_WORKER_ID:1}
-    datacenter-id: ${TURBOFEED_SNOWFLAKE_DATACENTER_ID:1}
+    worker-id: ${TURBOFEED_SNOWFLAKE_WORKER_ID:}
+    datacenter-id: ${TURBOFEED_SNOWFLAKE_DATACENTER_ID:}
   # Feed 引擎（tf-feed-engine，默认 8082）调用配置：Feed 时间线读模型已迁至独立部署单元，
   # 网关只做转发 + 降级决策，不再持有任何 Feed 读模型或推荐流缓存
   feed:
@@ -141,11 +143,15 @@ turbofeed:
         - "暴恐"
         - "涉政"
         - "赌博"
-  # MQ（RocketMQ）事件总线：
-  # 本地开发已部署 RocketMQ（Docker: rmqnamesrv 127.0.0.1:9876），启用跨进程投递。
-  # 若未部署 RocketMQ 且希望「克隆即跑」，改为 false 回退到本地 Spring 事件。
+  # MQ（RocketMQ）事件总线：默认关闭，未部署 RocketMQ 时也能「克隆即跑」。
+  # 开启方式见 application-mq.yml（--spring.profiles.active=mq），NameServer 地址可用
+  # TURBOFEED_ROCKETMQ_NAME_SERVER 覆盖。
+  # 为什么放在本文件的是「开关」而不是 rocketmq.* 配置块：rocketmq-spring 的
+  # @ConditionalOnProperty(prefix="rocketmq", value="name-server") 没有 havingValue，
+  # 属性「存在但为空」同样算命中 → 生产者 Bean 会被创建、启动时调用 producer.start()。
+  # 因此空值占位符做不到「不创建 Bean」，只能靠 profile 让属性真正缺席。
   mq:
-    enabled: true
+    enabled: ${TURBOFEED_MQ_ENABLED:false}
   fanout:
     push-threshold: 1000        # 大 V 判定：粉丝数阈值
     inbox-max-size: 2000        # 收件箱 LTRIM 定长
@@ -167,16 +173,6 @@ turbofeed:
 #       file:
 #         file: classpath:sentinel/rules.json
 
-# RocketMQ 启用配置（turbofeed.mq.enabled=true 时生效）
-# name-server 三处都显式声明：顶层（生产者/全局兜底）+ producer + consumer。
-# PUSH 消费者在 rocketmq-spring-boot-starter 里优先读 rocketmq.consumer.name-server，
-# 仅配顶层会导致消费端 setNamesrvAddr 不被调用、启动报 "connect to null failed"；
-# 三处齐设可兼容不同 starter 版本的属性解析路径。
-rocketmq:
-  name-server: 127.0.0.1:9876
-  producer:
-    group: turbofeed-media-producer-group
-    name-server: 127.0.0.1:9876
-    send-msg-timeout: 1000   # 调短发送超时：MQ 不可用时更快触发降级，而非长时间阻塞上传线程
-  consumer:
-    name-server: 127.0.0.1:9876
+# RocketMQ 连接配置已移至 profile 文件 application-mq.yml（--spring.profiles.active=mq 时加载）。
+# 放在那里的原因：只有让 rocketmq.name-server 在默认运行下「真正缺席」，
+# rocketmq-spring 才会跳过全部 Bean（见文件顶部 mq.enabled 处注释的字节码依据）。
