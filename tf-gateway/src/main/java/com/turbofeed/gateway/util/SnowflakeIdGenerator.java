@@ -28,10 +28,17 @@ public class SnowflakeIdGenerator {
     private long sequence = 0L;
     private long lastTimestamp = -1L;
 
-    public SnowflakeIdGenerator() {
-        this(1L, 1L);
-    }
-
+    /**
+     * 唯一构造器：实例标识必须显式传入。
+     *
+     * <p><b>刻意不提供无参构造器</b>：历史实现带一个 {@code this(1L, 1L)} 的默认构造器，
+     * 任何一处 {@code new SnowflakeIdGenerator()} 都会让实例回退到 (1,1)——多实例同毫秒撞主键的
+     * P0 缺陷就是这么复发的。移除后，取值只可能来自
+     * {@code config.SnowflakeConfig} 的配置注入，编译期即杜绝误用。</p>
+     *
+     * @param workerId     机器标识（0~31）
+     * @param datacenterId 机房标识（0~31）
+     */
     public SnowflakeIdGenerator(long workerId, long datacenterId) {
         if (workerId < 0 || workerId > MAX_WORKER) {
             throw new IllegalArgumentException("workerId 越界");

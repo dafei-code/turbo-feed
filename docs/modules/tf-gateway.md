@@ -135,7 +135,7 @@ upload(files, requestId)          @SentinelResource 机器维度限流（见 §3
 | 实现 | 激活条件 | 语义 |
 |---|---|---|
 | `LocalMediaEventPublisher` | 默认 | Spring 应用内事件，同步，零外部依赖 |
-| `RocketMqMediaEventPublisher` | `turbofeed.mq.enabled=true` + `rocketmq.name-server` | 跨进程投递，削峰 / 解耦 / 失败重试 |
+| `RocketMqMediaEventPublisher` | `turbofeed.mq.enabled=true`（经 `mq` profile 加载 `application-mq.yml`，其中含 `rocketmq.name-server`） | 跨进程投递，削峰 / 解耦 / 失败重试 |
 
 发布方只依赖 `MediaEventPublisher` 端口，新增订阅方（清理 / 通知服务）零改动发布方。
 

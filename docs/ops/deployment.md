@@ -25,9 +25,9 @@ java -jar tf-feed-engine/target/tf-feed-engine-0.1.0-SNAPSHOT.jar  # :8082
 
 | 开关 | 当前值 | 打开后 |
 |---|---|---|
-| `turbofeed.mq.enabled` | false | RocketMQ 跨进程事件（需放开 `rocketmq.name-server`） |
+| `turbofeed.mq.enabled` | false | RocketMQ 跨进程事件。**开启需激活 `mq` profile**（`--spring.profiles.active=mq`）以加载 `application-mq.yml` 的连接配置；只把本开关置 true 而不激活 profile，会因缺少 `RocketMQTemplate` Bean 启动失败 |
 | `turbofeed.media.processing-enabled` | false | ImageIO 缩略图处理链（注意解码内存 ≈ 48MB/张） |
-| 引擎服务 Redisson autoconfigure exclude | 生效 | Redis 就绪后删除 exclude，补 `spring.data.redis.*` |
+| 引擎服务 Redis 客户端 | 已就绪 | B1 起改为官方 `spring-boot-starter-data-redis`（Lettuce + commons-pool2）并已补 `spring.data.redis.*`；原 Redisson autoconfigure exclude 已移除 |
 | H2 数据源 | 内存库 | 生产切 MySQL 8（`MODE=MySQL` 已对齐语法） |
 
 ## 4. 生产前必改清单
