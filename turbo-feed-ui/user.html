@@ -310,6 +310,130 @@
     transition: width .2s;
   }
 
+  /* ========== 上传：已选预览（多图，上限 9） ========== */
+  .upload-preview { margin-top: 14px; }
+  .upload-preview-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+  .upload-preview-head b { color: var(--accent); font-weight: 600; }
+  .upload-preview-head .clear-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 2px 4px;
+  }
+  .upload-preview-head .clear-btn:hover { color: var(--error); }
+  .upload-thumbs {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    gap: 10px;
+  }
+  .upload-thumb {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #0a0d12;
+  }
+  .upload-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .upload-thumb .del {
+    position: absolute;
+    top: 4px; right: 4px;
+    width: 20px; height: 20px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(13,17,23,.8);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .upload-thumb .del:hover { background: var(--error); }
+  .upload-thumb .seq {
+    position: absolute;
+    left: 4px; bottom: 4px;
+    font-size: 10px;
+    color: #fff;
+    background: rgba(13,17,23,.7);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+  .upload-actions { margin-top: 12px; display: flex; gap: 10px; }
+  .upload-actions button {
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .upload-actions .primary {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+  .upload-actions .primary:hover { filter: brightness(1.1); }
+  .upload-actions .ghost {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+  .upload-actions .ghost:hover { color: var(--text); border-color: var(--accent); }
+
+  /* 内容卡片：多图角标 + 卡内迷你轮播（一帖一卡） */
+  .media-card .thumb .img-count {
+    position: absolute;
+    right: 10px; bottom: 10px;
+    font-size: 11px;
+    color: #fff;
+    background: rgba(13,17,23,.75);
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 20px;
+    padding: 2px 8px;
+    backdrop-filter: blur(4px);
+  }
+  .media-card .thumb .mini-slider {
+    display: flex;
+    height: 100%;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+  .media-card .thumb .mini-slider::-webkit-scrollbar { display: none; }
+  .media-card .thumb .mini-slider img {
+    flex: 0 0 100%;
+    width: 100%;
+    height: 100%;
+    scroll-snap-align: center;
+    object-fit: cover;
+  }
+  .media-card .thumb .mini-dots {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: 8px;
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+    pointer-events: none;
+  }
+  .media-card .thumb .mini-dots i {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: rgba(255,255,255,.35);
+  }
+  .media-card .thumb .mini-dots i.on { background: #fff; }
+
   /* ========== 内容列表 ========== */
   .toolbar {
     display: flex;
@@ -588,15 +712,26 @@
         <span class="sub" data-page-node-id="3A2GAzL9H1YYIBDBKi2FuS">支持 jpg / png / gif / webp，单张 ≤5MB，单次最多 9 张</span>
       </div>
       <label for="fileInput" class="upload-zone" id="uploadZone" data-page-node-id="vzntBspMsR26Gs14Alz8U6">
-        <input type="file" id="fileInput" accept="image/*" multiple onchange="console.log('file input change', this.files); doUpload(this.files); this.value='';" data-page-node-id="37vBQXODbEoayfCfLi1ElR">
+        <input type="file" id="fileInput" accept="image/*" multiple onchange="addFiles(this.files); this.value='';" data-page-node-id="37vBQXODbEoayfCfLi1ElR">
         <div class="icon" data-page-node-id="Bvl2IugaPoZYmtIjtQJvWu">↑</div>
         <div class="tip" data-page-node-id="cbeKr4kRBAsIrEjhLn4blB">点击或拖拽图片到此处上传</div>
-        <div class="hint" data-page-node-id="eeEAWMZrE6zadgOpE6RMXt">上传后进入待审核状态，审核通过后自动展示到 Feed 流</div>
+        <div class="hint" data-page-node-id="eeEAWMZrE6zadgOpE6RMXt">一次最多 9 张，同一批作为一个帖子展示；上传后进入待审核状态</div>
         <div class="upload-progress" id="uploadProgress" data-page-node-id="H3IVEAmscqFMAAtmDmKXUl">
           <span data-page-node-id="A8S9b6xaqutH7F4lbnjG9E">上传中...</span>
           <div class="bar" data-page-node-id="GRUcxZK8YPuNFGRkDETH4t"><i id="uploadBar" data-page-node-id="lTo5DMXrmsIjHYgFMqV5ND"></i></div>
         </div>
       </label>
+      <div class="upload-preview" id="uploadPreview" style="display:none;">
+        <div class="upload-preview-head">
+          <span>已选 <b id="previewCount">0</b> / 9 张 · 同一批将作为一个帖子展示</span>
+          <button type="button" class="clear-btn" onclick="clearSelection()">清空</button>
+        </div>
+        <div class="upload-thumbs" id="uploadThumbs"></div>
+        <div class="upload-actions">
+          <button type="button" class="primary" id="submitBtn" onclick="submitSelection()">上传 <span id="submitCount">0</span> 张</button>
+          <button type="button" class="ghost" onclick="clearSelection()">取消</button>
+        </div>
+      </div>
     </div>
 
     <!-- 我的内容 -->
@@ -637,6 +772,13 @@
   var USER = localStorage.getItem('turbofeed:user') || '用户';
   var allItems = [];
   var currentFilter = 'all';
+
+  // 一帖多图（抖音式图文）：一次上传 1..9 张，同一批 = 一个帖子。
+  // 数量/大小/类型与后端校验口径对齐（后端是权威，前端先拦是为了少一次无效往返）。
+  var MAX_FILES = 9;
+  var MAX_SIZE = 5 * 1024 * 1024;
+  var ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  var selectedFiles = [];   // 已选待传队列：先预览/可逐张删除，确认后再整批提交
 
   // 未登录拦截
   if (!TOKEN) {
@@ -720,13 +862,54 @@
     });
   }
 
-  // 更新统计
+  // 取一条记录的全部图片：优先 images（帖子内按 seq 排序），历史单图行回退 [url]
+  function imgUrlsOf(item) {
+    if (item && item.images && item.images.length) return item.images;
+    return (item && item.url) ? [item.url] : [];
+  }
+  // 帖子身份：有 postId 用 postId，历史单图数据回退 mediaId（与后端 timelineKey 口径一致）
+  function postKeyOf(item) {
+    return (item && (item.postId || item.mediaId)) || '';
+  }
+
+  // 按帖聚合：后端已按「seq=0 代表行 + 帖内图片」返回，这里再做一次幂等归并，
+  // 保证历史单图行（无 postId）与新帖子（有 postId）都能得到「一帖一卡」。
+  function groupPosts(items) {
+    var map = {};
+    var order = [];
+    (items || []).forEach(function (it) {
+      var key = postKeyOf(it);
+      if (!key) return;
+      if (!map[key]) {
+        map[key] = {
+          key: key,
+          postId: it.postId || '',
+          mediaId: it.mediaId || '',
+          status: it.status,
+          createdAt: it.createdAt,
+          caption: it.caption || '',
+          images: []
+        };
+        order.push(key);
+      }
+      var p = map[key];
+      imgUrlsOf(it).forEach(function (u) {
+        if (u && p.images.indexOf(u) < 0) p.images.push(u);
+      });
+      if (!p.status && it.status) p.status = it.status;
+      if (!p.createdAt && it.createdAt) p.createdAt = it.createdAt;
+      if (!p.mediaId && it.mediaId) p.mediaId = it.mediaId;
+    });
+    return order.map(function (k) { return map[k]; });
+  }
+
+  // 更新统计（以「帖子」为口径，与卡片数量一致）
   function updateStats() {
-    var total = allItems.length;
-    var approved = allItems.filter(function (i) { return i.status === 'APPROVED'; }).length;
-    var pending = allItems.filter(function (i) { return i.status === 'PENDING'; }).length;
-    var rejected = allItems.filter(function (i) { return i.status === 'REJECTED'; }).length;
-    document.getElementById('statTotal').textContent = total;
+    var posts = groupPosts(allItems);
+    var approved = posts.filter(function (p) { return p.status === 'APPROVED'; }).length;
+    var pending = posts.filter(function (p) { return p.status === 'PENDING'; }).length;
+    var rejected = posts.filter(function (p) { return p.status === 'REJECTED'; }).length;
+    document.getElementById('statTotal').textContent = posts.length;
     document.getElementById('statApproved').textContent = approved;
     document.getElementById('statPending').textContent = pending;
     document.getElementById('statRejected').textContent = rejected;
@@ -741,49 +924,83 @@
     renderGrid();
   }
 
-  // 渲染网格
+  // 渲染网格：一个帖子一张卡，帖内多图可在卡内横向滑动（带圆点指示）
   function renderGrid() {
     var grid = document.getElementById('contentGrid');
-    var items = currentFilter === 'all' ? allItems : allItems.filter(function (i) {
-      return (i.status || '').toUpperCase() === currentFilter;
-    });
-
-    var keyword = (document.getElementById('searchInput').value || '').trim().toLowerCase();
-    if (keyword) {
-      items = items.filter(function (i) {
-        return (i.mediaId || '').toLowerCase().indexOf(keyword) >= 0 ||
-               (i.url || '').toLowerCase().indexOf(keyword) >= 0;
+    var posts = groupPosts(allItems);
+    if (currentFilter !== 'all') {
+      posts = posts.filter(function (p) {
+        return (p.status || '').toUpperCase() === currentFilter;
       });
     }
 
-    if (!items.length) {
+    var keyword = (document.getElementById('searchInput').value || '').trim().toLowerCase();
+    if (keyword) {
+      posts = posts.filter(function (p) {
+        if ((p.postId || '').toLowerCase().indexOf(keyword) >= 0) return true;
+        if ((p.mediaId || '').toLowerCase().indexOf(keyword) >= 0) return true;
+        return p.images.some(function (u) { return (u || '').toLowerCase().indexOf(keyword) >= 0; });
+      });
+    }
+
+    if (!posts.length) {
       grid.innerHTML = '<div class="empty-state"><div class="big">📭</div>暂无符合条件的内容<br>点击上方上传区域添加新内容</div>';
       return;
     }
 
     grid.innerHTML = '';
-    items.forEach(function (item) {
-      var stCls = statusClass(item.status);
-      var stTxt = statusText(item.status);
+    posts.forEach(function (p) {
+      var stCls = statusClass(p.status);
+      var stTxt = statusText(p.status);
+      var n = p.images.length;
+      var thumb;
+      if (!n) {
+        thumb = '<div class="empty-img">无预览</div>';
+      } else if (n === 1) {
+        thumb = '<img src="' + p.images[0] + '" alt="">';
+      } else {
+        thumb =
+          '<div class="mini-slider" data-slider>' +
+            p.images.map(function (u) { return '<img src="' + u + '" alt="">'; }).join('') +
+          '</div>' +
+          '<div class="mini-dots">' +
+            p.images.map(function (_, i) { return '<i class="' + (i === 0 ? 'on' : '') + '"></i>'; }).join('') +
+          '</div>';
+      }
+
       var card = document.createElement('div');
       card.className = 'media-card';
       card.innerHTML =
-        '<div class="thumb">' +
-          (item.url
-            ? '<img src="' + item.url + '" alt="">'
-            : '<div class="empty-img">无预览</div>') +
+        '<div class="thumb">' + thumb +
+          (n > 1 ? '<span class="img-count">' + n + ' 图</span>' : '') +
           '<span class="status ' + stCls + '">' + stTxt + '</span>' +
         '</div>' +
         '<div class="info">' +
-          '<div class="id" title="' + (item.mediaId || '') + '">' + shortId(item.mediaId) + '</div>' +
-          '<div class="time">' + fmtTime(item.createdAt) + '</div>' +
+          '<div class="id" title="' + (p.postId || p.mediaId || '') + '">' + shortId(p.postId || p.mediaId) + '</div>' +
+          '<div class="time">' + fmtTime(p.createdAt) + (n > 1 ? ' · ' + n + ' 张图' : '') + '</div>' +
           '<div class="actions">' +
-            '<button onclick="openImage(\'' + (item.url || '') + '\')">查看</button>' +
-            '<button onclick="copyUrl(\'' + (item.url || '') + '\')">复制链接</button>' +
-            '<button class="danger" onclick="deleteMedia(\'' + (item.mediaId || '') + '\')">删除</button>' +
+            '<button onclick="openImage(\'' + (p.images[0] || '') + '\')">查看</button>' +
+            '<button onclick="copyUrl(\'' + (p.images[0] || '') + '\')">复制链接</button>' +
+            '<button class="danger" onclick="deleteMedia(\'' + (p.mediaId || '') + '\')">删除</button>' +
           '</div>' +
         '</div>';
       grid.appendChild(card);
+    });
+
+    bindMiniSliders(grid);
+  }
+
+  // 卡内多图轮播：横向滚动时同步圆点高亮
+  function bindMiniSliders(root) {
+    Array.prototype.forEach.call(root.querySelectorAll('[data-slider]'), function (sl) {
+      var dots = sl.parentNode.querySelectorAll('.mini-dots i');
+      if (!dots.length) return;
+      sl.addEventListener('scroll', function () {
+        var idx = Math.round(sl.scrollLeft / Math.max(1, sl.clientWidth));
+        Array.prototype.forEach.call(dots, function (d, i) {
+          d.classList.toggle('on', i === idx);
+        });
+      });
     });
   }
 
@@ -814,10 +1031,21 @@
     document.body.removeChild(ta);
   }
 
-  // 删除自己的内容：物理删除（MinIO）+ 逻辑删除（MySQL status=DELETED）
+  // 删除自己的内容：整帖删除（MinIO 物理删除 + MySQL 逻辑删除 status=DELETED）。
+  // 后端以 mediaId 为入口解析出 postId，再整帖处理；这里传的即卡片对应的代表行 mediaId。
   function deleteMedia(mediaId) {
     if (!mediaId) return;
-    if (!confirm('确定删除这条内容吗？删除后将从「我的内容」与公域发现流移除。')) return;
+    var target = null;
+    for (var i = 0; i < allItems.length; i++) {
+      if (allItems[i].mediaId === mediaId) { target = allItems[i]; break; }
+    }
+    var postKey = target ? postKeyOf(target) : mediaId;
+    var n = target ? imgUrlsOf(target).length : 1;
+    var tip = n > 1
+      ? '确定删除这个帖子吗？该帖共 ' + n + ' 张图，将整帖删除并从「我的内容」与公域发现流移除。'
+      : '确定删除这条内容吗？删除后将从「我的内容」与公域发现流移除。';
+    if (!confirm(tip)) return;
+
     fetch(API_BASE + '/api/media?mediaId=' + encodeURIComponent(mediaId), {
       method: 'DELETE',
       headers: { 'Authorization': 'Bearer ' + TOKEN }
@@ -828,46 +1056,126 @@
         showToast('删除失败：' + (res.message || '未知错误'), 'error');
         return;
       }
-      // 从本地列表移除并刷新统计与网格
-      allItems = allItems.filter(function (i) { return i.mediaId !== mediaId; });
+      allItems = allItems.filter(function (it) { return postKeyOf(it) !== postKey; });
       updateStats();
       renderGrid();
-      showToast('已删除', 'ok');
+      showToast(n > 1 ? '整帖已删除' : '已删除', 'ok');
     })
     .catch(function (err) {
       showToast('删除失败：' + (err.message || '网络错误'), 'error');
     });
   }
 
-  // 上传
-  function doUpload(files) {
-    if (!files || !files.length) return;
+  // ========== 上传：先加入待传队列（可预览 / 逐张删除），再整批提交 ==========
+  var previewUrls = [];
+  function revokePreviewUrls() {
+    previewUrls.forEach(function (u) { try { URL.revokeObjectURL(u); } catch (e) {} });
+    previewUrls = [];
+  }
+
+  // 选择/拖入文件 → 入队（类型、大小、单帖上限均在前端先拦，减少无效往返）
+  function addFiles(fileList) {
+    if (!fileList || !fileList.length) return;
+    var ignored = [];
+    Array.prototype.forEach.call(fileList, function (f) {
+      if (selectedFiles.length >= MAX_FILES) { ignored.push(f.name + '（超出 ' + MAX_FILES + ' 张上限）'); return; }
+      if (f.type && ALLOWED_TYPES.indexOf(f.type) < 0) { ignored.push(f.name + '（格式不支持）'); return; }
+      if (f.size === 0) { ignored.push(f.name + '（空文件）'); return; }
+      if (f.size > MAX_SIZE) { ignored.push(f.name + '（超过 5MB）'); return; }
+      var dup = selectedFiles.some(function (s) {
+        return s.name === f.name && s.size === f.size && s.lastModified === f.lastModified;
+      });
+      if (dup) return;
+      selectedFiles.push(f);
+    });
+    if (ignored.length) {
+      showToast('已忽略 ' + ignored.length + ' 个文件：' + ignored[0] + (ignored.length > 1 ? ' 等' : ''), 'error');
+    }
+    renderPreview();
+  }
+
+  function renderPreview() {
+    var box = document.getElementById('uploadPreview');
+    var thumbs = document.getElementById('uploadThumbs');
+    var n = selectedFiles.length;
+
+    revokePreviewUrls();
+    if (!n) {
+      box.style.display = 'none';
+      thumbs.innerHTML = '';
+      return;
+    }
+
+    box.style.display = 'block';
+    document.getElementById('previewCount').textContent = n;
+    document.getElementById('submitCount').textContent = n;
+    document.getElementById('submitBtn').disabled = false;
+
+    var html = '';
+    selectedFiles.forEach(function (f, i) {
+      var url = URL.createObjectURL(f);
+      previewUrls.push(url);
+      html +=
+        '<div class="upload-thumb">' +
+          '<img src="' + url + '" alt="" title="' + f.name + '">' +
+          '<button type="button" class="del" title="移除这张" onclick="removeSelected(' + i + ')">×</button>' +
+          '<span class="seq">' + (i + 1) + '</span>' +
+        '</div>';
+    });
+    thumbs.innerHTML = html;
+  }
+
+  function removeSelected(idx) {
+    selectedFiles.splice(idx, 1);
+    renderPreview();
+  }
+
+  function clearSelection() {
+    selectedFiles = [];
+    renderPreview();
+  }
+
+  // 整批提交：一次请求 = 一个帖子（1..9 张）
+  function submitSelection() {
+    if (!selectedFiles.length) { showToast('请先选择图片', 'error'); return; }
+    if (selectedFiles.length > MAX_FILES) { showToast('单次最多 ' + MAX_FILES + ' 张', 'error'); return; }
+
     var progress = document.getElementById('uploadProgress');
     var bar = document.getElementById('uploadBar');
+    var btn = document.getElementById('submitBtn');
     progress.classList.add('show');
     bar.style.width = '30%';
+    btn.disabled = true;
 
     var fd = new FormData();
-    Array.prototype.forEach.call(files, function (f) { fd.append('files', f); });
+    selectedFiles.forEach(function (f) { fd.append('files', f); });
+    // 幂等键：同一次提交（含重试）复用同一个 requestId，服务端窗口内去重，避免重复建帖
+    var requestId = 'ui-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
 
     fetch(API_BASE + '/api/media/upload', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + TOKEN },
+      headers: { 'Authorization': 'Bearer ' + TOKEN, 'X-Request-Id': requestId },
       body: fd
     })
     .then(function (r) { return r.json(); })
     .then(function (res) {
       bar.style.width = '100%';
+      btn.disabled = false;
       setTimeout(function () { progress.classList.remove('show'); bar.style.width = '0%'; }, 400);
       if (res.code !== 0) {
         showToast('上传失败：' + (res.message || '未知错误'), 'error');
         return;
       }
-      showToast('上传成功，已加入审核队列', 'ok');
+      var cnt = (res.data && res.data.images) ? res.data.images.length : selectedFiles.length;
+      selectedFiles = [];
+      renderPreview();
+      showToast('已上传 ' + cnt + ' 张，作为一个帖子进入审核队列', 'ok');
       loadContent(false);
     })
     .catch(function (err) {
+      // 失败保留已选，用户可直接重试（配合同一个 requestId 也不会产生重复帖子）
       progress.classList.remove('show');
+      btn.disabled = false;
       showToast('上传失败：' + (err.message || '网络错误'), 'error');
     });
   }
@@ -886,7 +1194,7 @@
   uploadZone.addEventListener('drop', function (e) {
     e.preventDefault();
     this.classList.remove('dragover');
-    doUpload(e.dataTransfer.files);
+    addFiles(e.dataTransfer.files);
   });
 
   // 搜索

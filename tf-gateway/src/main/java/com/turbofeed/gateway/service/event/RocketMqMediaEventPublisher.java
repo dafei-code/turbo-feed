@@ -46,11 +46,12 @@ public class RocketMqMediaEventPublisher implements MediaEventPublisher {
     public void publish(MediaUploadedEvent event) {
         try {
             rocketMQTemplate.convertAndSend(topic, event);
-            log.info("媒体上传事件已投递 RocketMQ: topic={}, mediaId={}", topic, event.mediaId());
+            log.info("帖子上传事件已投递 RocketMQ: topic={}, postId={}, images={}",
+                    topic, event.postId(), event.imageCount());
         } catch (MessagingException e) {
             // MQ 不可用 → 降级本地线程池消费：上传不失败、审核不中断（幂等保证安全）
-            log.warn("RocketMQ 投递失败，降级本地线程处理: topic={}, mediaId={}, {}",
-                    topic, event.mediaId(), e.getMessage());
+            log.warn("RocketMQ 投递失败，降级本地线程处理: topic={}, postId={}, {}",
+                    topic, event.postId(), e.getMessage());
             applicationEventPublisher.publishEvent(event);
         }
     }

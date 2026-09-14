@@ -65,10 +65,13 @@ CREATE TABLE `turbo_feed_1`.`media_0` (
   `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO',
   `caption`     VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '描述/标题（抖音式文案；解析后结构化标记在 caption_mark）',
   `caption_mark` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '解析后的结构化标记 JSON：@用户 / #话题 / [image:idx:filename]，前端直接消费',
+  `post_id`    VARCHAR(255) NOT NULL DEFAULT ''      COMMENT '帖子ID(一次上传批次=一帖多图; 空串=历史遗留单图帖, 查询时回退按 media_id 当帖)',
+  `seq`        TINYINT      NOT NULL DEFAULT 0       COMMENT '帖内图片序号(0起, 决定轮播顺序)',
   `file_size`  BIGINT        NOT NULL DEFAULT 0      COMMENT '字节数',
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '上传时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`media_id`),
+  KEY `idx_user_post` (`user_id`, `post_id`, `seq`),
   KEY `idx_user_status` (`user_id`, `status`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体元数据表(物理分片 turbo_feed_1.media_0)';
@@ -81,10 +84,13 @@ CREATE TABLE `turbo_feed_1`.`media_2` (
   `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO',
   `caption`     VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '描述/标题（抖音式文案；解析后结构化标记在 caption_mark）',
   `caption_mark` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '解析后的结构化标记 JSON：@用户 / #话题 / [image:idx:filename]，前端直接消费',
+  `post_id`    VARCHAR(255) NOT NULL DEFAULT ''      COMMENT '帖子ID(一次上传批次=一帖多图; 空串=历史遗留单图帖, 查询时回退按 media_id 当帖)',
+  `seq`        TINYINT      NOT NULL DEFAULT 0       COMMENT '帖内图片序号(0起, 决定轮播顺序)',
   `file_size`  BIGINT        NOT NULL DEFAULT 0      COMMENT '字节数',
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '上传时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`media_id`),
+  KEY `idx_user_post` (`user_id`, `post_id`, `seq`),
   KEY `idx_user_status` (`user_id`, `status`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体元数据表(物理分片 turbo_feed_1.media_2)';
@@ -202,10 +208,13 @@ CREATE TABLE `turbo_feed_2`.`media_1` (
   `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO',
   `caption`     VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '描述/标题（抖音式文案；解析后结构化标记在 caption_mark）',
   `caption_mark` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '解析后的结构化标记 JSON：@用户 / #话题 / [image:idx:filename]，前端直接消费',
+  `post_id`    VARCHAR(255) NOT NULL DEFAULT ''      COMMENT '帖子ID(一次上传批次=一帖多图; 空串=历史遗留单图帖, 查询时回退按 media_id 当帖)',
+  `seq`        TINYINT      NOT NULL DEFAULT 0       COMMENT '帖内图片序号(0起, 决定轮播顺序)',
   `file_size`  BIGINT        NOT NULL DEFAULT 0      COMMENT '字节数',
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '上传时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`media_id`),
+  KEY `idx_user_post` (`user_id`, `post_id`, `seq`),
   KEY `idx_user_status` (`user_id`, `status`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体元数据表(物理分片 turbo_feed_2.media_1)';
@@ -218,10 +227,13 @@ CREATE TABLE `turbo_feed_2`.`media_3` (
   `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO',
   `caption`     VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '描述/标题（抖音式文案；解析后结构化标记在 caption_mark）',
   `caption_mark` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '解析后的结构化标记 JSON：@用户 / #话题 / [image:idx:filename]，前端直接消费',
+  `post_id`    VARCHAR(255) NOT NULL DEFAULT ''      COMMENT '帖子ID(一次上传批次=一帖多图; 空串=历史遗留单图帖, 查询时回退按 media_id 当帖)',
+  `seq`        TINYINT      NOT NULL DEFAULT 0       COMMENT '帖内图片序号(0起, 决定轮播顺序)',
   `file_size`  BIGINT        NOT NULL DEFAULT 0      COMMENT '字节数',
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '上传时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`media_id`),
+  KEY `idx_user_post` (`user_id`, `post_id`, `seq`),
   KEY `idx_user_status` (`user_id`, `status`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体元数据表(物理分片 turbo_feed_2.media_3)';

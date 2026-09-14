@@ -177,6 +177,51 @@
     transition: opacity .2s;
   }
   .play-mask.show { opacity: 1; }
+
+  /* ========== 一帖多图：横向轮播（抖音图文） ========== */
+  /* 横向滚动容器铺满 .video-wrap；与纵向 feed 的 scroll-snap 分属不同轴，手势互不干扰 */
+  .img-slider {
+    position: absolute; inset: 0;
+    display: flex;
+    overflow-x: auto; overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    z-index: 1;
+    -webkit-overflow-scrolling: touch;
+  }
+  .img-slider::-webkit-scrollbar { display: none; }
+  .img-slide {
+    flex: 0 0 100%;
+    width: 100%; height: 100%;
+    scroll-snap-align: center;
+    background-size: cover; background-position: center;
+  }
+  /* 底部圆点指示器（当前张高亮） */
+  .img-dots {
+    position: absolute; left: 0; right: 0; bottom: 14px;
+    display: flex; justify-content: center; gap: 6px;
+    z-index: 4; pointer-events: none;
+  }
+  .img-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: rgba(255,255,255,.42);
+    transition: background .2s, transform .2s;
+  }
+  .img-dot.on { background: #fff; transform: scale(1.25); }
+  /* 右上角「当前 / 总数」计数 */
+  .img-counter {
+    position: absolute; top: 12px; right: 12px;
+    z-index: 4; pointer-events: none;
+    padding: 3px 9px; border-radius: 999px;
+    background: rgba(0,0,0,.45);
+    color: #fff; font-size: 12px; line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+  }
+  /* 多图帖是图文不是视频：隐藏「播放」遮罩与进度条，但保留节点，避免 JS 取不到元素而报错 */
+  .play-mask.hidden, .progress.hidden { display: none !important; }
+  /* .video-el 在本项目里是无 src 的空 video（占位），但也从未可点击：
+     放开指针事件，否则它会在 z-index:2 上截获横向拖拽，轮播划不动 */
+  .video-el { pointer-events: none; }
   .play-mask .big-play {
     width: 84px; height: 84px;
     border-radius: 50%;
@@ -521,6 +566,15 @@
   // 后端已只返回 APPROVED，前端无需再内存过滤。演示阶段推荐接口返回当前 APPROVED 内容。
   let videos = [];
 
+  /**
+   * feed 容器（脚本级）。
+   * 必须在这里声明：renderFeed / gotoVideo / 滚动监听 / 轮播都引用它，
+   * 而它原先只在 renderFeed 内部用 var 声明 —— 于是顶层
+   * `feedList.addEventListener('scroll', …)` 会直接抛 ReferenceError，
+   * 导致其后所有交互绑定（滚动切条、点赞/评论/收藏、点击暂停）静默失效。
+   */
+  var feedList = document.getElementById('feedList');
+
   function loadFeed() {
     var TOKEN = localStorage.getItem('turbofeed:token');
     if (!TOKEN) { location.href = 'login.html'; return; }
@@ -530,14 +584,19 @@
       .then(function (res) {
         var items = (res.data || []);
         videos = items.map(function (i) {
+          // 一帖多图：images 是整帖图片（按 seq 排序，后端保证非空）；
+          // 兼容旧结构：没有 images 时回退成单图 [url]
+          var images = (i.images && i.images.length) ? i.images.slice() : (i.url ? [i.url] : []);
           return {
-            id: i.mediaId,
+            id: i.postId || i.mediaId,
             author: '我',
             title: i.mediaId.split('/').pop(),
+            desc: i.caption || '',
             tags: '#TurboFeed #UGC',
             music: '—',
             like: 0, comment: 0, fav: 0, share: 0,
-            cover: i.url
+            images: images,
+            cover: images.length ? images[0] : ''
           };
         });
         renderFeed();
@@ -557,7 +616,6 @@
 
   // 生成 feed DOM（数据来自 loadFeed，仅渲染已有 videos）
   function renderFeed() {
-    var feedList = document.getElementById('feedList');
     feedList.innerHTML = '';
     if (!videos.length) {
       feedList.innerHTML = '<div style="padding:40px;text-align:center;color:#8b98ab">暂无已通过审核的内容，去后台上传图片吧</div>';
@@ -567,22 +625,92 @@
       var div = document.createElement('div');
       div.className = 'feed-item';
       div.dataset.idx = i;
-      var posterStyle = v.cover
-        ? ("background-image:url('" + v.cover + "');background-size:cover;background-position:center;")
-        : 'background:#1f4e79;';
+      var images = (v.images && v.images.length) ? v.images : [''];
+      var multi = images.length > 1;
+      // 每张图一个滑片；用 background-image 而非 <img>，省一层布局且天然 cover 裁切
+      var slides = images.map(function (u) {
+        var bg = u ? "background-image:url('" + u + "');" : 'background:#1f4e79;';
+        return '<div class="img-slide" style="' + bg + '"></div>';
+      }).join('');
+      var dots = multi
+        ? '<div class="img-dots">' + images.map(function (_, k) {
+            return '<i class="img-dot' + (k === 0 ? ' on' : '') + '"></i>';
+          }).join('') + '</div>'
+        : '';
+      var counter = multi
+        ? '<div class="img-counter"><span class="cur">1</span>/' + images.length + '</div>'
+        : '';
+      // 单图帖维持原「视频演示」观感（播放遮罩 + 进度条）；多图帖是图文，隐藏二者
+      var hiddenCls = multi ? ' hidden' : '';
       div.innerHTML = `
         <div class="video-wrap">
-          <div class="video-poster" style="${posterStyle}"></div>
+          <div class="img-slider" data-idx="${i}">${slides}</div>
+          ${dots}
+          ${counter}
           <video class="video-el" loop playsinline muted poster data-idx="${i}"></video>
-          <div class="play-mask" id="mask-${i}"><div class="big-play"><svg viewBox="0 0 24 24" width="34" height="34" fill="#fff"><polygon points="5 3 21 12 5 21 5 3"/></svg></div></div>
-          <div class="progress"><div class="progress-bar" id="bar-${i}"></div></div>
+          <div class="play-mask${hiddenCls}" id="mask-${i}"><div class="big-play"><svg viewBox="0 0 24 24" width="34" height="34" fill="#fff"><polygon points="5 3 21 12 5 21 5 3"/></svg></div></div>
+          <div class="progress${hiddenCls}"><div class="progress-bar" id="bar-${i}"></div></div>
         </div>
       `;
       feedList.appendChild(div);
     });
+    bindSliders();
+    startCarousel();
     currentIdx = 0;
     updateInfo(0);
     setPlay(0, true);
+  }
+
+  // ========== 一帖多图：轮播（滑动 + 圆点 + 「n/总数」计数，抖音图文口径） ==========
+  var CAROUSEL_INTERVAL_MS = 3500;   // 自动轮播间隔
+  var CAROUSEL_PAUSE_MS = 8000;      // 用户手动滑动后暂停自动轮播的时长，避免和用户抢控制权
+  var carouselTimer = null;
+  var carouselResumeAt = 0;
+
+  /** 给每个多图帖的横向滑块绑定「滑动即同步圆点与计数」 */
+  function bindSliders() {
+    Array.prototype.forEach.call(document.querySelectorAll('.img-slider'), function (slider) {
+      slider.addEventListener('scroll', function () {
+        syncSlider(slider);
+        carouselResumeAt = Date.now() + CAROUSEL_PAUSE_MS;
+      }, { passive: true });
+    });
+  }
+
+  /** 按 scrollLeft 算出当前是第几张，同步圆点高亮与右上角计数 */
+  function syncSlider(slider) {
+    var wrap = slider.parentElement;
+    if (!wrap) return;
+    var width = slider.clientWidth || 1;
+    var k = Math.round(slider.scrollLeft / width);
+    var dots = wrap.querySelectorAll('.img-dot');
+    for (var d = 0; d < dots.length; d++) {
+      dots[d].classList.toggle('on', d === k);
+    }
+    var cur = wrap.querySelector('.img-counter .cur');
+    if (cur) cur.textContent = String(k + 1);
+  }
+
+  /** 自动轮播：只推进当前可见的那一帖，到尾回到第一张（单图帖跳过） */
+  function startCarousel() {
+    stopCarousel();
+    carouselTimer = setInterval(function () {
+      if (!playing || Date.now() < carouselResumeAt) return;
+      var item = feedList.children[currentIdx];
+      if (!item) return;
+      var slider = item.querySelector('.img-slider');
+      if (!slider) return;
+      var count = slider.children.length;
+      if (count < 2) return;
+      var width = slider.clientWidth || 1;
+      var next = (Math.round(slider.scrollLeft / width) + 1) % count;
+      slider.scrollTo({ left: next * width, behavior: 'smooth' });
+    }, CAROUSEL_INTERVAL_MS);
+  }
+
+  function stopCarousel() {
+    if (carouselTimer) clearInterval(carouselTimer);
+    carouselTimer = null;
   }
 
   loadFeed();
@@ -590,8 +718,11 @@
   // ========== 视图更新 ==========
   function updateInfo(idx) {
     const v = videos[idx];
+    const imageCount = (v.images && v.images.length) || 1;
+    const desc = (v.desc && v.desc.trim()) ? v.desc : v.title;
     document.getElementById('infoAuthor').textContent = v.author;
-    document.getElementById('infoDesc').textContent = v.title + ' ' + v.tags;
+    document.getElementById('infoDesc').textContent =
+      desc + ' ' + v.tags + (imageCount > 1 ? '  ·  ' + imageCount + ' 图' : '');
     document.getElementById('infoMusic').textContent = v.music;
     document.getElementById('actionAvatar').textContent = v.author.charAt(0).toUpperCase();
 
@@ -614,11 +745,16 @@
     const item = feedList.children[idx];
     if (!item) return;
     if (isPlay) {
-      mask.classList.remove('show');
-      // 静态演示：这里无真实视频源，仅模拟“播放”状态
-      startProgress(idx);
+      if (mask) mask.classList.remove('show');
+      // 多图帖是图文：不跑「视频进度条」动画（节点已被 .hidden 隐藏，动画纯属浪费）
+      const slider = item.querySelector('.img-slider');
+      if (slider && slider.children.length > 1) {
+        stopProgress();
+      } else {
+        startProgress(idx);
+      }
     } else {
-      mask.classList.add('show');
+      if (mask) mask.classList.add('show');
       stopProgress();
     }
     playing = isPlay;
@@ -628,6 +764,7 @@
   function startProgress(idx) {
     stopProgress();
     const bar = document.getElementById('bar-' + idx);
+    if (!bar) return;   // 多图帖没有进度条节点，避免空引用
     let p = 0;
     bar.style.width = '0%';
     progressTimer = setInterval(() => {
@@ -812,11 +949,14 @@
     toast('举报 / 不感兴趣 / 下载（演示占位）');
   });
 
-  // 点击视频区域暂停/播放
+  // 点击视频区域暂停/播放。
+  // 多图帖是图文轮播：点击不切换暂停态——否则横向滑动结束时的 click 会把自动轮播误停。
   feedList.addEventListener('click', function (e) {
-    if (e.target.closest('.video-wrap')) {
-      setPlay(currentIdx, !playing);
-    }
+    if (!e.target.closest('.video-wrap')) return;
+    const item = feedList.children[currentIdx];
+    const slider = item && item.querySelector('.img-slider');
+    if (slider && slider.children.length > 1) return;
+    setPlay(currentIdx, !playing);
   });
 
   // 键盘上下切换
