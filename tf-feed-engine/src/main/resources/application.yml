@@ -40,7 +40,7 @@ spring:
       #     - 10.0.0.3:26379
 
 server:
-  port: 8082
+  port: 8083
 
 management:
   # Redis 未就绪前关闭其健康指示器，避免 /actuator/health 整体被拉成 DOWN（克隆即跑）；

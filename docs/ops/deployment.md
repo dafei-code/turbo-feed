@@ -16,7 +16,7 @@ mvn -pl tf-gateway -am package   # 只构建网关（-am 连带 tf-shared）
 ```bash
 java -jar tf-gateway/target/tf-gateway-0.1.0-SNAPSHOT.jar      # :8080
 java -jar tf-counter/target/tf-counter-0.1.0-SNAPSHOT.jar      # :8081
-java -jar tf-feed-engine/target/tf-feed-engine-0.1.0-SNAPSHOT.jar  # :8082
+java -jar tf-feed-engine/target/tf-feed-engine-0.1.0-SNAPSHOT.jar  # :8083
 ```
 
 验收：`curl localhost:808x/actuator/health` 全部 `{"status":"UP"}`；网关登录 + 上传按 [API 文档](../api/gateway-api.md) 走通。

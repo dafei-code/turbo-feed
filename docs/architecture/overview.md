@@ -15,7 +15,7 @@ flowchart LR
     subgraph services[独立部署的 Spring Boot 服务]
         GW[tf-gateway :8080<br/>HTTP 接入：认证 / 上传 / 审核闭环]
         CT[tf-counter :8081<br/>分布式计数服务]
-        FE[tf-feed-engine :8082<br/>Feed 推拉引擎]
+        FE[tf-feed-engine :8083<br/>Feed 推拉引擎]
     end
 
     subgraph libs[进程内库（jar 依赖）]
@@ -34,7 +34,7 @@ flowchart LR
 |---|---|---|---|
 | `tf-gateway` | 可执行服务 | 8080 | 登录鉴权（JWT）、UGC 图片上传、审核流转、事件总线（Local / RocketMQ 双实现） |
 | `tf-counter` | 可执行服务 | 8081 | 设计骨架（Redis 分桶计数 + MQ 削峰 + 批量落库 + 三级读缓存），待实现 |
-| `tf-feed-engine` | 可执行服务 | 8082 | 设计骨架（收件箱 / 大 V outbox / 活跃度分层 / 多路归并），待实现 |
+| `tf-feed-engine` | 可执行服务 | 8083 | 设计骨架（收件箱 / 大 V outbox / 活跃度分层 / 多路归并），待实现 |
 | `tf-hotspot` | 进程内 SDK | — | 滑动窗口热 Key 探测 + 广播 + Caffeine L1，嵌入 counter / feed-engine 进程 |
 | `tf-shared` | 纯 POJO 库 | — | `Result` / `ErrorCode` 统一契约，零框架依赖 |
 | `tf-benchmark` | 压测模块 | — | 五场景压测器 + Markdown 报告生成 |

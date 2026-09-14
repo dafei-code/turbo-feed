@@ -10,7 +10,7 @@
 turbo-feed/
 ├── tf-shared/         契约库：跨服务传输模型（Result / ErrorCode / DTO），零依赖
 ├── tf-hotspot/        热点治理 SDK（进程内库）：热 Key 探测 + 广播 + Caffeine L1，嵌入各引擎进程
-├── tf-feed-engine/    Feed 引擎（独立服务 :8082）：收件箱(Redis List+LTRIM) / 大V outbox(ZSET) / 活跃度分层 / 多路归并
+├── tf-feed-engine/    Feed 引擎（独立服务 :8083）：收件箱(Redis List+LTRIM) / 大V outbox(ZSET) / 活跃度分层 / 多路归并
 ├── tf-counter/        计数服务（独立服务 :8081）：Redis 分桶 + MQ 削峰 + 批量落库 + 三级读缓存(L1/L2/L3)
 ├── tf-gateway/        HTTP 接入层（独立服务 :8080）：认证 + 媒体上传 + Sentinel 流量防护
 └── tf-benchmark/      压测模块：五场景压测器 + Markdown 报告生成
@@ -28,7 +28,7 @@ Java 17 · Spring Boot 3.4.x · Spring Cloud 2024.0.x · Maven 多模块 · Redi
 mvn clean package
 java -jar tf-gateway/target/tf-gateway-0.1.0-SNAPSHOT.jar          # 接入层  :8080
 java -jar tf-counter/target/tf-counter-0.1.0-SNAPSHOT.jar          # 计数服务 :8081
-java -jar tf-feed-engine/target/tf-feed-engine-0.1.0-SNAPSHOT.jar  # Feed引擎 :8082
+java -jar tf-feed-engine/target/tf-feed-engine-0.1.0-SNAPSHOT.jar  # Feed引擎 :8083
 ```
 
 ## 技术文档

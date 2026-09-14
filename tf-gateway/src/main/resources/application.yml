@@ -66,12 +66,12 @@ turbofeed:
   snowflake:
     worker-id: ${TURBOFEED_SNOWFLAKE_WORKER_ID:}
     datacenter-id: ${TURBOFEED_SNOWFLAKE_DATACENTER_ID:}
-  # Feed 引擎（tf-feed-engine，默认 8082）调用配置：Feed 时间线读模型已迁至独立部署单元，
+  # Feed 引擎（tf-feed-engine，默认 8083）调用配置：Feed 时间线读模型已迁至独立部署单元，
   # 网关只做转发 + 降级决策，不再持有任何 Feed 读模型或推荐流缓存
   feed:
     engine:
       # 当前为直连形态（克隆即跑）；引入 Nacos 服务发现 + LoadBalancer 后，此项退化为兜底/调试用
-      base-url: ${TURBOFEED_FEED_ENGINE_BASE_URL:http://localhost:8082}
+      base-url: ${TURBOFEED_FEED_ENGINE_BASE_URL:http://localhost:8083}
       # 同步调用必须设超时：引擎故障时若无限等待，网关线程池会被慢调用耗尽（雪崩入口）
       connect-timeout: 500ms
       read-timeout: 2s
