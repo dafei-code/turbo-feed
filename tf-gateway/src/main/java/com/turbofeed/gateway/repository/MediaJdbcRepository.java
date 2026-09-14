@@ -4,6 +4,7 @@ import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.MediaStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
@@ -25,7 +26,7 @@ import java.util.Set;
  * <p><b>分片路由约束</b>：media 表分片键为 {@code user_id}。所有写/读均显式携带
  * {@code user_id}，确保 ShardingSphere 精准命中单分片、不发生全分片广播：
  * <ul>
- *   <li>{@link #insert} / {@link #updateStatus} / {@link #listByUser} 天然带 user_id；</li>
+ *   <li>{@link #insert} / {@link #updateStatusCas} / {@link #listByUser} 天然带 user_id；</li>
  *   <li>{@link #getStatus} 以 (media_id, user_id) 为条件，同样精准——单凭 media_id 会广播，
  *   故调用方必须传入 user_id（来自 JWT，非客户端可控）。</li>
  *   <li>{@link #listPostImages} 以 (user_id, post_id) 为条件。<b>post_id 不是分片键</b>，
@@ -138,48 +139,107 @@ public class MediaJdbcRepository {
         String c = caption == null ? "" : caption;
         String m = captionMark == null ? "" : captionMark;
         if (postId == null || postId.isBlank()) {
-            jdbcTemplate.update(
+            updatePostRows(
                     "UPDATE media SET caption = ?, caption_mark = ? WHERE media_id = ? AND user_id = ?",
                     c, m, mediaId, userId);
             return;
         }
-        jdbcTemplate.update(
+        updatePostRows(
                 "UPDATE media SET caption = ?, caption_mark = ? WHERE user_id = ? AND post_id = ?",
                 c, m, userId, postId);
     }
 
     /**
-     * 审核状态流转（整帖）：{@code mediaId} 用于定位帖子，实际更新帖内<b>全部</b>行。
+     * 按帖整批更新审核状态（<b>无 CAS 的盲写入口</b>）。
      *
      * <p><b>为什么必须整帖更新</b>：本项目采用「整帖一审」——一帖的 N 张图同上同下，
      * 状态语义才一致。若只改代表行，「我的内容」按任一非代表行读状态、公域时间线按下架
      * 时读到的行状态可能互相矛盾，出现「已下架但部分图仍可见」的内容安全问题。</p>
      *
-     * <p>post_id 为空（历史单图帖）或行不存在时退化为按 {@code media_id} 更新单行。</p>
+     * <p><b>使用边界</b>：本方法<b>不做前置状态校验</b>，是盲写，只适用于状态机之外的一致性
+     * 修复/补偿（如运维脚本纠正脏状态）。<b>审核状态流转一律走 {@link #updateStatusCas}</b>——
+     * 那才是把「并发双写」收敛为「一次生效 + 一次幂等返回」的正确入口；用本方法做流转会重新
+     * 打开检查-后-执行的窗口，让整帖多行 UPDATE 的 InnoDB 死锁复现（取证见 2026-09-14）。</p>
      */
-    public void updateStatus(String mediaId, long userId, MediaStatus status) {
-        String postId = findPostId(mediaId, userId);
-        if (postId == null || postId.isBlank()) {
-            int n = jdbcTemplate.update(
-                    "UPDATE media SET status = ? WHERE media_id = ? AND user_id = ?",
-                    toCode(status), mediaId, userId);
-            if (n == 0) {
-                log.warn("状态更新未命中任何行: mediaId={}, userId={}, status={}", mediaId, userId, status);
-            }
-            return;
-        }
-        updateStatusByPost(userId, postId, status);
-    }
-
-    /** 按帖整批更新审核状态（整帖一审的一致性落点）。 */
     public void updateStatusByPost(long userId, String postId, MediaStatus status) {
         if (postId == null || postId.isBlank()) {
             return;
         }
-        int n = jdbcTemplate.update(
+        int n = updatePostRows(
                 "UPDATE media SET status = ? WHERE user_id = ? AND post_id = ?",
                 toCode(status), userId, postId);
         log.debug("整帖状态流转: postId={}, userId={}, status={}, rows={}", postId, userId, status, n);
+    }
+
+    /**
+     * 整帖状态流转的 CAS（compare-and-set）：仅当帖内存在<b>期望前置状态</b>的行时才更新，
+     * 并返回实际影响行数。
+     *
+     * <p><b>为什么需要 CAS</b>：{@code MediaReviewService#review} 是「先 {@code getStatus} 读、
+     * 再写状态」的<b>检查-后-执行</b>，本身没有互斥。同一帖可能被两条路径同时审核：
+     * ① 上传后的异步「先发后审」——{@code AccountCreditService} 对无信用记录的账号默认 L1，
+     * 故 {@code handleUploaded} 会直接置 APPROVED；② 管理员人工审核 {@code reviewByMediaId}。
+     * 两者若都在对方提交前读到 PENDING，就会各自发起一次整帖 UPDATE，形成同帖双写。
+     * 带上 {@code status = 期望前置态} 后，只有一方能命中（另一方得到 0 行），
+     * 把「并发双写」收敛为「一次生效 + 一次幂等返回」，同时收窄了加锁范围。</p>
+     *
+     * @param expected 期望的前置状态（调用方刚读到的状态）
+     * @param target   目标状态
+     * @return 实际更新的行数；0 表示帖已不在期望状态（已被其他路径流转）
+     */
+    public int updateStatusCas(String mediaId, long userId, MediaStatus expected, MediaStatus target) {
+        String postId = findPostId(mediaId, userId);
+        if (postId == null || postId.isBlank()) {
+            return updatePostRows(
+                    "UPDATE media SET status = ? WHERE media_id = ? AND user_id = ? AND status = ?",
+                    toCode(target), mediaId, userId, toCode(expected));
+        }
+        return updatePostRows(
+                "UPDATE media SET status = ? WHERE user_id = ? AND post_id = ? AND status = ?",
+                toCode(target), userId, postId, toCode(expected));
+    }
+
+    /**
+     * 整帖多行 UPDATE 的统一执行入口（带<b>有界重试</b>）。
+     *
+     * <p><b>为什么需要重试</b>：整帖更新会命中帖内全部行（1..9 行），WHERE 条件走
+     * {@code idx_user_post(user_id, post_id, seq)} 这个二级索引，MySQL 需要在二级索引与聚簇主键
+     * 之间往返加锁。同帖的两条并发整帖 UPDATE 加锁顺序可能相反，形成
+     * 「一个持 idx_user_post 等 PRIMARY、另一个持 PRIMARY 等 idx_user_post」的互等，
+     * InnoDB 判定为死锁并回滚其中一方。取证见 2026-09-14
+     * {@code SHOW ENGINE INNODB STATUS → LATEST DETECTED DEADLOCK}：两个事务执行的是
+     * 完全相同的整帖 UPDATE，互相等待。</p>
+     *
+     * <p>MySQL 对该错误的官方处置就是 "try restarting transaction"：单条 UPDATE 在死锁时
+     * <b>整条回滚</b>、不会留下半更新，因此重试是安全且幂等的。重试次数与退避都取小值
+     * （总量 &lt; 100ms），避免在真实高争用下把请求线程拖长；耗尽后原样抛出，
+     * 由上层返回 50000 —— 不做无界重试去掩盖问题。</p>
+     */
+    private int updatePostRows(String sql, Object... args) {
+        final int maxAttempts = 3;
+        final long backoffMillis = 15L;
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return jdbcTemplate.update(sql, args);
+            } catch (PessimisticLockingFailureException e) {
+                if (attempt >= maxAttempts) {
+                    log.error("整帖更新连续 {} 次遇锁冲突，放弃重试: sql={}", attempt, sql, e);
+                    throw e;
+                }
+                log.warn("整帖更新遇锁冲突（第 {}/{} 次尝试），退避后重试: {}",
+                        attempt, maxAttempts, e.getMessage());
+                sleepQuietly(backoffMillis * attempt);
+            }
+        }
+    }
+
+    /** 有界重试的退避睡眠；被中断时恢复中断位并立即返回，交由上层处理。 */
+    private void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
@@ -335,11 +395,11 @@ public class MediaJdbcRepository {
     public void delete(String mediaId, long userId) {
         String postId = findPostId(mediaId, userId);
         if (postId == null || postId.isBlank()) {
-            jdbcTemplate.update(
+            updatePostRows(
                     "UPDATE media SET status = ? WHERE media_id = ? AND user_id = ?",
                     toCode(MediaStatus.DELETED), mediaId, userId);
         } else {
-            jdbcTemplate.update(
+            updatePostRows(
                     "UPDATE media SET status = ? WHERE user_id = ? AND post_id = ?",
                     toCode(MediaStatus.DELETED), userId, postId);
         }
@@ -360,7 +420,7 @@ public class MediaJdbcRepository {
         if (postId == null || postId.isBlank()) {
             return 0;
         }
-        int n = jdbcTemplate.update("DELETE FROM media WHERE user_id = ? AND post_id = ?", userId, postId);
+        int n = updatePostRows("DELETE FROM media WHERE user_id = ? AND post_id = ?", userId, postId);
         log.warn("补偿清理：物理删除残行 postId={}, userId={}, rows={}", postId, userId, n);
         return n;
     }

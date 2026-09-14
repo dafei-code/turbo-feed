@@ -104,8 +104,8 @@ public class MediaReviewService {
 
         if (properties.getReview().isAutoPass()) {
             // 演示占位：机审结果直接放行（仅供本地联调）
-            MediaStatus target = review(representativeId, userId, machine == MediaStatus.APPROVED);
-            if (target == MediaStatus.APPROVED) {
+            ReviewOutcome outcome = review(representativeId, userId, machine == MediaStatus.APPROVED);
+            if (outcome.transitioned() && outcome.status() == MediaStatus.APPROVED) {
                 CreditLevel level = accountCreditService.ensure(userId);
                 feedTimelinePublisher.append(toTimelinePost(event), level.poolLevel());
             }
@@ -129,47 +129,85 @@ public class MediaReviewService {
             return;
         }
         // 先发后审（L1/L2）：整帖直接 APPROVED 进对应流量池（小池/大池），靠举报/人审兜底
-        MediaStatus target = review(representativeId, userId, true);
-        if (target == MediaStatus.APPROVED) {
+        ReviewOutcome outcome = review(representativeId, userId, true);
+        if (outcome.transitioned() && outcome.status() == MediaStatus.APPROVED) {
             feedTimelinePublisher.append(toTimelinePost(event), level.poolLevel());
         }
     }
 
     /**
+     * 审核动作的结果。
+     *
+     * <p>{@code status} 是本次调用<b>结束后</b>帖子所处的状态；{@code transitioned} 表示
+     * <b>本次调用</b>是否真正引起了状态流转。</p>
+     *
+     * <p><b>为什么必须区分「结果状态」与「是否由我流转」</b>：调用方在状态变为 APPROVED 后要投递
+     * 公域时间线。若只看 {@code status == APPROVED}，那么「CAS 落空、帖子刚被另一条路径审过」
+     * 也会被误判成「我审的」，同一条帖子被投递两次（Redis ZSET 幂等，但反查索引/推荐旁路缓存
+     * 会多一次写放大）。{@code transitioned = false} 时调用方必须放弃投递——流转方自己会投。</p>
+     */
+    public record ReviewOutcome(MediaStatus status, boolean transitioned) {
+    }
+
+    /**
      * 执行审核动作：PENDING -> APPROVED / REJECTED（终态），<b>作用于整帖</b>。
      *
-     * <p>{@code mediaId} 用于定位帖子；仓库层的 {@code updateStatus} 会把状态落到帖内全部行。</p>
+     * <p>{@code mediaId} 用于定位帖子；仓库层的 CAS 会把状态落到帖内全部行。</p>
+     *
+     * <p><b>为什么是 CAS 而不是「读后直写」</b>：本方法原先「先 {@code getStatus} 读、再
+     * {@code updateStatus} 写」，两步之间没有互斥，是典型的检查-后-执行（TOCTOU）。同一帖存在
+     * 两条并发审核路径——上传后的异步「先发后审」（{@link AccountCreditService} 对无信用记录的
+     * 账号默认 L1，故 {@code handleUploaded} 会直接置 APPROVED）与管理员人工审核
+     * {@link #reviewByMediaId}。两者若都在对方提交前读到 PENDING，就会各自发起一次<b>整帖多行</b>
+     * UPDATE；帖内多行更新需要在二级索引 {@code idx_user_post} 与聚簇主键间往返加锁，加锁顺序相反
+     * 时即形成 InnoDB 死锁（取所见 2026-09-14 {@code SHOW ENGINE INNODB STATUS}）。
+     * 带上 {@code status = 期望前置态} 后，并发双写收敛为「一次生效 + 一次幂等返回」，
+     * 且加锁范围收窄到「真正需要改的行」。</p>
+     *
+     * <p><b>CAS 落空不是错误</b>：影响行数为 0 说明帖子已被另一条路径流转（或本来就是终态），
+     * 本次调用不改任何数据、不重复投递时间线，回读真实状态后原样返回，对调用方是幂等成功。</p>
      */
-    public MediaStatus review(String mediaId, long userId, boolean approved) {
+    public ReviewOutcome review(String mediaId, long userId, boolean approved) {
         MediaStatus current = mediaRepository.getStatus(mediaId, userId);
         if (current == null) {
             throw new BizException(ErrorCode.INTERNAL_ERROR, "未找到待审核记录: mediaId=" + mediaId);
         }
         if (current != MediaStatus.PENDING) {
             log.info("审核终态幂等返回（不重复流转）: mediaId={}, status={}", mediaId, current);
-            return current;
+            return new ReviewOutcome(current, false);
         }
         MediaStatus target = approved ? MediaStatus.APPROVED : MediaStatus.REJECTED;
-        mediaRepository.updateStatus(mediaId, userId, target);
+        int rows = mediaRepository.updateStatusCas(mediaId, userId, current, target);
+        if (rows == 0) {
+            // 读状态与 CAS 之间，帖子被另一条路径流转了：本次什么都没改，
+            // 时间线由真正流转的那一方投递，这里绝不重复投递。
+            MediaStatus actual = mediaRepository.getStatus(mediaId, userId);
+            log.info("审核 CAS 落空（已被其他路径流转，本次幂等返回）: mediaId={}, expected={}, actual={}",
+                    mediaId, current, actual);
+            return new ReviewOutcome(actual == null ? current : actual, false);
+        }
         evictCache(mediaId, userId);
-        log.info("审核状态流转（整帖）: mediaId={}, {} -> {}", mediaId, current, target);
-        return target;
+        log.info("审核状态流转（整帖）: mediaId={}, {} -> {}, rows={}", mediaId, current, target, rows);
+        return new ReviewOutcome(target, true);
     }
 
     /**
      * 管理员审核入口：PENDING → APPROVED / REJECTED，通过即按信用把<b>整帖</b>放进对应流量池。
+     *
+     * <p>投递时间线的条件是「<b>本次调用真的完成了流转</b>」，而不是「结果状态是 APPROVED」：
+     * 若管理员的点击与异步先发后审撞在一起，CAS 只有一方命中，落空的一方不得再投递一次。</p>
      */
     public MediaStatus reviewByMediaId(String mediaId, boolean approved) {
         long userId = parseUserId(mediaId);
-        MediaStatus target = review(mediaId, userId, approved);
-        if (target == MediaStatus.APPROVED) {
+        ReviewOutcome outcome = review(mediaId, userId, approved);
+        if (outcome.transitioned() && outcome.status() == MediaStatus.APPROVED) {
             MediaItem post = asTimelinePost(mediaRepository.findMedia(mediaId, userId), userId);
             if (post != null) {
                 CreditLevel level = accountCreditService.ensure(userId);
                 feedTimelinePublisher.append(post, level.poolLevel());
             }
         }
-        return target;
+        return outcome.status();
     }
 
     /**
@@ -188,7 +226,14 @@ public class MediaReviewService {
         }
         reportRepository.insert(mediaId, reporterUserId, reason);
         if (isHighRisk(reason)) {
-            mediaRepository.updateStatus(mediaId, authorId, MediaStatus.TAKEN_DOWN);
+            // CAS：同一违规可能被多人同时举报，只有第一条能把帖子从 APPROVED 翻下去，
+            // 其余得到 0 行——否则信用会被重复扣减（onViolationConfirmed 不是幂等操作）。
+            int rows = mediaRepository.updateStatusCas(
+                    mediaId, authorId, MediaStatus.APPROVED, MediaStatus.TAKEN_DOWN);
+            if (rows == 0) {
+                log.info("高危举报下架 CAS 落空（已被其他路径下架，不重复扣信用）: mediaId={}", mediaId);
+                return;
+            }
             removeFromTimeline(mediaId, authorId);
             accountCreditService.onViolationConfirmed(authorId);
             log.warn("高危举报立即下架停推（整帖）: mediaId={}, reporterUserId={}, reason={}",
@@ -202,10 +247,17 @@ public class MediaReviewService {
     public void handleReport(String mediaId, boolean confirmed) {
         long authorId = parseUserId(mediaId);
         if (confirmed) {
-            mediaRepository.updateStatus(mediaId, authorId, MediaStatus.TAKEN_DOWN);
-            removeFromTimeline(mediaId, authorId);
-            accountCreditService.onViolationConfirmed(authorId);
-            log.info("举报确认违规→整帖下架: mediaId={}", mediaId);
+            // CAS：只有把帖子从 APPROVED 翻下去的那一次才扣信用。若高危举报已先行下架
+            // （状态已是 TAKEN_DOWN）或作者已申诉（APPEALING），这里得 0 行、不再重复扣分。
+            int rows = mediaRepository.updateStatusCas(
+                    mediaId, authorId, MediaStatus.APPROVED, MediaStatus.TAKEN_DOWN);
+            if (rows > 0) {
+                removeFromTimeline(mediaId, authorId);
+                accountCreditService.onViolationConfirmed(authorId);
+                log.info("举报确认违规→整帖下架: mediaId={}", mediaId);
+            } else {
+                log.info("举报确认违规：内容已不在已发布态，不重复下架/扣信用: mediaId={}", mediaId);
+            }
         }
         reportRepository.resolve(mediaId, confirmed);
     }
@@ -219,7 +271,14 @@ public class MediaReviewService {
         if (cur == null || (cur != MediaStatus.REJECTED && cur != MediaStatus.TAKEN_DOWN)) {
             throw new BizException(ErrorCode.PARAM_ERROR, "仅被驳回/下架内容可申诉");
         }
-        mediaRepository.updateStatus(mediaId, authorUserId, MediaStatus.APPEALING);
+        int rows = mediaRepository.updateStatusCas(
+                mediaId, authorUserId, cur, MediaStatus.APPEALING);
+        if (rows == 0) {
+            // 并发重复申诉：另一条请求已把帖子翻成 APPEALING（并写了自己的申诉单），本次幂等返回。
+            log.info("申诉 CAS 落空（已被其他路径流转，不重复写申诉单）: mediaId={}, expected={}",
+                    mediaId, cur);
+            return;
+        }
         removeFromTimeline(mediaId, authorUserId); // 申诉中暂不可见
         appealRepository.insert(mediaId, authorUserId);
         log.info("作者申诉（整帖暂不可见）: mediaId={}, authorUserId={}", mediaId, authorUserId);
@@ -230,17 +289,25 @@ public class MediaReviewService {
     public void handleAppeal(String mediaId, boolean upheld) {
         long authorId = parseUserId(mediaId);
         if (upheld) {
-            mediaRepository.updateStatus(mediaId, authorId, MediaStatus.APPROVED);
-            MediaItem post = asTimelinePost(mediaRepository.findMedia(mediaId, authorId), authorId);
-            if (post != null) {
-                CreditLevel level = accountCreditService.ensure(authorId);
-                feedTimelinePublisher.append(post, level.poolLevel());
+            // CAS 前置态为 APPEALING：只有真正完成「申诉中 → 已发布」的那一次才恢复公域与加信用，
+            // 避免管理员重复点击导致同帖被投递多次、信用被重复加回。
+            int rows = mediaRepository.updateStatusCas(
+                    mediaId, authorId, MediaStatus.APPEALING, MediaStatus.APPROVED);
+            if (rows > 0) {
+                MediaItem post = asTimelinePost(mediaRepository.findMedia(mediaId, authorId), authorId);
+                if (post != null) {
+                    CreditLevel level = accountCreditService.ensure(authorId);
+                    feedTimelinePublisher.append(post, level.poolLevel());
+                }
+                accountCreditService.onAppealUpheld(authorId);
+                log.info("申诉翻案→整帖恢复公域: mediaId={}", mediaId);
+            } else {
+                log.info("申诉翻案 CAS 落空（内容不在申诉中态，不重复恢复/加信用）: mediaId={}", mediaId);
             }
-            accountCreditService.onAppealUpheld(authorId);
-            log.info("申诉翻案→整帖恢复公域: mediaId={}", mediaId);
         } else {
-            mediaRepository.updateStatus(mediaId, authorId, MediaStatus.TAKEN_DOWN);
-            log.info("申诉维持原状: mediaId={}", mediaId);
+            int rows = mediaRepository.updateStatusCas(
+                    mediaId, authorId, MediaStatus.APPEALING, MediaStatus.TAKEN_DOWN);
+            log.info("申诉维持原状: mediaId={}, rows={}", mediaId, rows);
         }
         appealRepository.resolve(mediaId, upheld);
     }
