@@ -6,7 +6,7 @@ import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.repository.ReportRepository;
 import com.turbofeed.gateway.repository.AppealRepository;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
-import com.turbofeed.gateway.client.FeedEngineClient;
+import com.turbofeed.gateway.service.feed.FeedTimelinePublisher;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.service.review.credit.CreditLevel;
@@ -27,8 +27,9 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p><b>存储边界</b>：审核状态已落库（{@link MediaJdbcRepository}，media 表 status 列），重启不丢失；
  * 公域可见性由 tf-feed-engine 的时间线读模型物化（多池 ZSET），发布即按信用进对应池。
- * 本服务通过 {@link FeedEngineClient} 同步投递入流/下架，<b>失败仅告警</b>（fail-open）：
- * 可见性是审核的下一跳，不能让引擎抖动反向阻断审核状态机本身。</p>
+ * 本服务通过 {@link FeedTimelinePublisher} 投递入流/下架（mq 关闭时走同步 HTTP 兜底、开启时走
+ * RocketMQ 顺序消息且 fail-fast，由 MQ 重试/DLQ 兜底）：可见性是审核的下一跳，仍不能让引擎抖动
+ * 反向阻断审核状态机本身（mq 模式下靠 @Transactional 回滚保证不丢）。</p>
  */
 @Slf4j
 @Service
@@ -38,7 +39,7 @@ public class MediaReviewService {
     private final MediaJdbcRepository mediaRepository;
     private final StringRedisTemplate redisTemplate;
     private final ContentModerationRouter contentModeration;
-    private final FeedEngineClient feedEngineClient;
+    private final FeedTimelinePublisher feedTimelinePublisher;
     private final MediaProperties properties;
     private final AccountCreditService accountCreditService;
     private final ReportRepository reportRepository;
@@ -59,7 +60,7 @@ public class MediaReviewService {
             // 重复投递：已是终态，幂等返回；APPROVED 兜底补齐时间线（按信用池）
             if (existing == MediaStatus.APPROVED) {
                 CreditLevel level = accountCreditService.ensure(userId);
-                feedEngineClient.append(
+                feedTimelinePublisher.append(
                         toTimelineItem(event),
                         level.poolLevel());
             }
@@ -77,7 +78,7 @@ public class MediaReviewService {
             MediaStatus target = review(event.mediaId(), userId, machine == MediaStatus.APPROVED);
             if (target == MediaStatus.APPROVED) {
                 CreditLevel level = accountCreditService.ensure(userId);
-                feedEngineClient.append(
+                feedTimelinePublisher.append(
                         toTimelineItem(event),
                         level.poolLevel());
             }
@@ -101,7 +102,7 @@ public class MediaReviewService {
         // 先发后审（L1/L2）：直接 APPROVED 进对应流量池（小池/大池），靠举报/人审兜底
         MediaStatus target = review(event.mediaId(), userId, true);
         if (target == MediaStatus.APPROVED) {
-            feedEngineClient.append(
+            feedTimelinePublisher.append(
                     toTimelineItem(event),
                     level.poolLevel());
         }
@@ -136,7 +137,7 @@ public class MediaReviewService {
             MediaItem item = mediaRepository.findMedia(mediaId, userId);
             if (item != null) {
                 CreditLevel level = accountCreditService.ensure(userId);
-                feedEngineClient.append(
+                feedTimelinePublisher.append(
                         new MediaItem(item.mediaId(), item.url(), MediaStatus.APPROVED, item.createdAt(),
                                 item.caption(), item.captionMark()),
                         level.poolLevel());
@@ -159,7 +160,7 @@ public class MediaReviewService {
         reportRepository.insert(mediaId, reporterUserId, reason);
         if (isHighRisk(reason)) {
             mediaRepository.updateStatus(mediaId, authorId, MediaStatus.TAKEN_DOWN);
-            feedEngineClient.remove(mediaId);
+            feedTimelinePublisher.remove(mediaId);
             accountCreditService.onViolationConfirmed(authorId);
             log.warn("高危举报立即下架停推: mediaId={}, reporterUserId={}, reason={}", mediaId, reporterUserId, reason);
         }
@@ -172,7 +173,7 @@ public class MediaReviewService {
         long authorId = parseUserId(mediaId);
         if (confirmed) {
             mediaRepository.updateStatus(mediaId, authorId, MediaStatus.TAKEN_DOWN);
-            feedEngineClient.remove(mediaId);
+            feedTimelinePublisher.remove(mediaId);
             accountCreditService.onViolationConfirmed(authorId);
             log.info("举报确认违规→下架: mediaId={}", mediaId);
         }
@@ -189,7 +190,7 @@ public class MediaReviewService {
             throw new BizException(ErrorCode.PARAM_ERROR, "仅被驳回/下架内容可申诉");
         }
         mediaRepository.updateStatus(mediaId, authorUserId, MediaStatus.APPEALING);
-        feedEngineClient.remove(mediaId); // 申诉中暂不可见
+        feedTimelinePublisher.remove(mediaId); // 申诉中暂不可见
         appealRepository.insert(mediaId, authorUserId);
         log.info("作者申诉（内容暂不可见）: mediaId={}, authorUserId={}", mediaId, authorUserId);
     }
@@ -203,7 +204,7 @@ public class MediaReviewService {
             MediaItem item = mediaRepository.findMedia(mediaId, authorId);
             if (item != null) {
                 CreditLevel level = accountCreditService.ensure(authorId);
-                feedEngineClient.append(
+                feedTimelinePublisher.append(
                         new MediaItem(item.mediaId(), item.url(), MediaStatus.APPROVED, item.createdAt(),
                                 item.caption(), item.captionMark()),
                         level.poolLevel());
