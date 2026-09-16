@@ -27,12 +27,25 @@ dataSources:
     jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
     username: root
     password: "123456"
+    # 连接池（HikariCP）：默认 maximumPoolSize=10/库 → 2 库仅 20 连接，高并发下线程在 getConnection 排队。
+    # 按「Sentinel 并发上限 + 上传存储执行器(max 64) + 审核执行器(max 16)」估，50/库=100 总连接留足余量。
+    maximumPoolSize: 50
+    minimumIdle: 10
+    connectionTimeout: 30000
+    idleTimeout: 600000
+    maxLifetime: 1800000
   ds_1:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
     jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
     username: root
     password: "123456"
+    # 同 ds_0（见其连接池注释）
+    maximumPoolSize: 50
+    minimumIdle: 10
+    connectionTimeout: 30000
+    idleTimeout: 600000
+    maxLifetime: 1800000
 
 rules:
   - !SHARDING

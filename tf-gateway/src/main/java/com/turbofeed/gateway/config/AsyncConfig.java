@@ -41,4 +41,30 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * 预签名直传的收尾执行器（{@code @Async("uploadFinalizeExecutor")} 显式绑定）。
+     *
+     * <p><b>为什么与 reviewExecutor 分开</b>：两者虽然都是「上传之后的异步尾巴」，
+     * 但语义不同——本执行器跑的是<b>落库前的收尾</b>（可选的处理链重编码 + 整帖落库 + 发事件），
+     * 一旦堆积，被拖慢的是「内容可见时延」；而 reviewExecutor 堆积拖慢的是「审核时延」。
+     * 分开后互不抢占：审核洪峰不会让刚传完的内容迟迟不入「我的内容」。</p>
+     *
+     * <p>背压同用 CallerRunsPolicy：池与队列打满时退回调用线程同步执行收尾，
+     * 宁可让 complete 接口变慢，也不丢弃任务（丢弃 = 内容永久停在 PENDING）。</p>
+     */
+    @Bean("uploadFinalizeExecutor")
+    public Executor uploadFinalizeExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(16);
+        executor.setQueueCapacity(512);
+        executor.setThreadNamePrefix("upload-finalize-");
+        executor.setAllowCoreThreadTimeOut(true);
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
 }

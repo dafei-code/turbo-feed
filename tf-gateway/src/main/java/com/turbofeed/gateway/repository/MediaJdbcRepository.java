@@ -98,6 +98,17 @@ public class MediaJdbcRepository {
     }
 
     /**
+     * 批量落库用的行规格（一次上传批次的一张图）。仅承载字段，不含行为。
+     *
+     * <p>由 {@link #batchInsert} 消费，把一次上传批次的 N 张图合并为一次
+     * {@code batchUpdate}（见其 javadoc）。跨包（{@code MediaUploadService}）引用，故 public。</p>
+     */
+    public record MediaRowSpec(String postId, String mediaId, long userId, String url,
+                               MediaStatus status, String caption, String captionMark,
+                               int seq, Instant createdAt) {
+    }
+
+    /**
      * 落库一条媒体记录。{@code media_id} 为主键，重投天然幂等。
      *
      * <p><b>重复键为何不回写 caption</b>：描述/标题的<b>初始写入方</b>是上传服务
@@ -124,6 +135,39 @@ public class MediaJdbcRepository {
                 java.sql.Timestamp.from(createdAt));
         log.debug("媒体落库: postId={}, mediaId={}, seq={}, userId={}, status={}",
                 postId, mediaId, seq, userId, status);
+    }
+
+    /**
+     * 批量落库一批媒体记录（一次上传批次 = 一帖多图）。
+     *
+     * <p>把 {@link #insert} 的逐张串行写合并为一次 {@code batchUpdate}：
+     * 同 {@code user_id} 的 N 张图落同一分片，JDBC URL 已带
+     * {@code rewriteBatchedStatements=true} → MySQL 侧合并为单批；N 张图从 N 次
+     * 网络往返收敛为 ≤ 分片数 次。仍用 {@code ON DUPLICATE KEY UPDATE} 保持幂等
+     * （media_id 主键，事件重投不重复插、仅刷新 status/url）。</p>
+     *
+     * @param rows 本批次全部待落库行（含 postId / mediaId / userId / url / seq / caption 等）
+     */
+    public void batchInsert(List<MediaRowSpec> rows) {
+        if (rows.isEmpty()) {
+            return;
+        }
+        String sql = "INSERT INTO media (post_id, media_id, user_id, url, status, media_type, "
+                + "file_size, caption, caption_mark, seq, created_at) "
+                + "VALUES (?, ?, ?, ?, ?, 'IMAGE', 0, ?, ?, ?, ?) "
+                + "ON DUPLICATE KEY UPDATE status = VALUES(status), url = VALUES(url)";
+        List<Object[]> batch = new ArrayList<>(rows.size());
+        for (MediaRowSpec r : rows) {
+            batch.add(new Object[]{
+                    r.postId() == null ? "" : r.postId(),
+                    r.mediaId(), r.userId(), r.url(), toCode(r.status()),
+                    r.caption() == null ? "" : r.caption(),
+                    r.captionMark() == null ? "" : r.captionMark(),
+                    r.seq(), java.sql.Timestamp.from(r.createdAt())
+            });
+        }
+        jdbcTemplate.batchUpdate(sql, batch);
+        log.debug("媒体批量落库: rows={}", rows.size());
     }
 
     /**

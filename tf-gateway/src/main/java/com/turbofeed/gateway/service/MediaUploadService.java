@@ -14,6 +14,11 @@ import com.turbofeed.gateway.service.event.MediaUploadedEvent;
 import com.turbofeed.gateway.service.feed.FeedTimelinePublisher;
 import com.turbofeed.gateway.service.idempotency.UploadIdempotency;
 import com.turbofeed.gateway.service.moderation.SensitiveWordService;
+import com.turbofeed.gateway.service.presign.PresignRequest;
+import com.turbofeed.gateway.service.presign.PresignResponse;
+import com.turbofeed.gateway.service.presign.UploadAccepted;
+import com.turbofeed.gateway.service.presign.UploadReservation;
+import com.turbofeed.gateway.service.presign.UploadReservationStore;
 import com.turbofeed.gateway.service.processing.ImageProcessingChain;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
@@ -33,15 +38,17 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 /**
- * 内容图片上传服务：责任链校验 -&gt; 用户维度限流 -&gt; 幂等去重 -&gt; 逐张「处理 -&gt; 存储 -&gt; 落库」-&gt; 整帖发事件。
+ * 内容图片上传服务：责任链校验 -&gt; 用户维度限流 -&gt; 幂等去重 -&gt; 逐张「处理 -&gt; 存储」-&gt; 整帖批量落库 -&gt; 整帖发事件。
  *
  * <p>校验整体外移至 {@code service/validation} 责任链
  * （{@link UploadValidationChain}）：批量数 / 空文件 / 大小 / Magic Number /
@@ -90,9 +97,14 @@ public class MediaUploadService {
     private final StringRedisTemplate redisTemplate;
     private final CaptionMarkParser captionMarkParser;
     private final SensitiveWordService sensitiveWordService;
+    private final UploadReservationStore reservationStore;
+    private final MediaUploadFinalizer uploadFinalizer;
 
     /** 单条状态缓存前缀（与 MediaReviewService 一致，删除时精确失效） */
     private static final String STATUS_KEY_PREFIX = "tf:media:status:";
+
+    /** Magic Number 探测字节数：需覆盖 WEBP（标识位于偏移 8、长 4 字节），故取 12。 */
+    private static final int HEADER_PROBE_BYTES = 12;
 
     /** 单张图片的存储结果（mediaId 用于落库与后续删除，url 用于拼装帖子视图）。 */
     private record StoredOne(String mediaId, String url) {
@@ -169,14 +181,20 @@ public class MediaUploadService {
         UploadValidation context = null;
         List<String> mediaIds = new ArrayList<>(files.length);
         List<String> urls = new ArrayList<>(files.length);
+        List<MediaJdbcRepository.MediaRowSpec> rows = new ArrayList<>(files.length);
+        String markJson = captionMark.markJson();
         try {
             context = validationChain.validate(userId, files);
             for (int seq = 0; seq < files.length; seq++) {
-                StoredOne stored = storeOne(postId, seq, userId, files[seq], context.format(seq),
-                        rawCaption, captionMark.markJson(), createdAt);
+                StoredOne stored = storeOne(userId, files[seq], context.format(seq));
                 mediaIds.add(stored.mediaId());
                 urls.add(stored.url());
+                rows.add(new MediaJdbcRepository.MediaRowSpec(
+                        postId, stored.mediaId(), Long.parseLong(userId), stored.url(),
+                        MediaStatus.PENDING, rawCaption, markJson, seq, createdAt));
             }
+            // 整帖落库：N 张图一次 batch（同 user_id 落同片，rewriteBatchedStatements 合并为单批）
+            mediaRepository.batchInsert(rows);
         } catch (RuntimeException e) {
             // 中途失败：清掉本批已落库的残行与已上传的对象，绝不留半成品帖（见类注释）
             cleanupPartialPost(uid, postId, mediaIds);
@@ -216,14 +234,177 @@ public class MediaUploadService {
         throw new BizException(ErrorCode.RATE_LIMITED, "上传过于频繁，请稍后再试");
     }
 
+    // ==================== 预签名直传：签发凭证 / 通知完成 ====================
+
     /**
-     * 单张图片：可选处理 -&gt; 存储 -&gt; 落库 PENDING，返回 mediaId 与 URL。
+     * 申请预签名上传凭证（抖音式客户端直传）：网关只签发凭证，字节由客户端直传对象存储。
      *
-     * <p>带上 {@code postId} 与 {@code seq} 落库，使该行成为帖子的一员；{@code seq} 决定前端
-     * 轮播顺序，因此必须用调用方传入的下标、不要在这里重新排序。</p>
+     * <p><b>链路</b>：本方法（签发）→ 客户端 PUT 直传 → {@link #complete}（通知完成）。
+     * 与 {@link #upload} 产出同一个「帖子」，区别只在字节入口：<code>upload</code> 由网关收字节流
+     * （保留给 {@code storage=local} 与旧客户端），本方法把最重的网络 IO 从计算集群剥离，
+     * 是高并发下的推荐入口。</p>
+     *
+     * <p><b>校验分两段</b>：此处<b>没有字节可读</b>，只校验声明值（数量 / 声明大小 /
+     * contentType 白名单）；真实格式与真实大小在 {@link #complete} 阶段由服务端读对象复核。
+     * 伪造 contentType 最多影响对象名后缀，过不了文件头复检。</p>
+     *
+     * @param request   文件元数据 + 整帖文案
+     * @param requestId 客户端幂等键（可选，X-Request-Id；窗口内重复申请复用同一预约）
      */
-    private StoredOne storeOne(String postId, int seq, String userId, MultipartFile file,
-                               ImageFormat format, String caption, String captionMark, Instant createdAt) {
+    @SentinelResource(value = SentinelRateLimitConfig.UPLOAD_RESOURCE,
+            entryType = EntryType.IN, blockHandler = "presignBlocked")
+    public PresignResponse presign(PresignRequest request, String requestId) {
+        String userId = UserContextHolder.requireUserId();
+
+        if (!rateLimiter.tryAcquire(userId)) {
+            throw new BizException(ErrorCode.RATE_LIMITED, "上传过于频繁，请稍后再试");
+        }
+        // 预签名是 S3 协议能力：本地磁盘 / 占位实现无此能力，给明确提示而不是 500
+        if (!"minio".equalsIgnoreCase(properties.getStorage())) {
+            throw new BizException(ErrorCode.UPLOAD_INVALID,
+                    "预签名直传仅在 turbofeed.media.storage=minio 时可用");
+        }
+
+        // 幂等：同一 requestId 复用同一预约 → 同一批对象名，避免重试把孤儿对象翻倍
+        Optional<String> existed = reservationStore.findPostIdByRequest(userId, requestId);
+        if (existed.isPresent()) {
+            Optional<UploadReservation> resv = reservationStore.load(existed.get());
+            if (resv.isPresent()) {
+                log.info("预签幂等命中，复用原预约: userId={}, requestId={}, postId={}",
+                        userId, requestId, resv.get().postId());
+                return toPresignResponse(resv.get());
+            }
+        }
+
+        List<PresignRequest.FileMeta> files = request != null && request.files() != null
+                ? request.files() : List.of();
+        if (files.isEmpty() || files.size() > properties.getMaxBatchCount()) {
+            throw new BizException(ErrorCode.UPLOAD_INVALID,
+                    "上传数量不合法（1.." + properties.getMaxBatchCount() + "）");
+        }
+
+        String rawCaption = request != null && request.caption() != null ? request.caption() : "";
+        sensitiveWordService.requireClean(rawCaption);
+        CaptionMarkParser.ParseResult captionMark = captionMarkParser.parse(rawCaption);
+
+        long maxBytes = properties.getMaxFileSize().toBytes();
+        List<UploadReservation.Slot> slots = new ArrayList<>(files.size());
+        for (int seq = 0; seq < files.size(); seq++) {
+            PresignRequest.FileMeta meta = files.get(seq);
+            ImageFormat format = ImageFormat.fromContentType(meta.contentType());
+            if (format == null) {
+                throw new BizException(ErrorCode.UPLOAD_INVALID, "不支持的图片类型: " + meta.contentType());
+            }
+            if (meta.size() <= 0 || meta.size() > maxBytes) {
+                throw new BizException(ErrorCode.UPLOAD_INVALID, "文件大小超限: " + meta.size());
+            }
+            slots.add(new UploadReservation.Slot(seq,
+                    storageClient.generateMediaId(userId, format), format, meta.size()));
+        }
+
+        String postId = POST_ID_PREFIX + userId + "/" + UUID.randomUUID().toString().replace("-", "");
+        UploadReservation reservation = new UploadReservation(postId, userId, List.copyOf(slots),
+                rawCaption, captionMark.markJson(), requestId, Instant.now(),
+                UploadReservation.Status.RESERVED);
+        reservationStore.save(reservation);
+        reservationStore.saveRequestIndex(userId, requestId, postId);
+
+        PresignResponse response = toPresignResponse(reservation);
+        log.info("预签名凭证已签发: userId={}, postId={}, images={}, requestId={}",
+                userId, postId, slots.size(), requestId);
+        return response;
+    }
+
+    /** Sentinel 限流回调（blockHandler）：签名契约同 {@link #uploadBlocked}。 */
+    public PresignResponse presignBlocked(PresignRequest request, String requestId, BlockException e) {
+        UserContext context = UserContextHolder.get();
+        String userId = context != null ? context.userId() : "anonymous";
+        log.warn("预签限流触发: userId={}, requestId={}, rule={}", userId, requestId, e.getClass().getSimpleName());
+        throw new BizException(ErrorCode.RATE_LIMITED, "上传过于频繁，请稍后再试");
+    }
+
+    /** 按预约签发（重签）上传 URL：同一批对象名可重复签发，用于幂等复用与凭证过期重试。 */
+    private PresignResponse toPresignResponse(UploadReservation reservation) {
+        int expiry = properties.getPresign().getExpirySeconds();
+        Duration ttl = Duration.ofSeconds(expiry);
+        List<PresignResponse.PresignItem> items = new ArrayList<>(reservation.slots().size());
+        for (UploadReservation.Slot slot : reservation.slots()) {
+            items.add(new PresignResponse.PresignItem(slot.seq(), slot.mediaId(),
+                    storageClient.presignedPutUrl(slot.mediaId(), slot.format().contentType(), ttl)));
+        }
+        return new PresignResponse(reservation.postId(), List.copyOf(items), expiry);
+    }
+
+    /**
+     * 通知「客户端已直传完成」：复核对象 → 异步收尾 → 立即返回受理回执。
+     *
+     * <p><b>为什么还要复核</b>：凭证只保证「能传到指定对象名」，不保证内容合规。
+     * 若跳过复核直接落库，客户端就能用图片凭证上传任意字节（含伪装扩展名的可执行内容），
+     * 而公域展示依赖的正是库里的 URL。故此处用 stat 复核大小、用文件头复核真实格式——
+     * 与 {@code upload} 里 {@code FileConstraintValidator} 的口径保持一致。</p>
+     *
+     * <p><b>为什么返回受理而非最终结果</b>：落库与送审已异步化（{@code MediaUploadFinalizer}），
+     * 本接口只保证「校验通过 + 收尾已提交」。客户端凭回执里的 mediaId 轮询
+     * {@code GET /api/media/status} 获取最终状态（收尾未完成时该接口按既有语义返回 PENDING）。</p>
+     *
+     * @param postId    帖子 ID（取自 {@link PresignResponse#postId()}）
+     * @param requestId 客户端幂等键（可选）
+     */
+    public UploadAccepted complete(String postId, String requestId) {
+        String userId = UserContextHolder.requireUserId();
+        UploadReservation reservation = reservationStore.load(postId)
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "上传预约不存在或已过期，请重新申请凭证"));
+        if (!reservation.userId().equals(userId)) {
+            throw new BizException(ErrorCode.FORBIDDEN, "无权完成他人的上传");
+        }
+        String representative = reservation.slots().isEmpty()
+                ? null : reservation.slots().get(0).mediaId();
+
+        // 原子领取收尾权：重复 complete 只有一次能落库 / 发事件，其余按幂等返回
+        if (!reservationStore.claim(postId)) {
+            log.info("重复完成通知，按幂等返回: postId={}, userId={}", postId, userId);
+            return new UploadAccepted(postId, representative, MediaStatus.PENDING.name());
+        }
+
+        long maxBytes = properties.getMaxFileSize().toBytes();
+        for (UploadReservation.Slot slot : reservation.slots()) {
+            long size = storageClient.sizeOf(slot.mediaId());
+            if (size <= 0 || size > maxBytes) {
+                discardUploadedObjects(reservation);
+                throw new BizException(ErrorCode.UPLOAD_INVALID, "上传对象缺失或大小超限: seq=" + slot.seq());
+            }
+            ImageFormat actual = ImageFormat.detect(
+                    storageClient.probeHeader(slot.mediaId(), HEADER_PROBE_BYTES));
+            if (actual != slot.format()) {
+                discardUploadedObjects(reservation);
+                throw new BizException(ErrorCode.UPLOAD_INVALID, "文件内容与声明类型不符: seq=" + slot.seq());
+            }
+        }
+
+        uploadFinalizer.finalizeAsync(reservation);
+        return new UploadAccepted(postId, representative, MediaStatus.PENDING.name());
+    }
+
+    /** 复核失败的清理：此时尚未落库，只需删掉已直传的对象并释放预约。 */
+    private void discardUploadedObjects(UploadReservation reservation) {
+        for (UploadReservation.Slot slot : reservation.slots()) {
+            try {
+                storageClient.delete(slot.mediaId());
+            } catch (Exception e) {
+                log.warn("复核失败清理对象异常（残留对象依赖清理任务）: mediaId={}, {}",
+                        slot.mediaId(), e.getMessage());
+            }
+        }
+        reservationStore.delete(reservation.postId());
+    }
+
+    /**
+     * 单张图片：可选处理 -&gt; 存储，返回 mediaId 与 URL（落库已移出，由 {@link #upload} 收尾批量写入 PENDING）。
+     *
+     * <p>{@code postId} 与 {@code seq} 仅用于日志/回调标识；真正落库在 {@code upload} 主流程
+     * 统一 {@link MediaJdbcRepository#batchInsert} 完成，把逐张串行写合并为一次批量，压平写放大。</p>
+     */
+    private StoredOne storeOne(String userId, MultipartFile file, ImageFormat format) {
         byte[] processed = maybeProcess(file, format);
         try (InputStream content = processed != null
                 ? new ByteArrayInputStream(processed)
@@ -231,11 +412,6 @@ public class MediaUploadService {
             long size = processed != null ? processed.length : file.getSize();
             MediaStorageClient.StoredMedia stored =
                     storageClient.store(userId, format, content, size);
-            // 先同步落 PENDING：消除「存储成功但审核事件消费前进程崩溃」导致的 MinIO 孤儿对象。
-            // insert 以 media_id 主键幂等（ON DUPLICATE KEY UPDATE），与 handleUploaded 兜底插互不冲突；
-            // 即便事件丢失，media 表已留 PENDING 记录，可经巡检对账补审 / 清理。
-            mediaRepository.insert(postId, stored.mediaId(), Long.parseLong(userId), stored.url(),
-                    MediaStatus.PENDING, caption, captionMark, seq, createdAt);
             return new StoredOne(stored.mediaId(), stored.url());
         } catch (IOException e) {
             log.error("读取上传内容失败: userId={}, size={}", userId, file.getSize(), e);

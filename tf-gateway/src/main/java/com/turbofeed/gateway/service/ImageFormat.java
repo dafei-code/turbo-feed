@@ -38,6 +38,33 @@ public enum ImageFormat {
         return contentType;
     }
 
+    /**
+     * 按 Content-Type 声明值映射到白名单格式（预签名直传场景：客户端上报 MIME，服务端据此决定对象名后缀）。
+     *
+     * <p><b>与 {@link #detect(byte[])} 的分工</b>：本方法只做「声明值 → 枚举」的映射，
+     * <b>不构成任何信任</b>——真实格式在完成阶段由服务端读对象文件头用 {@code detect} 复检
+     * （信文件头不信客户端声明）。伪造 contentType 只能骗过对象名后缀，骗不过复检。</p>
+     *
+     * <p>容忍 {@code "image/png; charset=utf-8"} 这类带参数的写法（只取分号前的主类型并忽略大小写）；
+     * 无法识别（含 SVG、空值）返回 {@code null}，由调用方拒绝。</p>
+     */
+    public static ImageFormat fromContentType(String contentType) {
+        if (contentType == null) {
+            return null;
+        }
+        String normalized = contentType.trim().toLowerCase(java.util.Locale.ROOT);
+        int semicolon = normalized.indexOf(';');
+        if (semicolon >= 0) {
+            normalized = normalized.substring(0, semicolon).trim();
+        }
+        for (ImageFormat format : values()) {
+            if (format.contentType.equals(normalized)) {
+                return format;
+            }
+        }
+        return null;
+    }
+
     /** 判定文件头对应的真实格式；无法识别（含 SVG / 伪造扩展名）返回 null。 */
     public static ImageFormat detect(byte[] header) {
         if (startsWith(header, 0, JPEG_MAGIC)) {

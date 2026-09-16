@@ -2,18 +2,25 @@ package com.turbofeed.gateway.controller;
 
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.MediaUploadService;
+import com.turbofeed.gateway.service.presign.CompleteRequest;
+import com.turbofeed.gateway.service.presign.PresignRequest;
+import com.turbofeed.gateway.service.presign.PresignResponse;
+import com.turbofeed.gateway.service.presign.UploadAccepted;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.query.MediaQueryService;
 import com.turbofeed.gateway.service.review.MediaStatus;
 import com.turbofeed.shared.result.Result;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -118,6 +125,49 @@ public class MediaController {
             @RequestParam(value = "caption", required = false) String caption,
             @RequestHeader(value = "X-Request-Id", required = false) String requestId) {
         return Result.ok(mediaUploadService.upload(files, caption, requestId));
+    }
+
+    /**
+     * 申请预签名上传凭证（抖音式客户端直传）：网关只发凭证，字节由客户端直传对象存储。
+     *
+     * <p><b>与 {@link #upload} 的区别</b>：{@code upload} 由网关接收字节流（multipart），
+     * 本接口只接收<b>元数据</b>——把大文件的网络 IO 从网关剥离，改由「客户端 ⇄ 对象存储」
+     * 直连承担，是高并发 / 大文件场景的推荐入口。两者产出同一个「帖子」结构
+     * （{@code postId} + {@code images}），下游审核与展示链路完全一致。</p>
+     *
+     * <p><b>客户端须遵守</b>：对每个 {@code uploadUrl} 发起 {@code PUT}，请求体为原始字节，
+     * 且<b>必须</b>携带与申请时一致的 {@code Content-Type} 头——该头已纳入签名，
+     * 不一致会被对象存储以签名校验失败拒绝。</p>
+     *
+     * @param request   文件元数据（fileName / size / contentType）+ 整帖文案
+     * @param requestId 客户端幂等键（可选，请求头 X-Request-Id）
+     */
+    @PostMapping("/presign")
+    public Result<PresignResponse> presign(
+            @RequestBody PresignRequest request,
+            @RequestHeader(value = "X-Request-Id", required = false) String requestId) {
+        return Result.ok(mediaUploadService.presign(request, requestId));
+    }
+
+    /**
+     * 通知「已直传完成」：服务端复核对象后异步落库送审，返回 <b>202 受理回执</b>。
+     *
+     * <p>客户端把全部图片 PUT 到预签名地址之后调用本接口。落库与送审异步执行
+     * （{@code uploadFinalizeExecutor}），故此处返回 202 而非最终帖子视图——
+     * 凭回执中的 {@code mediaId} 轮询 {@link #status} 获取最终审核状态。</p>
+     *
+     * <p><b>只收 postId</b>：媒体清单一律以服务端预约为准，不接受客户端声明，
+     * 避免伪造 mediaId 把他人 / 非本批的对象写进自己的帖子。</p>
+     *
+     * @param request   完成通知（仅 postId）
+     * @param requestId 客户端幂等键（可选）
+     */
+    @PostMapping("/complete")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public Result<UploadAccepted> complete(
+            @RequestBody CompleteRequest request,
+            @RequestHeader(value = "X-Request-Id", required = false) String requestId) {
+        return Result.ok(mediaUploadService.complete(request.postId(), requestId));
     }
 
     /**

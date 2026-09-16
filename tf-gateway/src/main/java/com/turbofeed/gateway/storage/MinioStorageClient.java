@@ -10,14 +10,28 @@ import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
+import io.minio.GetObjectArgs;
+import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.SetBucketPolicyArgs;
+import io.minio.StatObjectArgs;
+import io.minio.http.Method;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.time.Duration;
+import java.util.Arrays;
+import java.util.Map;
 import java.util.UUID;
+import okhttp3.ConnectionPool;
+import okhttp3.Dispatcher;
+import okhttp3.OkHttpClient;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 对象存储实现（MinIO / 兼容 S3 协议）：百亿级文件的唯一可行落点。
@@ -69,6 +83,7 @@ public class MinioStorageClient implements MediaStorageClient, InitializingBean 
                     client = MinioClient.builder()
                             .endpoint(m.getEndpoint())
                             .credentials(m.getAccessKey(), m.getSecretKey())
+                            .httpClient(buildOkHttpClient())   // 注入大连接池 OkHttp，消除默认 maxRequestsPerHost=5 的隐藏瓶颈
                             .build();
                     ensureBucket(m.getBucket());
                     initialized = true;
@@ -76,6 +91,30 @@ public class MinioStorageClient implements MediaStorageClient, InitializingBean 
             }
         }
         return client;
+    }
+
+    /**
+     * 自定义 OkHttpClient：抬高单主机并发上限，避免 MinIO（单 host）下默认
+     * {@code Dispatcher.maxRequestsPerHost=5} 把上传线程串行化（与 Sentinel thread 上限无关）。
+     */
+    private OkHttpClient buildOkHttpClient() {
+        Dispatcher dispatcher = new Dispatcher(new ThreadPoolExecutor(
+                32, 128, 60, TimeUnit.SECONDS,
+                new SynchronousQueue<>(),
+                r -> {
+                    Thread t = new Thread(r, "minio-io");
+                    t.setDaemon(true);
+                    return t;
+                }));
+        dispatcher.setMaxRequests(1024);
+        dispatcher.setMaxRequestsPerHost(256);   // 关键：默认 5
+        return new OkHttpClient.Builder()
+                .dispatcher(dispatcher)
+                .connectionPool(new ConnectionPool(256, 5, TimeUnit.MINUTES))
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .build();
     }
 
     /** 桶预检：不存在则尝试创建（权限不足时仅告警，真正写入时再抛清晰异常）。 */
@@ -151,5 +190,94 @@ public class MinioStorageClient implements MediaStorageClient, InitializingBean 
         } catch (Exception e) {
             log.warn("MinIO 对象删除失败（可能已不存在，继续逻辑删除）: mediaId={}, {}", mediaId, e.getMessage());
         }
+    }
+
+    // ==================== 预签名直传（客户端直传，网关不收字节流） ====================
+
+    @Override
+    public String generateMediaId(String userId, ImageFormat format) {
+        // 与 store() 同一拼装规则 {keyPrefix}/{userId}/{uuid}.{ext}：
+        // userId 来自 JWT、uuid 服务端生成，客户端无法指定对象名（无路径穿越面）
+        return properties.getKeyPrefix() + "/" + userId + "/" + UUID.randomUUID() + "." + format.extension();
+    }
+
+    @Override
+    public String presignedPutUrl(String mediaId, String contentType, Duration expiry) {
+        try {
+            return client().getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+                    .method(Method.PUT)
+                    .bucket(properties.getMinio().getBucket())
+                    .object(mediaId)
+                    .expiry((int) expiry.getSeconds())
+                    // Content-Type 纳入签名：客户端 PUT 必须携带一致的值，否则签名校验失败。
+                    // 一石二鸟——既保证对象按真实图片类型存储（否则浏览器按 octet-stream 下载而非渲染），
+                    // 也堵住「拿图片凭证上传非图片内容」。
+                    .extraHeaders(Map.of("Content-Type", contentType))
+                    .build());
+        } catch (Exception e) {
+            log.error("生成预签名上传 URL 失败: mediaId={}", mediaId, e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "生成上传凭证失败");
+        }
+    }
+
+    @Override
+    public long sizeOf(String mediaId) {
+        try {
+            return client().statObject(StatObjectArgs.builder()
+                    .bucket(properties.getMinio().getBucket())
+                    .object(mediaId)
+                    .build()).size();
+        } catch (Exception e) {
+            log.error("查询对象大小失败: mediaId={}", mediaId, e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "校验上传对象失败");
+        }
+    }
+
+    @Override
+    public byte[] probeHeader(String mediaId, int bytes) {
+        // 8.5.7 的 GetObjectArgs 无 offset/length 分段读（已字节码核实：ObjectReadArgs 仅有 ssec），
+        // 故开流读前 N 字节后立即关闭：OkHttp 只取已消费的缓冲区，不会把整个对象拉下来。
+        try (InputStream in = openStream(mediaId)) {
+            byte[] header = new byte[bytes];
+            int read = in.readNBytes(header, 0, bytes);
+            return read == bytes ? header : Arrays.copyOf(header, Math.max(read, 0));
+        } catch (Exception e) {
+            log.error("探测对象头失败: mediaId={}", mediaId, e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "校验上传对象失败");
+        }
+    }
+
+    @Override
+    public byte[] download(String mediaId) {
+        try (InputStream in = openStream(mediaId)) {
+            return in.readAllBytes();
+        } catch (Exception e) {
+            log.error("下载对象失败: mediaId={}", mediaId, e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "读取上传对象失败");
+        }
+    }
+
+    @Override
+    public void overwrite(String mediaId, byte[] content, String contentType) {
+        try (InputStream in = new ByteArrayInputStream(content)) {
+            client().putObject(PutObjectArgs.builder()
+                    .bucket(properties.getMinio().getBucket())
+                    .object(mediaId)
+                    .stream(in, content.length, -1)
+                    .contentType(contentType)
+                    .build());
+            log.info("对象已覆盖写回: mediaId={}, size={}B", mediaId, content.length);
+        } catch (Exception e) {
+            log.error("对象覆盖写回失败: mediaId={}", mediaId, e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "处理产物回写失败");
+        }
+    }
+
+    /** 打开对象读流（调用方负责关闭）。 */
+    private InputStream openStream(String mediaId) throws Exception {
+        return client().getObject(GetObjectArgs.builder()
+                .bucket(properties.getMinio().getBucket())
+                .object(mediaId)
+                .build());
     }
 }
