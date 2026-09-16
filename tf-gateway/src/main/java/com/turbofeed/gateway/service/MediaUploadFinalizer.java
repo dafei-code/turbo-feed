@@ -87,6 +87,9 @@ public class MediaUploadFinalizer {
                     postId, reservation.userId(), e);
             cleanup(reservation.userId(), postId, mediaIds);
         } finally {
+            // 无论成功还是已补偿清理，本批对象都已不再是「待落库」状态：
+            // 成功者已有 DB 行、失败者已被删除，都必须从孤儿名单中释放，否则会被清理任务误删
+            reservationStore.releasePending(mediaIds);
             reservationStore.delete(postId);
         }
     }
