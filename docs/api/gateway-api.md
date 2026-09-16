@@ -142,6 +142,66 @@ curl -X POST 'http://localhost:8080/api/media/upload' \
 
 > **上传成功 ≠ 前端可见**：本接口返回 `PENDING`（受理态），须经审核流转为 `APPROVED` 后才进入公域。
 
+### 2.3.1 预签名直传：申请上传凭证（推荐入口）
+
+```
+POST /api/media/presign         Content-Type: application/json
+```
+
+**字节流不经过网关**：本接口只接收元数据并签发每个对象的预签名 PUT URL，客户端凭 URL 直传对象存储
+（抖音式直传）。仅在 `turbofeed.media.storage=minio` 下可用；本地磁盘模式请继续使用 2.3。
+
+| 参数 | 位置 | 必填 | 说明 |
+|---|---|---|---|
+| Authorization: Bearer | header | 是 | 身份经 JWT 验签，userId 取自令牌 |
+| X-Request-Id | header | 否 | 客户端幂等键；窗口内重复申请**复用同一预约**（对象名不变，不产生重复孤儿） |
+| files | body | 是 | 文件元数据数组，1–9 项：`{ fileName, size, contentType }` |
+| caption | body | 否 | 整帖共享描述，需过敏感词校验 |
+
+`contentType` 必须落在白名单（image/jpeg / png / gif / webp），否则 `42902`；
+`size` 超 `turbofeed.media.max-file-size`、张数超 `max-batch-count` 同样 `42902`。
+
+响应 `data`：
+
+| 字段 | 说明 |
+|---|---|
+| `postId` | 帖子标识（一次上传批次一个），供 2.3.2 回传 |
+| `items` | `[{ seq, mediaId, uploadUrl }]`，按 `seq` 升序；`uploadUrl` 为预签名 PUT 地址 |
+| `expirySeconds` | 凭证有效期（秒），超时需重新申请 |
+
+### 2.3.2 预签名直传：通知完成
+
+```
+POST /api/media/complete        Content-Type: application/json
+```
+
+客户端把全部图片直传成功后调用。服务端复核每个对象（真实大小 + 文件头 Magic Number），
+通过后**异步**落库送审，立即返回 **202 Accepted**。
+
+| 参数 | 位置 | 必填 | 说明 |
+|---|---|---|---|
+| Authorization: Bearer | header | 是 | 须为预约归属用户，否则 `40301` |
+| X-Request-Id | header | 否 | 客户端幂等键 |
+| postId | body | 是 | 取自 2.3.1。**媒体清单一律以服务端预约为准**，不接受客户端声明 |
+
+错误码：`40401` 预约不存在或已过期 · `40301` 非本人预约 ·
+`42902` 对象缺失 / 大小超限 / **文件内容与声明类型不符**（此时已传对象会被立即清理）。
+
+```json
+{
+  "code": 0,
+  "message": "成功",
+  "data": { "postId": "post/1000000000000000001/dc222847...",
+            "mediaId": "media/1000000000000000001/fed1154d-....jpg",
+            "status": "PENDING" },
+  "timestamp": 1789571792624
+}
+```
+
+> **收尾是异步的**：客户端凭 `mediaId` 轮询 2.5 获取最终状态；落库完成前按既有语义返回 `PENDING`。
+> **客户端传完后不调用本接口**（放弃 / 断网 / 崩溃）时，已传对象由服务端孤儿清理任务回收，
+> 不会永久占用存储。
+
 ### 2.4 我的内容（按帖聚合）
 
 ```

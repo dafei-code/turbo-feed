@@ -395,6 +395,9 @@ public class MediaUploadService {
                         slot.mediaId(), e.getMessage());
             }
         }
+        // 复核失败时对象已删除，须同步从孤儿名单释放（否则清理任务会重复删一次）
+        reservationStore.releasePending(reservation.slots().stream()
+                .map(UploadReservation.Slot::mediaId).toList());
         reservationStore.delete(reservation.postId());
     }
 

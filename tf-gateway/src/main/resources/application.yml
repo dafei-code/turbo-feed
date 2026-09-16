@@ -120,6 +120,11 @@ turbofeed:
     # 过期后客户端需重新申请；重签会复用同一批对象名，不会让孤儿对象随重试翻倍。
     presign:
       expiry-seconds: 300
+      # 孤儿对象清理：客户端传完却未通知完成（放弃 / 断网 / 崩溃）会留下无 DB 行引用的对象，
+      # 由定时任务按「预约已过期且未释放」的保守口径回收
+      orphan-cleanup-enabled: true
+      orphan-cleanup-batch: 200
+      # 清理周期（ms，默认 600000=10 分钟）：turbofeed.media.presign.orphan-cleanup-fixed-delay-ms
     # 上传限流分工：thread/qps 走 Sentinel 注解（机器维度，@SentinelResource 埋点于 MediaUploadService#upload）；
     # per-user 走 Redis UploadRateLimiter（用户维度，注解热点参数取不到 ThreadLocal 的 userId，跨实例计数）
     rate-limit:

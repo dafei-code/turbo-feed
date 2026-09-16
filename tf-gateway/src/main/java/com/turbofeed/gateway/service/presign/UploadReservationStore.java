@@ -7,7 +7,10 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 上传预约的 Redis 存取（预签名直传的中间态）。
@@ -35,6 +38,19 @@ public class UploadReservationStore {
     private static final String REQ_PREFIX = "presign:req:";
     private static final String CLAIM_PREFIX = "presign:claim:";
 
+    /**
+     * 待落库对象登记表（ZSET）：member=mediaId，score=「预约过期时间戳(ms)」。
+     *
+     * <p><b>孤儿问题的由来</b>：客户端直传后若不调用 complete（放弃上传 / 断网 / 进程崩溃），
+     * 对象已落在对象存储里但<b>没有任何 DB 行引用它</b>——既不可见也删不掉，只能靠清理任务回收。
+     * 本集合就是这份「已签发、尚未落库」的待清理名单：正常完成时移除，
+     * 逾期仍存在即判定为孤儿。</p>
+     *
+     * <p>与预约本体（有 TTL）不同，本集合<b>不设 TTL</b>——它本身就是清理任务的输入源，
+     * 若随 TTL 消失，过期项反而永远查不到。条目由清理任务或正常收尾主动移除。</p>
+     */
+    private static final String PENDING_ZSET = "presign:pending";
+
     /** TTL 缓冲（秒）：在凭证有效期之上留出「传完后通知完成」的余量。 */
     private static final long TTL_BUFFER_SECONDS = 300L;
 
@@ -57,6 +73,69 @@ public class UploadReservationStore {
                     objectMapper.writeValueAsString(reservation), Duration.ofSeconds(ttlSeconds()));
         } catch (Exception e) {
             log.warn("上传预约写入失败（降级放行）: postId={}, {}", reservation.postId(), e.getMessage());
+        }
+        // 同步登记「待落库」：逾期未释放即由清理任务按孤儿回收
+        markPending(reservation.slots().stream().map(UploadReservation.Slot::mediaId).toList(),
+                System.currentTimeMillis() + ttlSeconds() * 1000L);
+    }
+
+    /**
+     * 登记待落库对象。
+     *
+     * @param mediaIds        本批对象名
+     * @param expireAtMillis 判定为孤儿的时刻（= 预约过期时刻；早于此不算孤儿）
+     */
+    public void markPending(List<String> mediaIds, long expireAtMillis) {
+        if (mediaIds == null || mediaIds.isEmpty()) {
+            return;
+        }
+        try {
+            for (String mediaId : mediaIds) {
+                redisTemplate.opsForZSet().add(PENDING_ZSET, mediaId, expireAtMillis);
+            }
+        } catch (Exception e) {
+            log.warn("待落库登记失败（可能残留孤儿）: n={}, {}", mediaIds.size(), e.getMessage());
+        }
+    }
+
+    /**
+     * 释放待落库对象（收尾成功或已补偿清理时调用）——从孤儿名单中移除，避免被误删。
+     */
+    public void releasePending(List<String> mediaIds) {
+        if (mediaIds == null || mediaIds.isEmpty()) {
+            return;
+        }
+        try {
+            redisTemplate.opsForZSet().remove(PENDING_ZSET, mediaIds.toArray());
+        } catch (Exception e) {
+            log.warn("待落库释放失败（对象可能被误判为孤儿）: n={}, {}", mediaIds.size(), e.getMessage());
+        }
+    }
+
+    /**
+     * 取出「已过期且仍未被释放」的对象（孤儿候选），并以 ZREM 的返回值认领。
+     *
+     * <p><b>为什么用 ZREM 认领</b>：多实例下两个节点可能同时扫到同一批候选，
+     * 只有 ZREM 返回 1（真的删到了）的实例才处理，避免重复删除。</p>
+     */
+    public List<String> takeExpiredPending(int limit) {
+        try {
+            Set<String> candidates = redisTemplate.opsForZSet()
+                    .rangeByScore(PENDING_ZSET, 0, System.currentTimeMillis(), 0, limit);
+            if (candidates == null || candidates.isEmpty()) {
+                return List.of();
+            }
+            List<String> claimed = new ArrayList<>(candidates.size());
+            for (String mediaId : candidates) {
+                Long removed = redisTemplate.opsForZSet().remove(PENDING_ZSET, mediaId);
+                if (removed != null && removed > 0) {
+                    claimed.add(mediaId);
+                }
+            }
+            return claimed;
+        } catch (Exception e) {
+            log.warn("孤儿扫描失败（下次周期重试）: {}", e.getMessage());
+            return List.of();
         }
     }
 

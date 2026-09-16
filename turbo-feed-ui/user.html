@@ -1136,6 +1136,10 @@
   }
 
   // 整批提交：一次请求 = 一个帖子（1..9 张）
+  //
+  // 采用「预签名直传」（抖音式）：① 向网关申请上传凭证 → ② 每张图直接 PUT 到对象存储
+  // → ③ 通知网关完成。字节流不经过网关，弱网/大图下更稳，也不会占满网关带宽。
+  // 注意：第 ② 步的 Content-Type 必须与第 ① 步声明的一致（该头已被服务端纳入签名）。
   function submitSelection() {
     if (!selectedFiles.length) { showToast('请先选择图片', 'error'); return; }
     if (selectedFiles.length > MAX_FILES) { showToast('单次最多 ' + MAX_FILES + ' 张', 'error'); return; }
@@ -1144,37 +1148,76 @@
     var bar = document.getElementById('uploadBar');
     var btn = document.getElementById('submitBtn');
     progress.classList.add('show');
-    bar.style.width = '30%';
+    bar.style.width = '5%';
     btn.disabled = true;
 
-    var fd = new FormData();
-    selectedFiles.forEach(function (f) { fd.append('files', f); });
     // 幂等键：同一次提交（含重试）复用同一个 requestId，服务端窗口内去重，避免重复建帖
     var requestId = 'ui-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+    var authHeaders = { 'Authorization': 'Bearer ' + TOKEN, 'X-Request-Id': requestId };
+    var uploadCount = selectedFiles.length;
 
-    fetch(API_BASE + '/api/media/upload', {
+    // ① 申请预签名凭证（只传元数据，不含字节）
+    var metas = selectedFiles.map(function (f) {
+      return { fileName: f.name, size: f.size, contentType: f.type || '' };
+    });
+
+    fetch(API_BASE + '/api/media/presign', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + TOKEN, 'X-Request-Id': requestId },
-      body: fd
+      headers: { 'Authorization': authHeaders.Authorization, 'X-Request-Id': requestId,
+                 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: metas, caption: '' })
     })
     .then(function (r) { return r.json(); })
     .then(function (res) {
+      if (res.code !== 0) { throw new Error(res.message || '获取上传凭证失败'); }
+      return res.data;
+    })
+    .then(function (data) {
+      // ② 逐张直传对象存储（可并发）
+      var done = 0, total = data.items.length;
+      return Promise.all(data.items.map(function (item) {
+        var file = selectedFiles[item.seq];
+        return fetch(item.uploadUrl, {
+          method: 'PUT',
+          // 必须与申请时声明的 contentType 一致，否则对象存储按签名校验失败拒绝
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+          body: file
+        }).then(function (r) {
+          if (!r.ok) { throw new Error('第 ' + (item.seq + 1) + ' 张直传失败（HTTP ' + r.status + '）'); }
+          done++;
+          bar.style.width = (10 + Math.round(done * 80 / total)) + '%';
+        });
+      })).then(function () { return data; });
+    })
+    .then(function (data) {
+      // ③ 通知完成：服务端复核后异步落库送审（返回 202 受理）
+      bar.style.width = '95%';
+      return fetch(API_BASE + '/api/media/complete', {
+        method: 'POST',
+        headers: { 'Authorization': authHeaders.Authorization, 'X-Request-Id': requestId,
+                   'Content-Type': 'application/json' },
+        body: JSON.stringify({ postId: data.postId })
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code !== 0) { throw new Error(res.message || '完成通知失败'); }
+        return res.data;
+      });
+    })
+    .then(function () {
       bar.style.width = '100%';
       btn.disabled = false;
       setTimeout(function () { progress.classList.remove('show'); bar.style.width = '0%'; }, 400);
-      if (res.code !== 0) {
-        showToast('上传失败：' + (res.message || '未知错误'), 'error');
-        return;
-      }
-      var cnt = (res.data && res.data.images) ? res.data.images.length : selectedFiles.length;
       selectedFiles = [];
       renderPreview();
-      showToast('已上传 ' + cnt + ' 张，作为一个帖子进入审核队列', 'ok');
+      showToast('已上传 ' + uploadCount + ' 张，作为一个帖子进入审核队列', 'ok');
       loadContent(false);
     })
     .catch(function (err) {
-      // 失败保留已选，用户可直接重试（配合同一个 requestId 也不会产生重复帖子）
+      // 失败保留已选，用户可直接重试（配合同一个 requestId 也不会产生重复帖子）。
+      // 已直传但未完成的对象由服务端的孤儿清理任务回收，不会永久占用存储。
       progress.classList.remove('show');
+      bar.style.width = '0%';
       btn.disabled = false;
       showToast('上传失败：' + (err.message || '网络错误'), 'error');
     });

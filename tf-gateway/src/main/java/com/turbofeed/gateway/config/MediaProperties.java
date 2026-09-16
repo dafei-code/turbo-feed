@@ -280,6 +280,28 @@ public class MediaProperties {
         public void setExpirySeconds(int expirySeconds) {
             this.expirySeconds = expirySeconds;
         }
+
+        /** 是否启用孤儿对象清理（客户端传完却没通知完成 / 进程崩溃残留的对象）。默认开启。 */
+        private boolean orphanCleanupEnabled = true;
+
+        /** 单次清理扫描的孤儿上限（防止一次拉爆对象存储）。 */
+        private int orphanCleanupBatch = 200;
+
+        public boolean isOrphanCleanupEnabled() {
+            return orphanCleanupEnabled;
+        }
+
+        public void setOrphanCleanupEnabled(boolean orphanCleanupEnabled) {
+            this.orphanCleanupEnabled = orphanCleanupEnabled;
+        }
+
+        public int getOrphanCleanupBatch() {
+            return orphanCleanupBatch;
+        }
+
+        public void setOrphanCleanupBatch(int orphanCleanupBatch) {
+            this.orphanCleanupBatch = orphanCleanupBatch;
+        }
     }
 
     public String getKeyPrefix() {
