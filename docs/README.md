@@ -10,18 +10,19 @@ docs/
 ├── README.md                 # 本文件：文档索引与维护约定
 ├── architecture/             # 架构层文档
 │   ├── overview.md           # 系统总体架构：模块 / 通信 / 技术栈 / 关键决策
-│   └── service-split.md      # 微服务拆分方案：部署单元 / 端口 / 通信矩阵
+│   ├── service-split.md      # 微服务拆分方案：部署单元 / 端口 / 通信矩阵
+│   └── sharding.md           # 分库分表：分片键选型 / 6 张逻辑表 / 演进与踩坑
 ├── modules/                  # 模块级技术文档（与 Maven 模块一一对应）
-│   ├── tf-gateway.md         # 网关：认证 / 媒体上传 / 审核 / 事件 / 配置
-│   ├── tf-counter.md         # 计数服务：现状 + 设计蓝图
-│   ├── tf-feed-engine.md     # Feed 引擎：现状 + 设计蓝图
-│   ├── tf-hotspot.md         # 热点探测 SDK：设计蓝图
-│   └── tf-shared.md          # 公共契约：Result / ErrorCode
+│   ├── tf-gateway.md         # 网关：认证与 RBAC / 一帖多图上传 / 审核状态机 / 分片 / 配置
+│   ├── tf-counter.md         # 计数服务：现状（模块骨架）+ 设计蓝图
+│   ├── tf-feed-engine.md     # Feed 引擎：公域时间线读模型（已实现）+ 扇出蓝图
+│   ├── tf-hotspot.md         # 热点探测 SDK：设计蓝图（尚未实现）
+│   └── tf-shared.md          # 公共契约：Result / ErrorCode / FeedItemView / FeedTimelineEvent
 ├── api/                      # 接口文档
-│   └── gateway-api.md        # HTTP 接口：统一返回结构 / 错误码 / curl 示例
+│   └── gateway-api.md        # HTTP 接口：全量端点 / 参数 / 返回结构 / 错误码 / curl
 ├── ops/                      # 运维层文档
-│   └── deployment.md         # 构建部署 / 配置开关 / 环境演进
-└── changelog/                # 变更记录（每变更一份，编号递增）
+│   └── deployment.md         # 构建部署 / 必需环境变量 / 配置开关 / 生产前必改清单
+└── changelog/                # 变更记录（每变更一份，编号递增；历史快照，不回头改）
 ```
 
 ## 推荐阅读路径
