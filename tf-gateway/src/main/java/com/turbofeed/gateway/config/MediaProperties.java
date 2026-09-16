@@ -73,6 +73,9 @@ public class MediaProperties {
     /** 缩略图长边上限（px），超过则等比缩放（turbofeed.media.thumbnail-max-dimension）。 */
     private long thumbnailMaxDimension = 2048;
 
+    /** 预签名直传配置（turbofeed.media.presign.*）：仅对象存储实现（MinIO/S3）支持该链路。 */
+    private Presign presign = new Presign();
+
     /**
      * 上传接口限流阈值（机器维度与用户维度分工）。
      *
@@ -248,6 +251,35 @@ public class MediaProperties {
 
     public void setThumbnailMaxDimension(long thumbnailMaxDimension) {
         this.thumbnailMaxDimension = thumbnailMaxDimension;
+    }
+
+    public Presign getPresign() {
+        return presign;
+    }
+
+    public void setPresign(Presign presign) {
+        this.presign = presign;
+    }
+
+    /**
+     * 预签名直传配置（turbofeed.media.presign.*）。
+     *
+     * <p>客户端直传对象存储模式下，网关只签发凭证、不收字节流；凭证有效期是唯一的
+     * 「未完成上传」时间窗，过期后客户端必须重新申请（重签会复用同一批对象名，见
+     * {@code UploadReservationStore#saveRequestIndex}），避免孤儿对象随重试翻倍。</p>
+     */
+    public static class Presign {
+
+        /** 预签名 URL 有效期（秒）：须覆盖「最慢一张传完」的时间，过长则扩大凭证泄露窗口。 */
+        private int expirySeconds = 300;
+
+        public int getExpirySeconds() {
+            return expirySeconds;
+        }
+
+        public void setExpirySeconds(int expirySeconds) {
+            this.expirySeconds = expirySeconds;
+        }
     }
 
     public String getKeyPrefix() {

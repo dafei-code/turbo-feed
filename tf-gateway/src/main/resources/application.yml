@@ -116,11 +116,15 @@ turbofeed:
     # 开启后经 ImageIO 解码重编码（12MP ARGB ≈ 48MB/张），需评估上传 QPS 与堆内存
     processing-enabled: false
     thumbnail-max-dimension: 2048
+    # 预签名直传（客户端直传对象存储，网关不收字节流）：上传凭证有效期（秒）。
+    # 过期后客户端需重新申请；重签会复用同一批对象名，不会让孤儿对象随重试翻倍。
+    presign:
+      expiry-seconds: 300
     # 上传限流分工：thread/qps 走 Sentinel 注解（机器维度，@SentinelResource 埋点于 MediaUploadService#upload）；
     # per-user 走 Redis UploadRateLimiter（用户维度，注解热点参数取不到 ThreadLocal 的 userId，跨实例计数）
     rate-limit:
-      thread: 20
-      qps: 100
+      thread: 200
+      qps: 2000
       per-user: 10
       # 同用户上传并发占位 TTL（秒）：进程崩溃 / 释放失败时的兜底过期时间（ConcurrentUploadValidator 消费）
       inflight-ttl-seconds: 30
