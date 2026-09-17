@@ -12,9 +12,13 @@ import java.util.List;
  * 敏感词持久层（JDBC）。
  *
  * <p><b>表路由</b>：{@code sensitive_word} 单表放在 {@code turbo_feed_1}（ds_0），
- * 未注册到 ShardingSphere 的 autoTables/broadcastTables 规则，ShardingSphere 5.x
- * 会把未配置的表路由到默认数据源（本配置下即 ds_0）——词库小、单表读写，足够。
- * 若未来需多副本 HA，将该表注册为 BROADCAST 规则即可零侵入复制到 ds_1。</p>
+ * 并在 shardingsphere-config.yaml 显式配置 {@code !SINGLE} 规则
+ * （{@code tables: [ds_0.sensitive_word]} + {@code defaultDataSource: ds_0}）。
+ * ⚠️ ShardingSphere 5.5.3 <b>不会</b>把「未纳入任何规则的表」自动放进逻辑元数据——
+ * 旧说法「未配置的表走默认数据源」不成立（实测：缺 {@code !SINGLE} 时查询直接抛
+ * {@code TableNotFoundException}，敏感词库启动加载失败、Trie 保持空，过滤静默失效）。
+ * 新增单表必须同步在 {@code !SINGLE} 的 tables 里登记，元素格式为「数据源.表名」。
+ * 若未来需多副本 HA，将该表改为 BROADCAST 规则即可零侵入复制到 ds_1。</p>
  *
  * <p><b>变更检测</b>：{@link #checkSum()} 返回 {@code (COUNT, MAX(updated_at))}，
  * 任意 INSERT/UPDATE/DELETE 都会改变该二元组——无需应用层维护全局计数器，
