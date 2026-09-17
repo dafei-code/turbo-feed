@@ -83,6 +83,14 @@ rules:
     keyGenerators:
       snowflake:
         type: SNOWFLAKE
+  # 单表规则（必须显式声明）：与 shardingsphere-config.yaml 同因——
+  # 未纳入 !SHARDING 的表（sensitive_word）不会自动进入逻辑元数据，
+  # 缺此规则会抛 TableNotFoundException，导致敏感词库加载失败、过滤静默失效。
+  # ⚠️ tables 元素必须是「数据源.表名」全限定格式。
+  - !SINGLE
+    defaultDataSource: ds_0
+    tables:
+      - ds_0.sensitive_word
 
 props:
   sql-show: true

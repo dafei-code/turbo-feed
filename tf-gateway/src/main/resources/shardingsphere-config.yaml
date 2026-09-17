@@ -123,6 +123,18 @@ rules:
     keyGenerators:
       snowflake:
         type: SNOWFLAKE
+  # 单表规则（必须显式声明）：未纳入 !SHARDING 的表（当前只有 sensitive_word）
+  # 不会自动进入逻辑元数据——缺此规则时对其查询会抛
+  #   TableNotFoundException: Table or view 'sensitive_word' does not exist
+  # 进而导致 SensitiveWordService 启动加载失败、保留空 Trie（敏感词过滤静默失效）。
+  # ⚠️ init-local.sql 注释「ShardingSphere 未配置规则的表走默认 ds_0」在 5.5.3 不成立（实测）。
+  # ⚠️ tables 元素必须是「数据源.表名」全限定格式；只写表名会抛
+  #   InvalidDataNodeFormatException: Invalid format for actual data node 'sensitive_word'
+  # defaultDataSource 决定「未列出的新建单表」落到哪个库，保持 ds_0 与建表脚本一致。
+  - !SINGLE
+    defaultDataSource: ds_0
+    tables:
+      - ds_0.sensitive_word
 
 props:
   # 开发期打印实际落到的物理库/表与 SQL，便于核对路由；生产可关闭
