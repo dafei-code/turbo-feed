@@ -86,6 +86,27 @@ rules:
           standard:
             shardingColumn: user_id
             shardingAlgorithmName: hashMod
+      # 逻辑表 violation_record：分片键 user_id（与 account_credit 同片）。
+      # append-only 审计表，是处罚升级决策的「事实源」；id 由雪花生成器填充（业务侧 INSERT 不传 id）。
+      # 注意：分片表主键含分片键 (user_id, id)，保证「查某账号全部违规」单分片命中。
+      violation_record:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: hashMod
+        keyGenerateStrategy:
+          column: id
+          keyGeneratorName: snowflake
+      # 逻辑表 account_penalty：分片键 user_id（与 account_credit 同片）。
+      # 账号级「硬执行」处罚态（封禁/警告）；与 account_credit「软声誉」领域分离，
+      # 不把封禁字段塞进信用表。ensure/get/apply 均 WHERE user_id=? 单分片命中。
+      account_penalty:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: hashMod
       # 逻辑表 report / appeal：分片键 media_id，
       # 举报/申诉高频查询均按 media_id（insert(media_id) / resolve(WHERE media_id=?)）精准命中单分片；
       # 管理员待处理列表(按 status)为广播，低频可接。
