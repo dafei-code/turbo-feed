@@ -107,6 +107,8 @@ CREATE TABLE `turbo_feed_1`.`account_credit_0` (
   `credit_score`      INT          NOT NULL DEFAULT 100    COMMENT '信用分(0-100), 越低越严',
   `level`             TINYINT      NOT NULL DEFAULT 1      COMMENT '信用等级 0=L0(先审后放) 1=L1(小池) 2=L2(大池)',
   `strict_queue_flag` TINYINT      NOT NULL DEFAULT 0      COMMENT '0=普通 1=加严队列(近30天有下架, 所有内容先审后放)',
+  `new_user_watch`   TINYINT      NOT NULL DEFAULT 0      COMMENT '1=新人观察期(先审后放), 人审通过达阈值后自动置 0',
+  `new_user_approved_count` INT  NOT NULL DEFAULT 0      COMMENT '新人观察期内累计人审通过帖数(仅统计人工通过)',
   `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(物理分片 turbo_feed_1.account_credit_0)';
@@ -116,6 +118,8 @@ CREATE TABLE `turbo_feed_1`.`account_credit_2` (
   `credit_score`      INT          NOT NULL DEFAULT 100    COMMENT '信用分(0-100), 越低越严',
   `level`             TINYINT      NOT NULL DEFAULT 1      COMMENT '信用等级 0=L0(先审后放) 1=L1(小池) 2=L2(大池)',
   `strict_queue_flag` TINYINT      NOT NULL DEFAULT 0      COMMENT '0=普通 1=加严队列(近30天有下架, 所有内容先审后放)',
+  `new_user_watch`   TINYINT      NOT NULL DEFAULT 0      COMMENT '1=新人观察期(先审后放), 人审通过达阈值后自动置 0',
+  `new_user_approved_count` INT  NOT NULL DEFAULT 0      COMMENT '新人观察期内累计人审通过帖数(仅统计人工通过)',
   `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(物理分片 turbo_feed_1.account_credit_2)';
@@ -246,6 +250,8 @@ CREATE TABLE `turbo_feed_2`.`account_credit_1` (
   `credit_score`      INT          NOT NULL DEFAULT 100    COMMENT '信用分(0-100), 越低越严',
   `level`             TINYINT      NOT NULL DEFAULT 1      COMMENT '信用等级 0=L0(先审后放) 1=L1(小池) 2=L2(大池)',
   `strict_queue_flag` TINYINT      NOT NULL DEFAULT 0      COMMENT '0=普通 1=加严队列(近30天有下架, 所有内容先审后放)',
+  `new_user_watch`   TINYINT      NOT NULL DEFAULT 0      COMMENT '1=新人观察期(先审后放), 人审通过达阈值后自动置 0',
+  `new_user_approved_count` INT  NOT NULL DEFAULT 0      COMMENT '新人观察期内累计人审通过帖数(仅统计人工通过)',
   `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(物理分片 turbo_feed_2.account_credit_1)';
@@ -255,6 +261,8 @@ CREATE TABLE `turbo_feed_2`.`account_credit_3` (
   `credit_score`      INT          NOT NULL DEFAULT 100    COMMENT '信用分(0-100), 越低越严',
   `level`             TINYINT      NOT NULL DEFAULT 1      COMMENT '信用等级 0=L0(先审后放) 1=L1(小池) 2=L2(大池)',
   `strict_queue_flag` TINYINT      NOT NULL DEFAULT 0      COMMENT '0=普通 1=加严队列(近30天有下架, 所有内容先审后放)',
+  `new_user_watch`   TINYINT      NOT NULL DEFAULT 0      COMMENT '1=新人观察期(先审后放), 人审通过达阈值后自动置 0',
+  `new_user_approved_count` INT  NOT NULL DEFAULT 0      COMMENT '新人观察期内累计人审通过帖数(仅统计人工通过)',
   `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(物理分片 turbo_feed_2.account_credit_3)';
@@ -375,11 +383,16 @@ CREATE TABLE `turbo_feed_2`.`comment_3` (
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论表(物理分片 turbo_feed_2.comment_3)';
 
--- ==================== 敏感词库（sensitive_word，单表放 ds_0，ShardingSphere 未配置规则的表走默认 ds_0） ====================
+-- ==================== 敏感词库（sensitive_word，单表放 ds_0） ====================
+-- ⚠️ 部署：单表必须由 shardingsphere-config.yaml 的 `!SINGLE` 规则显式登记
+--    （tables: [ds_0.sensitive_word]）。旧注释「未配置规则的表走默认 ds_0」在
+--    ShardingSphere 5.5.3 不成立（实测：缺 !SINGLE 时查询抛 TableNotFoundException，
+--    导致词库加载失败、Trie 保持空、过滤静默失效）。
 -- 词库小（KB~MB 级），单表足够；写少读多（启动 + 30s 定时 + 手动触发全量加载到 AC 自动机）。
--- revision 单调递增，节点用「本地 revision vs DB MAX(revision)」判断是否需要重载；
--- 检测到变更则全量重建 AC（词库 < 10k 时全量重建成本 < 1ms，生产大词库可演进为增量合并）。
--- category 用于分类（政治/色情/广告/自定义），分类 Trie 后续可扩展为多棵子树。
+-- 变更检测用「(COUNT, MAX(updated_at))」指纹（不是自增 revision 对比）：INSERT 改变 count、
+-- UPDATE 改变 max、DELETE 改变 count，二元组任一变化即触发全量重建。revision 保留作运营审计。
+-- category 用于分级处置（POLITICS/PORN/VIOLENCE/AD/...），决策层按分类查动作表
+-- （turbofeed.content-security.category-actions），如「广告类只降权不拦截」。
 CREATE TABLE `turbo_feed_1`.`sensitive_word` (
   `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
   `word`       VARCHAR(64)  NOT NULL                COMMENT '敏感词',
@@ -393,6 +406,36 @@ CREATE TABLE `turbo_feed_1`.`sensitive_word` (
   KEY `idx_revision` (`revision`),
   KEY `idx_enabled` (`enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感词库(单表, AC 自动机加载源)';
+
+-- ==================== 误杀豁免白名单（sensitive_whitelist，单表放 ds_0） ====================
+-- 任何词库都必然误杀（「黄色」「水乳交融」在某个语境下完全正常）。没有豁免出口时，
+-- 运营只能二选一：删词（漏放）或留着（误杀）。白名单把「是否敏感」从「词的属性」
+-- 改成「词 × 场景 × 主体」的属性，让误杀与漏放可以分别调。
+-- 与 sensitive_word 同为「小表 + 读多写少 + 必须秒级生效」，共用同一套热更新模型
+-- （启动加载 + 30s 指纹检测 + admin 写操作立即刷新）。
+-- ⚠️ 排序规则刻意用 utf8mb4_bin（大小写/重音敏感）：白名单是「精确豁免」语义，
+--    必须与 AC 的逐字符精确匹配一致；而 sensitive_word.uk_word 因库级
+--    utf8mb4_0900_ai_ci 是大小写不敏感的（加 'Abc' 后再加 'abc' 不新增行、
+--    文本里的 'abc' 却拦不到——实测踩过），沿用那套会让白名单意外豁免 'ABC'。
+-- scene：* = 全部场景，或 NICKNAME / CAPTION / COMMENT。
+-- scope：GLOBAL = 对所有人生效；USER = 仅 owner_id 本人（个案申诉，不放开全站）。
+-- 部署：同样必须在 shardingsphere-config.yaml 的 `!SINGLE` 里登记 ds_0.sensitive_whitelist。
+CREATE TABLE `turbo_feed_1`.`sensitive_whitelist` (
+  `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `word`       VARCHAR(64)  NOT NULL                COMMENT '被豁免的词（与词库存储形态一致）',
+  `scene`      VARCHAR(16)  NOT NULL DEFAULT '*'    COMMENT '生效场景: * / NICKNAME / CAPTION / COMMENT',
+  `scope`      VARCHAR(16)  NOT NULL DEFAULT 'GLOBAL' COMMENT '生效范围: GLOBAL / USER',
+  `owner_id`   BIGINT       NOT NULL DEFAULT 0      COMMENT 'scope=USER 时的用户 ID；GLOBAL 恒为 0',
+  `reason`     VARCHAR(255)          DEFAULT NULL   COMMENT '豁免原因（运营留痕）',
+  `enabled`    TINYINT(1)   NOT NULL DEFAULT 1      COMMENT '0=禁用 1=启用',
+  `revision`   BIGINT       NOT NULL DEFAULT 1      COMMENT '修订号, 每次写操作 +1',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_word_scene_scope` (`word`, `scene`, `scope`, `owner_id`),
+  KEY `idx_word` (`word`),
+  KEY `idx_enabled` (`enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='误杀豁免白名单(单表, 内存索引加载源)';
 
 -- ==================== 演示账号种子数据（DB 重建后可直接登录） ====================
 -- 说明：网关登录现走 user 分片表 + BCrypt 校验；旧 application.yml 中 auth.demo-users

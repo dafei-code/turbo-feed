@@ -13,7 +13,8 @@ import com.turbofeed.gateway.service.event.MediaEventPublisher;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
 import com.turbofeed.gateway.service.feed.FeedTimelinePublisher;
 import com.turbofeed.gateway.service.idempotency.UploadIdempotency;
-import com.turbofeed.gateway.service.moderation.SensitiveWordService;
+import com.turbofeed.gateway.service.moderation.ContentScene;
+import com.turbofeed.gateway.service.moderation.ContentSecurityService;
 import com.turbofeed.gateway.service.presign.PresignRequest;
 import com.turbofeed.gateway.service.presign.PresignResponse;
 import com.turbofeed.gateway.service.presign.UploadAccepted;
@@ -96,7 +97,7 @@ public class MediaUploadService {
     private final FeedTimelinePublisher feedTimelinePublisher;
     private final StringRedisTemplate redisTemplate;
     private final CaptionMarkParser captionMarkParser;
-    private final SensitiveWordService sensitiveWordService;
+    private final ContentSecurityService contentSecurityService;
     private final UploadReservationStore reservationStore;
     private final MediaUploadFinalizer uploadFinalizer;
 
@@ -168,13 +169,13 @@ public class MediaUploadService {
             throw new BizException(ErrorCode.UPLOAD_IN_PROGRESS, "请求处理中，请勿重复提交");
         }
 
-        // 描述/标题：抖音式文案（@用户 / #话题 / [image:idx:filename]），
-        // 同步敏感词 fail-closed；解析为 caption_mark 落库。一次上传一个 caption 共享给整帖。
+        // 描述/标题：抖音式文案（@用户 / #话题 / [image:idx:filename]）。
+        // 长度上限 + 敏感词统一走内容安全入口（场景 CAPTION），命中即 fail-closed；
+        // 解析为 caption_mark 落库。一次上传一个 caption 共享给整帖。
         String rawCaption = caption == null ? "" : caption;
-        sensitiveWordService.requireClean(rawCaption);
-        CaptionMarkParser.ParseResult captionMark = captionMarkParser.parse(rawCaption);
-
         long uid = Long.parseLong(userId);
+        contentSecurityService.requireClean(ContentScene.CAPTION, rawCaption, uid);
+        CaptionMarkParser.ParseResult captionMark = captionMarkParser.parse(rawCaption);
         String postId = POST_ID_PREFIX + userId + "/" + UUID.randomUUID().toString().replace("-", "");
         Instant createdAt = Instant.now();
 
@@ -284,7 +285,7 @@ public class MediaUploadService {
         }
 
         String rawCaption = request != null && request.caption() != null ? request.caption() : "";
-        sensitiveWordService.requireClean(rawCaption);
+        contentSecurityService.requireClean(ContentScene.CAPTION, rawCaption, Long.parseLong(userId));
         CaptionMarkParser.ParseResult captionMark = captionMarkParser.parse(rawCaption);
 
         long maxBytes = properties.getMaxFileSize().toBytes();
@@ -531,7 +532,8 @@ public class MediaUploadService {
     /**
      * 更新媒体描述/标题（用户编辑已上传内容的文案）。
      *
-     * <p>流程：原始文本过敏感词 fail-closed → 解析为 caption_mark → 落库。
+     * <p>流程：长度上限 + 敏感词统一走内容安全入口（场景 CAPTION，命中即 fail-closed）
+     * → 解析为 caption_mark → 落库。
      * 带 user_id 分片键，仅本人内容可改（与 delete 同源防护）。该方法不重置
      * 审核状态——描述修改不影响内容流转（合规要求：涉政违规仅下架而非拒重传）。</p>
      *
@@ -543,7 +545,7 @@ public class MediaUploadService {
      */
     public void updateCaption(String mediaId, String userId, String caption) {
         String raw = caption == null ? "" : caption;
-        sensitiveWordService.requireClean(raw);
+        contentSecurityService.requireClean(ContentScene.CAPTION, raw, Long.parseLong(userId));
         CaptionMarkParser.ParseResult pr = captionMarkParser.parse(raw);
         mediaRepository.updateCaption(mediaId, Long.parseLong(userId), raw, pr.markJson());
         log.info("媒体描述已更新（整帖）: mediaId={}, userId={}, captionLen={}", mediaId, userId, raw.length());

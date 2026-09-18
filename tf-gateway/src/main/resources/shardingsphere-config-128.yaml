@@ -91,6 +91,7 @@ rules:
     defaultDataSource: ds_0
     tables:
       - ds_0.sensitive_word
+      - ds_0.sensitive_whitelist
 
 props:
   sql-show: true

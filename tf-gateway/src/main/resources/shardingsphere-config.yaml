@@ -135,6 +135,7 @@ rules:
     defaultDataSource: ds_0
     tables:
       - ds_0.sensitive_word
+      - ds_0.sensitive_whitelist
 
 props:
   # 开发期打印实际落到的物理库/表与 SQL，便于核对路由；生产可关闭
