@@ -415,12 +415,53 @@ public class MediaProperties {
          */
         private int newUserApproveThreshold = 3;
 
+        /** 加严队列持续天数（P0-5）：strict_queue_flag 超此窗口自动降级，避免永久加严。默认 30 */
+        private int strictQueueWindowDays = 30;
+        /** 新人观察期天数（P0-6）：new_user_watch 超此窗口即使人审通过数未达阈值也自动转正。默认 7 */
+        private int newUserWatchWindowDays = 7;
+        /** 信用分自然恢复步长（P0-5 增强）：每日凌晨给近 creditRecoverQuietDays 天无违规账号加分。默认 5 */
+        private int creditRecoverStep = 5;
+        /** 信用分自然恢复静默天数（P0-5 增强）：近 N 天有违规则不恢复。默认 30 */
+        private int creditRecoverQuietDays = 30;
+
         public int getNewUserApproveThreshold() {
             return newUserApproveThreshold;
         }
 
         public void setNewUserApproveThreshold(int newUserApproveThreshold) {
             this.newUserApproveThreshold = newUserApproveThreshold;
+        }
+
+        public int getStrictQueueWindowDays() {
+            return strictQueueWindowDays;
+        }
+
+        public void setStrictQueueWindowDays(int strictQueueWindowDays) {
+            this.strictQueueWindowDays = strictQueueWindowDays;
+        }
+
+        public int getNewUserWatchWindowDays() {
+            return newUserWatchWindowDays;
+        }
+
+        public void setNewUserWatchWindowDays(int newUserWatchWindowDays) {
+            this.newUserWatchWindowDays = newUserWatchWindowDays;
+        }
+
+        public int getCreditRecoverStep() {
+            return creditRecoverStep;
+        }
+
+        public void setCreditRecoverStep(int creditRecoverStep) {
+            this.creditRecoverStep = creditRecoverStep;
+        }
+
+        public int getCreditRecoverQuietDays() {
+            return creditRecoverQuietDays;
+        }
+
+        public void setCreditRecoverQuietDays(int creditRecoverQuietDays) {
+            this.creditRecoverQuietDays = creditRecoverQuietDays;
         }
 
         public boolean isAutoPass() {

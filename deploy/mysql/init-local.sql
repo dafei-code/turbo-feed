@@ -109,6 +109,8 @@ CREATE TABLE `turbo_feed_1`.`account_credit_0` (
   `strict_queue_flag` TINYINT      NOT NULL DEFAULT 0      COMMENT '0=普通 1=加严队列(近30天有下架, 所有内容先审后放)',
   `new_user_watch`   TINYINT      NOT NULL DEFAULT 0      COMMENT '1=新人观察期(先审后放), 人审通过达阈值后自动置 0',
   `new_user_approved_count` INT  NOT NULL DEFAULT 0      COMMENT '新人观察期内累计人审通过帖数(仅统计人工通过)',
+  `last_violation_at` DATETIME     DEFAULT NULL          COMMENT '最近一次违规时点(P0-5, 超 strictQueueWindowDays 自动解除加严)',
+  `watch_since`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '观察期起始(P0-6, 超 newUserWatchWindowDays 自动转正)',
   `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(物理分片 turbo_feed_1.account_credit_0)';
@@ -120,6 +122,8 @@ CREATE TABLE `turbo_feed_1`.`account_credit_2` (
   `strict_queue_flag` TINYINT      NOT NULL DEFAULT 0      COMMENT '0=普通 1=加严队列(近30天有下架, 所有内容先审后放)',
   `new_user_watch`   TINYINT      NOT NULL DEFAULT 0      COMMENT '1=新人观察期(先审后放), 人审通过达阈值后自动置 0',
   `new_user_approved_count` INT  NOT NULL DEFAULT 0      COMMENT '新人观察期内累计人审通过帖数(仅统计人工通过)',
+  `last_violation_at` DATETIME     DEFAULT NULL          COMMENT '最近一次违规时点(P0-5, 超 strictQueueWindowDays 自动解除加严)',
+  `watch_since`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '观察期起始(P0-6, 超 newUserWatchWindowDays 自动转正)',
   `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(物理分片 turbo_feed_1.account_credit_2)';
@@ -252,6 +256,8 @@ CREATE TABLE `turbo_feed_2`.`account_credit_1` (
   `strict_queue_flag` TINYINT      NOT NULL DEFAULT 0      COMMENT '0=普通 1=加严队列(近30天有下架, 所有内容先审后放)',
   `new_user_watch`   TINYINT      NOT NULL DEFAULT 0      COMMENT '1=新人观察期(先审后放), 人审通过达阈值后自动置 0',
   `new_user_approved_count` INT  NOT NULL DEFAULT 0      COMMENT '新人观察期内累计人审通过帖数(仅统计人工通过)',
+  `last_violation_at` DATETIME     DEFAULT NULL          COMMENT '最近一次违规时点(P0-5, 超 strictQueueWindowDays 自动解除加严)',
+  `watch_since`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '观察期起始(P0-6, 超 newUserWatchWindowDays 自动转正)',
   `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(物理分片 turbo_feed_2.account_credit_1)';
@@ -263,6 +269,8 @@ CREATE TABLE `turbo_feed_2`.`account_credit_3` (
   `strict_queue_flag` TINYINT      NOT NULL DEFAULT 0      COMMENT '0=普通 1=加严队列(近30天有下架, 所有内容先审后放)',
   `new_user_watch`   TINYINT      NOT NULL DEFAULT 0      COMMENT '1=新人观察期(先审后放), 人审通过达阈值后自动置 0',
   `new_user_approved_count` INT  NOT NULL DEFAULT 0      COMMENT '新人观察期内累计人审通过帖数(仅统计人工通过)',
+  `last_violation_at` DATETIME     DEFAULT NULL          COMMENT '最近一次违规时点(P0-5, 超 strictQueueWindowDays 自动解除加严)',
+  `watch_since`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '观察期起始(P0-6, 超 newUserWatchWindowDays 自动转正)',
   `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(物理分片 turbo_feed_2.account_credit_3)';
