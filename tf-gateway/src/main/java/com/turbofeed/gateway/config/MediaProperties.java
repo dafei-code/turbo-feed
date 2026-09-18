@@ -408,6 +408,21 @@ public class MediaProperties {
         /** 机审初筛违禁词表（RULE 引擎 fail-closed 命中即拦；与 CLOUD 视觉语义互补）。 */
         private List<String> bannedKeywords = List.of();
 
+        /**
+         * 新人观察期解除阈值（{@code turbofeed.media.review.new-user-approve-threshold}）：
+         * 新注册账号初始处于「先审后放」观察期，累计<b>人工审核通过</b>达到该帖数后自动转正常分级。
+         * 只统计人工通过——先发后审的自动通过不计入，否则新号第一帖就会自己转正。
+         */
+        private int newUserApproveThreshold = 3;
+
+        public int getNewUserApproveThreshold() {
+            return newUserApproveThreshold;
+        }
+
+        public void setNewUserApproveThreshold(int newUserApproveThreshold) {
+            this.newUserApproveThreshold = newUserApproveThreshold;
+        }
+
         public boolean isAutoPass() {
             return autoPass;
         }
