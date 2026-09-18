@@ -275,6 +275,126 @@ CREATE TABLE `turbo_feed_2`.`account_credit_3` (
   PRIMARY KEY (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号信用分级表(物理分片 turbo_feed_2.account_credit_3)';
 
+-- ---------------------------------------------------------------------------
+-- 处罚域（penalty 包骨架）：与 account_credit「软声誉」领域分离的两张表。
+--   violation_record —— append-only 审计，升级决策的事实源（谁/何类目/何严重度/何来源/何处置）。
+--   account_penalty  —— 账号级硬执行处罚态（封禁/警告），直接决定能不能写。
+-- 均为分片键 user_id（与 account_credit 同键同算法 → 同片），物理表 <表>_0.._3，
+-- 偶数下标(_0/_2)落 ds_0、奇数下标(_1/_3)落 ds_1。
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE `turbo_feed_1`.`violation_record_0` (
+  `id`               BIGINT       NOT NULL                COMMENT '违规记录ID, ShardingSphere雪花填充',
+  `user_id`          BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id)',
+  `category`         TINYINT      NOT NULL                COMMENT '违规类目 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
+  `severity`         TINYINT      NOT NULL                COMMENT '严重度 1低 2中 3高 4严重(CRITICAL)',
+  `source`           TINYINT      NOT NULL                COMMENT '来源 1机审 2举报 3人审 4申诉翻案',
+  `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封',
+  `related_media_id` VARCHAR(255) DEFAULT NULL            COMMENT '关联内容ID(内容违规时填, 账号/行为违规可空)',
+  `reason`           VARCHAR(512) DEFAULT NULL            COMMENT '处置理由(人审/运营填写)',
+  `operator`         VARCHAR(64)  DEFAULT NULL            COMMENT '操作人(SYSTEM/审核员ID)',
+  `created_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录时间',
+  PRIMARY KEY (`user_id`, `id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='违规记录表(append-only, 物理分片 turbo_feed_1.violation_record_0)';
+
+CREATE TABLE `turbo_feed_1`.`violation_record_2` (
+  `id`               BIGINT       NOT NULL                COMMENT '违规记录ID, ShardingSphere雪花填充',
+  `user_id`          BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id)',
+  `category`         TINYINT      NOT NULL                COMMENT '违规类目 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
+  `severity`         TINYINT      NOT NULL                COMMENT '严重度 1低 2中 3高 4严重(CRITICAL)',
+  `source`           TINYINT      NOT NULL                COMMENT '来源 1机审 2举报 3人审 4申诉翻案',
+  `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封',
+  `related_media_id` VARCHAR(255) DEFAULT NULL            COMMENT '关联内容ID(内容违规时填, 账号/行为违规可空)',
+  `reason`           VARCHAR(512) DEFAULT NULL            COMMENT '处置理由(人审/运营填写)',
+  `operator`         VARCHAR(64)  DEFAULT NULL            COMMENT '操作人(SYSTEM/审核员ID)',
+  `created_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录时间',
+  PRIMARY KEY (`user_id`, `id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='违规记录表(append-only, 物理分片 turbo_feed_1.violation_record_2)';
+
+CREATE TABLE `turbo_feed_2`.`violation_record_1` (
+  `id`               BIGINT       NOT NULL                COMMENT '违规记录ID, ShardingSphere雪花填充',
+  `user_id`          BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id)',
+  `category`         TINYINT      NOT NULL                COMMENT '违规类目 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
+  `severity`         TINYINT      NOT NULL                COMMENT '严重度 1低 2中 3高 4严重(CRITICAL)',
+  `source`           TINYINT      NOT NULL                COMMENT '来源 1机审 2举报 3人审 4申诉翻案',
+  `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封',
+  `related_media_id` VARCHAR(255) DEFAULT NULL            COMMENT '关联内容ID(内容违规时填, 账号/行为违规可空)',
+  `reason`           VARCHAR(512) DEFAULT NULL            COMMENT '处置理由(人审/运营填写)',
+  `operator`         VARCHAR(64)  DEFAULT NULL            COMMENT '操作人(SYSTEM/审核员ID)',
+  `created_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录时间',
+  PRIMARY KEY (`user_id`, `id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='违规记录表(append-only, 物理分片 turbo_feed_2.violation_record_1)';
+
+CREATE TABLE `turbo_feed_2`.`violation_record_3` (
+  `id`               BIGINT       NOT NULL                COMMENT '违规记录ID, ShardingSphere雪花填充',
+  `user_id`          BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id)',
+  `category`         TINYINT      NOT NULL                COMMENT '违规类目 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
+  `severity`         TINYINT      NOT NULL                COMMENT '严重度 1低 2中 3高 4严重(CRITICAL)',
+  `source`           TINYINT      NOT NULL                COMMENT '来源 1机审 2举报 3人审 4申诉翻案',
+  `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封',
+  `related_media_id` VARCHAR(255) DEFAULT NULL            COMMENT '关联内容ID(内容违规时填, 账号/行为违规可空)',
+  `reason`           VARCHAR(512) DEFAULT NULL            COMMENT '处置理由(人审/运营填写)',
+  `operator`         VARCHAR(64)  DEFAULT NULL            COMMENT '操作人(SYSTEM/审核员ID)',
+  `created_at`       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录时间',
+  PRIMARY KEY (`user_id`, `id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='违规记录表(append-only, 物理分片 turbo_feed_2.violation_record_3)';
+
+CREATE TABLE `turbo_feed_1`.`account_penalty_0` (
+  `user_id`            BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id)',
+  `status`             TINYINT      NOT NULL DEFAULT 0      COMMENT '处罚态 0正常 1警告 2临时封 3永久封',
+  `ban_category`       TINYINT      DEFAULT NULL            COMMENT '触发封禁的类目(见 violation_record.category)',
+  `ban_reason`         VARCHAR(512) DEFAULT NULL            COMMENT '封禁理由',
+  `ban_until`          DATETIME     DEFAULT NULL            COMMENT '临时封禁到期时点(NULL=永久封禁)',
+  `violation_count`    INT          NOT NULL DEFAULT 0      COMMENT '累计违规次数(升级判断输入)',
+  `first_violation_at` DATETIME     DEFAULT NULL            COMMENT '首次违规时点',
+  `last_violation_at`  DATETIME     DEFAULT NULL            COMMENT '最近一次违规时点',
+  `updated_at`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号处罚态表(物理分片 turbo_feed_1.account_penalty_0)';
+
+CREATE TABLE `turbo_feed_1`.`account_penalty_2` (
+  `user_id`            BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id)',
+  `status`             TINYINT      NOT NULL DEFAULT 0      COMMENT '处罚态 0正常 1警告 2临时封 3永久封',
+  `ban_category`       TINYINT      DEFAULT NULL            COMMENT '触发封禁的类目(见 violation_record.category)',
+  `ban_reason`         VARCHAR(512) DEFAULT NULL            COMMENT '封禁理由',
+  `ban_until`          DATETIME     DEFAULT NULL            COMMENT '临时封禁到期时点(NULL=永久封禁)',
+  `violation_count`    INT          NOT NULL DEFAULT 0      COMMENT '累计违规次数(升级判断输入)',
+  `first_violation_at` DATETIME     DEFAULT NULL            COMMENT '首次违规时点',
+  `last_violation_at`  DATETIME     DEFAULT NULL            COMMENT '最近一次违规时点',
+  `updated_at`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号处罚态表(物理分片 turbo_feed_1.account_penalty_2)';
+
+CREATE TABLE `turbo_feed_2`.`account_penalty_1` (
+  `user_id`            BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id)',
+  `status`             TINYINT      NOT NULL DEFAULT 0      COMMENT '处罚态 0正常 1警告 2临时封 3永久封',
+  `ban_category`       TINYINT      DEFAULT NULL            COMMENT '触发封禁的类目(见 violation_record.category)',
+  `ban_reason`         VARCHAR(512) DEFAULT NULL            COMMENT '封禁理由',
+  `ban_until`          DATETIME     DEFAULT NULL            COMMENT '临时封禁到期时点(NULL=永久封禁)',
+  `violation_count`    INT          NOT NULL DEFAULT 0      COMMENT '累计违规次数(升级判断输入)',
+  `first_violation_at` DATETIME     DEFAULT NULL            COMMENT '首次违规时点',
+  `last_violation_at`  DATETIME     DEFAULT NULL            COMMENT '最近一次违规时点',
+  `updated_at`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号处罚态表(物理分片 turbo_feed_2.account_penalty_1)';
+
+CREATE TABLE `turbo_feed_2`.`account_penalty_3` (
+  `user_id`            BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id)',
+  `status`             TINYINT      NOT NULL DEFAULT 0      COMMENT '处罚态 0正常 1警告 2临时封 3永久封',
+  `ban_category`       TINYINT      DEFAULT NULL            COMMENT '触发封禁的类目(见 violation_record.category)',
+  `ban_reason`         VARCHAR(512) DEFAULT NULL            COMMENT '封禁理由',
+  `ban_until`          DATETIME     DEFAULT NULL            COMMENT '临时封禁到期时点(NULL=永久封禁)',
+  `violation_count`    INT          NOT NULL DEFAULT 0      COMMENT '累计违规次数(升级判断输入)',
+  `first_violation_at` DATETIME     DEFAULT NULL            COMMENT '首次违规时点',
+  `last_violation_at`  DATETIME     DEFAULT NULL            COMMENT '最近一次违规时点',
+  `updated_at`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账号处罚态表(物理分片 turbo_feed_2.account_penalty_3)';
+
 CREATE TABLE `turbo_feed_2`.`report_1` (
   `id`                BIGINT       NOT NULL AUTO_INCREMENT COMMENT '举报记录ID',
   `media_id`          VARCHAR(255) NOT NULL                COMMENT '被举报内容ID, 分片键',

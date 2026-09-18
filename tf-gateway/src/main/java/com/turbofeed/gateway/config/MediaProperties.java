@@ -424,6 +424,21 @@ public class MediaProperties {
         /** 信用分自然恢复静默天数（P0-5 增强）：近 N 天有违规则不恢复。默认 30 */
         private int creditRecoverQuietDays = 30;
 
+        /**
+         * 临时封禁触发阈值（penalty 包骨架）：累计违规次数达到此值即临时封禁。默认 3
+         * （骨架版按「累计总数」判断；抖音式“同类 N 次”需改按类目计数）。
+         */
+        private int banTempThreshold = 3;
+
+        /** 临时封禁时长（天，penalty 包骨架）：到期后 {@code ban_until} 过期即自动恢复可写。默认 7 */
+        private int banTempDays = 7;
+
+        /**
+         * 严重违规（{@code ViolationSeverity#CRITICAL}）是否直接<b>永久</b>封禁。默认 true。
+         * false 则 CRITICAL 也只临时封禁 {@code banTempDays} 天（上线初期建议先 false 灰度，避免误封不可逆）。
+         */
+        private boolean criticalAutoPermBan = true;
+
         public int getNewUserApproveThreshold() {
             return newUserApproveThreshold;
         }
@@ -462,6 +477,30 @@ public class MediaProperties {
 
         public void setCreditRecoverQuietDays(int creditRecoverQuietDays) {
             this.creditRecoverQuietDays = creditRecoverQuietDays;
+        }
+
+        public int getBanTempThreshold() {
+            return banTempThreshold;
+        }
+
+        public void setBanTempThreshold(int banTempThreshold) {
+            this.banTempThreshold = banTempThreshold;
+        }
+
+        public int getBanTempDays() {
+            return banTempDays;
+        }
+
+        public void setBanTempDays(int banTempDays) {
+            this.banTempDays = banTempDays;
+        }
+
+        public boolean isCriticalAutoPermBan() {
+            return criticalAutoPermBan;
+        }
+
+        public void setCriticalAutoPermBan(boolean criticalAutoPermBan) {
+            this.criticalAutoPermBan = criticalAutoPermBan;
         }
 
         public boolean isAutoPass() {
