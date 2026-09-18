@@ -107,18 +107,22 @@ public class AccountCreditRepository {
 
     /**
      * 违规确认：扣分并据分重算等级；并置 {@code strict_queue_flag}（<b>只增不减</b>，
-     * 目前无自动解除路径，解除策略待定）。
+     * 目前无自动解除路径，解除策略见 P0-5）。
      *
-     * <p>⚠️ <b>已知缺陷（本次未改，已记录）</b>：本方法先改 {@code credit_score} 再用
-     * {@code credit_score - 20} 算等级，而 MySQL 的赋值是从左到右求值——后面的 CASE 看到的是
-     * <b>已扣分后的</b>分数，等价于按「扣 40 分」判级，导致等级滞后一档
-     * （实测：100 → 80 分时等级算成 L1，按模型应为 L2）。{@code restore()} 有同类问题。
-     * 修正方式是把 CASE 放到分数赋值<b>之前</b>；因涉及行为变更，另行确认后处理。</p>
+     * <p>⚠️ <b>等级滞后已修正（changelog 0029）</b>：原实现先改 {@code credit_score} 再算等级，
+     * 因 MySQL UPDATE 赋值从左到右求值，level 里的 {@code credit_score - 20} 看到的是已扣分后的分
+     * （等价于扣 40 判级），100 → 80 被算成 L1（应为 L2）。现把 level CASE 前置，引用原始分，判级正确。
+     * {@code restore()} 同类修正。</p>
      */
     public void deduct(long userId) {
+        // 修正等级滞后：level CASE 必须放在 credit_score 赋值之前（见类注释 SQL 赋值顺序说明）。
+        // CASE 前置后引用「未改动前的原始分」，按真实扣分(20)判级；若放其后会看到已扣分，
+        // 等价于多扣一档。
         jdbcTemplate.update(
-                "UPDATE account_credit SET credit_score = GREATEST(0, credit_score - 20), "
-                        + "level = CASE WHEN credit_score - 20 < 60 THEN 0 ELSE CASE WHEN credit_score - 20 < 80 THEN 1 ELSE 2 END END, "
+                "UPDATE account_credit SET "
+                        + "level = CASE WHEN credit_score - 20 < 60 THEN 0 "
+                        + "             ELSE CASE WHEN credit_score - 20 < 80 THEN 1 ELSE 2 END END, "
+                        + "credit_score = GREATEST(0, credit_score - 20), "
                         + "strict_queue_flag = 1, updated_at = ? WHERE user_id = ?",
                 java.sql.Timestamp.from(Instant.now()), userId);
     }
@@ -126,13 +130,16 @@ public class AccountCreditRepository {
     /**
      * 申诉翻案：加分（封顶 100）并据分重算等级。
      *
-     * <p>注意：<b>不修改</b> {@code strict_queue_flag}（该标记当前无自动解除路径），
-     * 与 {@link #deduct} 存在同一类赋值顺序缺陷（留待一并修正）。</p>
+     * <p>注意：<b>不修改</b> {@code strict_queue_flag}（该标记当前无自动解除路径，见 P0-5）。
+     * 与 {@link #deduct} 同类的赋值顺序缺陷已一并修正（level CASE 前置）。</p>
      */
     public void restore(long userId) {
+        // 修正等级滞后：level CASE 前置，引用「未改动前的原始分 + 10」判级。
         jdbcTemplate.update(
-                "UPDATE account_credit SET credit_score = LEAST(100, credit_score + 10), "
-                        + "level = CASE WHEN LEAST(100, credit_score + 10) < 60 THEN 0 ELSE CASE WHEN LEAST(100, credit_score + 10) < 80 THEN 1 ELSE 2 END END, "
+                "UPDATE account_credit SET "
+                        + "level = CASE WHEN LEAST(100, credit_score + 10) < 60 THEN 0 "
+                        + "             ELSE CASE WHEN LEAST(100, credit_score + 10) < 80 THEN 1 ELSE 2 END END, "
+                        + "credit_score = LEAST(100, credit_score + 10), "
                         + "updated_at = ? WHERE user_id = ?",
                 java.sql.Timestamp.from(Instant.now()), userId);
     }
