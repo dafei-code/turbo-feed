@@ -16,6 +16,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -196,7 +198,13 @@ public class MediaReviewService {
      *
      * <p>投递时间线的条件是「<b>本次调用真的完成了流转</b>」，而不是「结果状态是 APPROVED」：
      * 若管理员的点击与异步先发后审撞在一起，CAS 只有一方命中，落空的一方不得再投递一次。</p>
+     *
+     * <p><b>事务与 MQ 顺序（P0-4）</b>：整段包 {@code @Transactional}，使「状态 CAS 翻转 +
+     * 新人观察期计数」原子提交；时间线投递注册到事务 {@code afterCommit}——仅当 DB 真正提交成功
+     * 后才发 MQ/HTTP，杜绝「消息已发但事务回滚」导致时间线裸奔、以及「状态/计数部分提交」的分裂。
+     * 投递本身失败（事务已提交不可回滚）属 fail-open 残余，归 P0-3 outbox 补偿。</p>
      */
+    @Transactional(rollbackFor = Exception.class)
     public MediaStatus reviewByMediaId(String mediaId, boolean approved) {
         long userId = parseUserId(mediaId);
         ReviewOutcome outcome = review(mediaId, userId, approved);
@@ -204,7 +212,19 @@ public class MediaReviewService {
             MediaItem post = asTimelinePost(mediaRepository.findMedia(mediaId, userId), userId);
             if (post != null) {
                 CreditLevel level = accountCreditService.ensure(userId);
-                feedTimelinePublisher.append(post, level.poolLevel());
+                // 仅事务提交后投递时间线：DB 回滚则绝不发布，避免「状态未落库却已进公域」的孤儿。
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        try {
+                            feedTimelinePublisher.append(post, level.poolLevel());
+                        } catch (Exception e) {
+                            // 事务已提交（内容已可见），时间线投递失败属 fail-open 残余，待 P0-3 outbox 补偿。
+                            log.error("审核通过但时间线投递失败（fail-open，待 outbox 补偿）: mediaId={}, postId={}",
+                                    mediaId, post.postId(), e);
+                        }
+                    }
+                });
             }
             // 人工通过计数：新人观察期据此解除。只统计人工路径——先发后审的自动通过不计入，
             // 否则新号第一帖上传即把自己顶出观察期，观察期形同虚设。
