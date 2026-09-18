@@ -51,8 +51,8 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        // RBAC 权限拦截：对 /api/admin/** 按 @RequirePermission 注解（或兜底 CONTENT_REVIEW）
-        // 做角色鉴权——审核员(REVIEWER)与系统管理员(ADMIN)可进审核工作台，普通用户(USER)一律 40301。
+        // RBAC 权限拦截：对 /api/admin/** 按 @RequirePermission 注解做角色鉴权；
+        // 未声明注解的端点一律拒绝（deny-by-default），审核员(REVIEWER)与系统管理员(ADMIN)仅能进已声明权限的端点，普通用户(USER)一律 40301。
         // 路径匹配走 Ant 风格，仅覆盖 /api/admin/**，不影响普通业务接口（/api/media/** 仅要求登录态）。
         // 注意：不再注册 AdminAuthInterceptor（其仅放行 ADMIN，会挡住审核员），鉴权统一收口到 PermissionInterceptor。
         registry.addInterceptor(permissionInterceptor)

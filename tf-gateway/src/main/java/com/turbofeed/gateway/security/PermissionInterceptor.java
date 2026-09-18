@@ -1,5 +1,7 @@
 package com.turbofeed.gateway.security;
 
+import com.turbofeed.gateway.exception.BizException;
+import com.turbofeed.shared.result.ErrorCode;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -8,7 +10,8 @@ import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
- * 权限拦截器：对受保护接口按 {@link RequirePermission} 注解（或兜底默认权限）做角色鉴权。
+ * 权限拦截器：对受保护接口按 {@link RequirePermission} 注解做角色鉴权；
+ * 未声明注解的管理端点一律拒绝（deny-by-default），强制显式声明权限。
  *
  * <p><b>为什么用拦截器而非 @PreAuthorize</b>：项目未引入 Spring Security，鉴权链由
  * {@link JwtAuthenticationFilter}（Servlet Filter）+ ThreadLocal {@link UserContextHolder}
@@ -34,7 +37,9 @@ public class PermissionInterceptor implements HandlerInterceptor {
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             return true;
         }
-        // 方法级 @RequirePermission 优先；缺省（/api/admin/** 兜底）要求内容审核权限。
+        // 方法级 @RequirePermission 优先；缺省（未声明注解）一律拒绝（deny-by-default）。
+        // 旧实现兜底为 CONTENT_REVIEW，导致「漏标注解的 admin 端点」可被审核员(REVIEWER)进入，
+        // 属可利用越权面；改为显式拒绝，强制每个 /api/admin/** 端点声明所需权限后才放行。
         Permission[] required = null;
         if (handler instanceof HandlerMethod hm) {
             RequirePermission ann = hm.getMethodAnnotation(RequirePermission.class);
@@ -43,7 +48,8 @@ public class PermissionInterceptor implements HandlerInterceptor {
             }
         }
         if (required == null || required.length == 0) {
-            required = new Permission[]{ Permission.CONTENT_REVIEW };
+            throw new BizException(ErrorCode.FORBIDDEN,
+                    "管理端点未声明 @RequirePermission：必须显式声明所需权限后才可放行");
         }
         // 匿名 -> UNAUTHORIZED；权限不足 -> FORBIDDEN；其余放行。
         // 异常由 GlobalExceptionHandler 翻译为 Result，不在此自行写响应。
