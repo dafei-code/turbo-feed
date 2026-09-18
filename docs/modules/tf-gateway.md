@@ -283,7 +283,7 @@ upload(files[], caption, requestId)     @SentinelResource 机器维度限流（�
 | `turbofeed.media.max-batch-count` | 9 | **单次上传张数上限（一帖多图）** |
 | `turbofeed.media.public-url-base` | http://127.0.0.1:9000/turbo-feed-media/ | URL 拼接基址（指向对象存储 / CDN；bucket 需匿名可读，否则浏览器 403） |
 | `turbofeed.media.storage` | minio | 存储实现：`minio` / `local` / `placeholder`（三者互斥装配） |
-| `turbofeed.media.minio.*` | endpoint/accessKey/secretKey/bucket | 对象存储连接（**开发期凭据硬编码，生产改 ENV 注入**） |
+| `turbofeed.media.minio.*` | endpoint/accessKey/secretKey/bucket | 对象存储连接（**accessKey/secretKey 已外部化，仅 ENV 注入，缺失即启动失败**） |
 | `turbofeed.media.local-dir` | ./data/media | `storage=local` 时的落盘根目录 |
 | `turbofeed.media.processing-enabled` | false | 图片处理链开关（Decorator：缩略图） |
 | `turbofeed.media.rate-limit.thread` / `.qps` | 20 / 100 | 上传机器维度限流（Sentinel） |

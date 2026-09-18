@@ -112,7 +112,7 @@ java -jar tf-gateway/target/tf-gateway-0.1.0-SNAPSHOT.jar
 ## 5. 生产前必改清单
 
 - [x] `TURBOFEED_JWT_SECRET`：已外部化（仓库内**零字面量**，缺失即启动失败）；部署时由密钥管理注入 ≥32 字符高熵值，轮换会使旧令牌立即失效，需配合灰度
-- [ ] `turbofeed.media.minio.access-key / secret-key`：从默认 `minioadmin` 改为 ENV / 密钥管理注入
+- [x] `turbofeed.media.minio.access-key / secret-key`：已外部化（仓库内**零字面量**，缺省即启动失败，见 `MinioStorageClient#requireCredentials`）；部署时由环境变量 `TURBOFEED_MINIO_ACCESS_KEY` / `TURBOFEED_MINIO_SECRET_KEY` 注入
 - [ ] `TURBOFEED_REDIS_PASSWORD` / `TURBOFEED_SNOWFLAKE_*`：由部署清单注入，多实例逐实例取不同雪花值
 - [ ] `turbofeed.media.public-url-base`：改指真实对象存储 / CDN 域名
 - [ ] `turbofeed.media.review.auto-pass` 确认为 `false`；按需接入云内容安全（`moderation-mode=cloud`）

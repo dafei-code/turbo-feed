@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -80,6 +81,7 @@ public class MinioStorageClient implements MediaStorageClient, InitializingBean 
             synchronized (this) {
                 if (!initialized) {
                     MediaProperties.Minio m = properties.getMinio();
+                    requireCredentials(m);   // P0-1：启动期校验凭据外部化，缺失即启动失败
                     client = MinioClient.builder()
                             .endpoint(m.getEndpoint())
                             .credentials(m.getAccessKey(), m.getSecretKey())
@@ -91,6 +93,20 @@ public class MinioStorageClient implements MediaStorageClient, InitializingBean 
             }
         }
         return client;
+    }
+
+    /**
+     * 凭据外部化校验（P0-1）：accessKey/secretKey 必须来自环境变量注入，禁止任何仓库默认字面量。
+     * 缺失即抛 {@link IllegalStateException} 导致启动失败——因本方法由 {@link #afterPropertiesSet()}
+     * 在 Spring Context refresh 期调用，把「裸奔用默认 minioadmin 连 MinIO」的事故在启动期拦下，
+     * 而非等首次上传才报 403/鉴权错。仅 {@code storage=minio} 激活时触发，local 存储不受影响。
+     */
+    private void requireCredentials(MediaProperties.Minio m) {
+        if (!StringUtils.hasText(m.getAccessKey()) || !StringUtils.hasText(m.getSecretKey())) {
+            throw new IllegalStateException(
+                    "MinIO accessKey/secretKey 未配置：请通过环境变量 TURBOFEED_MINIO_ACCESS_KEY / "
+                            + "TURBOFEED_MINIO_SECRET_KEY 注入，禁止在仓库默认配置中硬编码凭据。");
+        }
     }
 
     /**
