@@ -11,7 +11,9 @@ docs/
 ├── architecture/             # 架构层文档
 │   ├── overview.md           # 系统总体架构：模块 / 通信 / 技术栈 / 关键决策
 │   ├── service-split.md      # 微服务拆分方案：部署单元 / 端口 / 通信矩阵
-│   └── sharding.md           # 分库分表：分片键选型 / 6 张逻辑表 / 演进与踩坑
+│   ├── sharding.md           # 分库分表：分片键选型 / 6 张逻辑表 / 演进与踩坑
+│   ├── moderation-design.md  # 审核体系设计蓝图（P0~P3，**规划中未实施**）
+│   └── content-security-design.md # 内容安全（文本）：五层架构 / 归一化 / 白名单（**S1 已落地，S2+ 规划**）
 ├── modules/                  # 模块级技术文档（与 Maven 模块一一对应）
 │   ├── tf-gateway.md         # 网关：认证与 RBAC / 一帖多图上传 / 审核状态机 / 分片 / 配置
 │   ├── tf-counter.md         # 计数服务：现状（模块骨架）+ 设计蓝图
@@ -32,6 +34,8 @@ docs/
 | 新接手工程师 | [架构总览](architecture/overview.md) → [tf-gateway](modules/tf-gateway.md) → [API](api/gateway-api.md) → 本地跑起来见 [部署](ops/deployment.md) |
 | 前端 / 联调 | [API 文档](api/gateway-api.md)（含登录换取 JWT 与上传示例） |
 | 运维 / 部署 | [部署文档](ops/deployment.md) → [服务拆分](architecture/service-split.md) |
+| 审核 / 产品 | [审核体系蓝图](architecture/moderation-design.md)（P0~P3，**规划中**）→ [tf-gateway §4 审核状态机](modules/tf-gateway.md)（现状） |
+| 内容安全 | [内容安全设计](architecture/content-security-design.md)（文本侧：五层架构 / 归一化抗绕过 / 白名单；**S1 已落地**） |
 | 查历史变更 | [changelog 目录](changelog/)（倒序看编号） |
 
 ## 文档维护约定

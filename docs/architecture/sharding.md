@@ -16,7 +16,7 @@ UGC 场景元数据增速 ≈ 用户量 × 人均写入量。单表在千万级�
 |---|---|---|
 | `user` | `id`（雪花 Long） | 它是主键，单行操作（按 id 查/改/删）精准命中单分片；雪花高位是时间、低位含序列，整体分布均匀，`hash(id) % N` 分布好；与服务内身份体系一致（JWT 的 `userId` 即此 `id`） |
 | `media` | `user_id` | 「我的上传」`WHERE user_id = ?` 是唯一高频路径，**精准命中单分片**；且与 `user` 同片（同用户的行同库同表），便于按用户聚合 |
-| `account_credit` | `user_id` | 与 `user` 同片；`ensure` / `deduct` / `restore` 全部 `WHERE user_id = ?` 单分片命中，信用扣减不跨片 |
+| `account_credit` | `user_id` | 与 `user` 同片；`ensure` / `deduct` / `restore` / `onHumanApproved` 全部 `WHERE user_id = ?` 单分片命中，信用扣减不跨片。加列须**逐张物理表**执行（`account_credit_0.._3` 共 4 张，分落两库） |
 | `report` | `media_id` | 举报的写入与处理（`insert(media_id)` / `resolve(WHERE media_id=?)`）均按 `media_id` 定位；管理员待处理列表按 `status` 查为**广播**，低频可接受 |
 | `appeal` | `media_id` | 同 `report`，申诉单与举报单按同一维度聚集，便于按内容聚合查看 |
 | `comment` | `media_id` | 「读某条内容下所有评论」单分片命中，**不依赖 media 所在库**即可定位评论——评论分片键与 media 分片键（`user_id`）**正交**，这是刻意的：评论独立成包、独立读写路径，不与内容耦合 |

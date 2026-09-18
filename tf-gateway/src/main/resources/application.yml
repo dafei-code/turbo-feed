@@ -57,9 +57,14 @@ server:
   port: 8080
 
 turbofeed:
-  # JWT 签发配置；secret 生产必须替换为密钥管理注入的高熵值
+  # JWT 签发配置
   jwt:
-    secret: turbofeed-demo-secret-change-me
+    # 签名密钥：**刻意无默认值**（同 snowflake 的实例标识），未注入即启动失败。
+    # 原因（P0）：密钥一旦有兜底默认值，生产漏配就会静默使用仓库里公开的 demo 串，
+    # 攻击者可直接签发任意 userId + role=ADMIN 的令牌。两道保障缺一不可：
+    #   ① 此处 `${TURBOFEED_JWT_SECRET:}` 不允许出现字面量；
+    #   ② JwtProperties 的字段同样无默认值（否则占位符缺失时会回落到字段初始值）。
+    secret: ${TURBOFEED_JWT_SECRET:}
     expire-seconds: 86400
   # 雪花 ID 的实例标识（各 0~31）。多实例部署必须逐实例注入不同取值：
   # 同一组取值会让两个实例在同一毫秒生成相同的 ID，user 表主键插入直接冲突（注册失败）。
@@ -147,14 +152,52 @@ turbofeed:
       #   pass = AutoPassModeration 占位桩（恒 APPROVED，仅机审不拦截，下游仍卡人审闸）
       #   ai   = AiContentModeration（Ollama 本地视觉模型，已卸载；保留为「类抖音机器初审」后续接入点）
       #   cloud（预留）= 将来接云内容安全 API（腾讯云/阿里云）做类抖音机器初审，审核主流程零改动
-      # 注意：无论哪种机审，默认策略都是「驳回即拦 · 通过仍人审」，机审不直接放行到公域。
+      # 注意：机审不直接决定公域可见性——机审通过后<b>按账号信用分级</b>分流：
+      #   · L0（新人观察期 / 违规加严）→ 先审后放：停在 PENDING 等人工终裁
+      #   · L1 / L2（正常 / 高信用）→ 先发后审：直接 APPROVED 进对应流量池，靠举报与人审兜底
+      # 机审 REJECTED 则立即拦截，不进人审队列。
       # 当前 MVP：机审初筛用 rule（本地规则引擎），视觉语义识别留 cloud（需云 API key）。
       moderation-mode: rule
-      banned-keywords:
-        - "涉黄"
-        - "暴恐"
-        - "涉政"
-        - "赌博"
+      # 新人观察期解除阈值：新注册账号初始「先审后放」，人工审核累计通过该帖数后自动转正常分级
+      # （只统计人工通过，不含先发后审的自动通过）
+      new-user-approve-threshold: 3
+  # ==================== 内容安全（文本审核）====================
+  # 统一入口：ContentSecurityService（场景 NICKNAME / CAPTION / COMMENT）。
+  # 为什么独立于 media.review：昵称、评论都不是「媒体」的事——挂在 media 下会让后来者
+  # 以为只有上传才需要检测，而历史上昵称正因如此完全没被过滤。
+  # 本段刻意不含任何具体词条：词条是运营数据（sensitive_word / sensitive_whitelist 表 +
+  # admin 接口维护），把词写进默认配置等于让「克隆即跑」自带一份不该公开的名单。
+  content-security:
+    # 总开关。关闭后所有检测直接放行——仅用于「怀疑本模块误杀」时的快速回滚。
+    enabled: true
+    # 启动时若词库为空是否直接失败：默认 false 以保「克隆即跑」（本地开发/测试常常不需要词库）；
+    # 生产部署务必置 true，把「忘了导词库」挡在部署阶段——否则词库为空时过滤静默失效、无人察觉。
+    fail-startup-on-empty-dictionary: ${TURBOFEED_FAIL_ON_EMPTY_DICT:false}
+    # 各场景长度上限（字符数）。必须与 DB 列宽、前端输入上限保持同一事实源：
+    #   NICKNAME 32   — 昵称是全站公开展示位，短且必须严（抖音昵称上限 24）
+    #   CAPTION  2048 — 对齐 media.caption VARCHAR(2048)；否则超长在 DB 严格模式下抛 500 级错误而非友好参数错误
+    #   COMMENT  1024 — 原 CommentService.MAX_CONTENT_LEN，现归口于此
+    scene-max-length:
+      NICKNAME: 32
+      CAPTION: 2048
+      COMMENT: 1024
+    # 未单独配置长度的场景的兜底上限；同时限制 AC 扫描成本（防超长文本拖慢写路径 P99）
+    max-text-length: 4096
+    # 归一化（抗绕过）：NFKC 折叠全角/兼容字符 → 剥离不可见字符（恒开，无开关）→ 剥离分隔符 → 小写 → 繁简折叠
+    normalize:
+      enabled: true
+      # 剥分隔符是误杀率最高、收益也最高的一步（「涉-黄」「涉 黄」这类穿插都能拦下）；
+      # 代价是「顺 丰 车」可能被拼成敏感词——出口是白名单，二者必须配合使用。
+      strip-separators: true
+      # 只覆盖常用繁体字表（不是完整 OpenCC 转换）；未覆盖的生僻繁体仍可绕过，属已知边界。
+      fold-traditional: true
+    # 白名单（误杀治理出口）：sensitive_whitelist 表 + admin 接口维护，默认开启。
+    whitelist-enabled: true
+    # 分类 → 处置动作。留空 = 所有分类统一走 default-action（与改造前「命中即拒」行为一致）。
+    # 运营明确策略后再逐条配置，例如「广告类只降权不拦截」→ AD: LIMIT
+    # 取值：PASS / LIMIT（放行+标降权，当前等同 PASS）/ REVIEW（转人审，当前等同 BLOCK）/ BLOCK
+    category-actions: {}
+    default-action: BLOCK
   # MQ（RocketMQ）事件总线：默认关闭，未部署 RocketMQ 时也能「克隆即跑」。
   # 开启方式见 application-mq.yml（--spring.profiles.active=mq），NameServer 地址可用
   # TURBOFEED_ROCKETMQ_NAME_SERVER 覆盖。

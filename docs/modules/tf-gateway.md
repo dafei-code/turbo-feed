@@ -36,7 +36,14 @@ com.turbofeed.gateway
 │   ├── processing/             #   图片处理链（Decorator）：ImageProcessor / ThumbnailProcessor
 │   ├── ratelimit/              #   用户维度限流（Redis 时间窗）+ LocalFallbackRateLimiter
 │   ├── idempotency/            #   UploadIdempotency：X-Request-Id 去重
-│   ├── moderation/             #   敏感词：AhoCorasick + SensitiveWordService（热加载）
+│   ├── moderation/             #   内容安全（文本）：五层架构，见 architecture/content-security-design.md
+│   │   ├── ContentSecurityService     #   ①统一入口 + ④决策层（长度/归一化/匹配/白名单/动作/计数）
+│   │   ├── ContentScene/ModerationAction/ContentVerdict/SensitiveWordHit  # ①契约层
+│   │   ├── TextNormalizer             #   ②预处理：NFKC→剥不可见→剥分隔符→小写→繁简（带下标回溯）
+│   │   ├── AhoCorasick                #   ③匹配：多模自动机（不可变快照，原子引用热切换）
+│   │   ├── SensitiveWordService        #   ③词库热加载（AC + 词→分类同一原子引用）
+│   │   ├── WhitelistService/Repository/Entry  # ④白名单（场景 × 主体两维度豁免）
+│   │   └── ContentSecurityProperties  #   turbofeed.content-security.*（不含任何词条）
 │   ├── validation/             #   上传校验责任链（模板方法 + 不可断链）
 │   │   ├── UploadValidation     #   校验上下文（格式写回 + 完成回调注册）
 │   │   ├── UploadValidator      #   抽象基类（模板方法：本校验 → next）
@@ -50,7 +57,7 @@ com.turbofeed.gateway
 │       ├── MediaReviewService  #   状态机入口 + 举报/申诉闭环（CAS 流转）
 │       ├── ContentModeration / ContentModerationRouter / RuleBasedModeration
 │       ├── AutoPassModeration / AiContentModeration   # 占位与预留实现
-│       └── credit/             #   AccountCreditService / CreditLevel（信用分级 L0/L1/L2）
+│       └── credit/             #   AccountCreditService / CreditLevel（信用分级 L0/L1/L2 + 新人观察期）
 ├── security/                   # 认证与授权基础设施
 │   ├── JwtUtil / JwtAuthenticationFilter / UserContext / UserContextHolder
 │   ├── Permission / Role        # RBAC：权限枚举 + 角色→权限映射
@@ -108,7 +115,8 @@ upload(files[], caption, requestId)     @SentinelResource 机器维度限流（�
  ├─ validationChain.validate()          责任链校验（见 §3.2）→ 返回上下文
  │   ├─ ConcurrentUploadValidator   环1：Redis SET NX EX 并发护栏
  │   └─ FileConstraintValidator     环2：批量数 → 空文件 → 大小 → Magic Number（格式写回）
- ├─ 敏感词：caption 走 Aho-Corasick，命中即 fail-closed 拒绝（42904）
+ ├─ 内容安全：caption 走 ContentSecurityService（场景 CAPTION：长度 → 归一化 → AC 匹配
+ │   → 白名单 → 分类动作），命中即 fail-closed 拒绝（42904）
  ├─ for each: storeOne(userId, file, format) → storageClient.store(...)
  │   └─ 中途任一张失败 → hardDeleteByPost 补偿清理已落库残行
  ├─ 落库整帖：N 条 media 行共享同一 postId，seq = 0..N-1
@@ -179,15 +187,23 @@ upload(files[], caption, requestId)     @SentinelResource 机器维度限流（�
  │    pass=AutoPassModeration（占位恒通过） / ai=AiContentModeration（预留，视觉模型）
  ├─ 机审 REJECTED → 整帖 REJECTED（不进人工队列）
  └─ 机审通过/降级 → 按账号信用分级分流：
-      L0（低信用/新号）→ 先审后放：留在 PENDING 等人审终裁
-      L1 / L2         → 先发后审：整帖直接 APPROVED，进对应流量池，靠举报/人审兜底
+      L0（新人观察期 / 违规加严 / 低信用）→ 先审后放：留在 PENDING 等人审终裁
+      L1 / L2（普通 / 高信用）           → 先发后审：整帖直接 APPROVED，进对应流量池，靠举报/人审兜底
 ```
 
-> ⚠️ **无信用记录的账号默认 L1**（`AccountCreditService.ensure`），因此新账号上传会被**自动放行**。
-> 这意味着即使 `turbofeed.review.auto-pass=false`，走 L1 路径的内容仍会「先发后审」——
-> 这正是与「异步先发后审」形成并发双写的来源（见下）。
+> ⚠️ **新账号默认走先审后放**（`0027` 起）：`AccountCreditRepository.ensure` 为新账号写入
+> `new_user_watch = 1`，`getLevel` 据此返回 **L0**，内容停在 PENDING 等人审。累计**人工**通过
+> `turbofeed.media.review.new-user-approve-threshold`（默认 3）帖后自动转正，之后按 `level` 正常分级。
+> 先发后审的自动通过**不计数**——否则新号第一帖上传就会把自己顶出观察期。
+>
+> **两条加严路径分列存储**：`strict_queue_flag`（违规加严，无自动解除）与 `new_user_watch`
+> （新人观察期，达标自动解除）**不复用同一列**，否则「新人转正」会顺手解封被处罚账号。
+>
+> 历史行为（`0027` 之前）为「无信用记录默认 L1 → 新号内容直接进公域」，与设计意图相反，已修正；
+> 背景、取舍与端到端验证见 [`docs/changelog/0027`](../changelog/0027-new-user-watch-period.md)。
 
 **管理员审核入口**：`reviewByMediaId → review(mediaId, userId, approved) → ReviewOutcome(status, transitioned)`。
+人工通过分支额外调用 `AccountCreditService#onHumanApproved` 累加新人观察期计数（**只有人工路径计数**）。
 
 - **CAS 流转**：`UPDATE media SET status=? WHERE user_id=? AND post_id=? AND status=期望前置态`，
   用影响行数判定是否真正流转；0 行 = 已被另一条路径流转 → **幂等返回，且不重复投递时间线**；
@@ -259,7 +275,7 @@ upload(files[], caption, requestId)     @SentinelResource 机器维度限流（�
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `server.port` | 8080 | 服务端口 |
-| `turbofeed.jwt.secret` | demo 值 | **生产必须替换**为密钥管理注入的高熵值 |
+| `turbofeed.jwt.secret` | `${TURBOFEED_JWT_SECRET:}` | **无默认值，缺失或长度 < 32 即启动失败**（`JwtProperties#requireSecret`）。HS256 是对称算法，持有密钥即可签发任意 userId + role，故拒绝任何兜底字面量。类字段亦无默认值——否则占位符缺失时会回落到字段初始值，等于没改 |
 | `turbofeed.jwt.expire-seconds` | 86400 | 令牌有效期（秒） |
 | `turbofeed.snowflake.worker-id` / `datacenter-id` | `${TURBOFEED_SNOWFLAKE_WORKER_ID:}` 等 | **无默认值，缺失即启动失败**（`SnowflakeConfig#requireInstanceId`）。取值 0~31，多实例必须逐实例不同，否则同毫秒生成相同 ID 撞主键 |
 | `turbofeed.media.key-prefix` | media | 对象 key 前缀（`media/{userId}/{uuid}.{ext}`） |
@@ -276,6 +292,13 @@ upload(files[], caption, requestId)     @SentinelResource 机器维度限流（�
 | `turbofeed.media.review.auto-pass` | false | **演示占位**：机审结果直接放行（仅本地联调）。生产务必 false |
 | `turbofeed.media.review.moderation-mode` | rule | 机审策略：`rule` / `pass` / `ai`（预留）/ `cloud`（预留） |
 | `turbofeed.media.review.banned-keywords` | 涉黄/暴恐/涉政/赌博 | 本地规则引擎关键词 |
+| `turbofeed.media.review.new-user-approve-threshold` | 3 | 新人观察期解除阈值：新号累计**人工**通过该帖数后转正常分级（先发后审的自动通过不计入） |
+| `turbofeed.content-security.enabled` | true | 文本检测总开关（怀疑误杀时快速回滚用） |
+| `turbofeed.content-security.fail-startup-on-empty-dictionary` | `${TURBOFEED_FAIL_ON_EMPTY_DICT:false}` | 词库为空时是否拒绝启动；默认 false 保"克隆即跑"，**生产应置 true**（否则过滤静默失效无人察觉） |
+| `turbofeed.content-security.scene-max-length` | NICKNAME 32 / CAPTION 2048 / COMMENT 1024 | 场景长度上限，与 DB 列宽、前端上限同一事实源 |
+| `turbofeed.content-security.normalize.*` | 均 true | 归一化：总开关 / 剥分隔符 / 繁简折叠（抗绕过，见设计文档 §4） |
+| `turbofeed.content-security.whitelist-enabled` | true | 白名单（误杀治理出口；**剥分隔符必须与其配合使用**） |
+| `turbofeed.content-security.category-actions` / `default-action` | `{}` / BLOCK | 分类 → 动作；留空即统一 BLOCK（与改造前行为一致）。`REVIEW`/`LIMIT` 当前分别等价 BLOCK/PASS |
 | `turbofeed.feed.engine.base-url` | http://localhost:8083 | 引擎地址（当前**直连**，无注册中心） |
 | `turbofeed.feed.engine.connect-timeout` / `read-timeout` | 500ms / 2s | **同步调用必须设超时**：引擎故障时无限等待会耗尽网关线程池（雪崩入口） |
 | `turbofeed.feed.degraded-mode` | empty | 引擎不可用时：`empty`（返回空 + WARN，**拒绝跨分片广播**，生产必须）/ `local-scan`（回源广播，仅演示） |
