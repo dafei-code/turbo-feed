@@ -25,9 +25,24 @@ public class AccountCreditService {
         return accountCreditRepository.getLevel(userId);
     }
 
-    /** 读取当前等级（strict_queue 强制降 L0）。 */
+    /** 读取当前等级（违规加严 or 新人观察期都会强制降 L0）。 */
     public CreditLevel getLevel(long userId) {
         return accountCreditRepository.getLevel(userId);
+    }
+
+    /**
+     * 人审通过一帖（只能由人工审核路径调用）：累加新人观察期计数，达阈值即转正常分级。
+     *
+     * <p>阈值来自 {@code turbofeed.media.review.new-user-approve-threshold}，由调用方传入，
+     * 便于测试注入与后续按环境调整。返回是否在本次调用中解除了观察期。</p>
+     */
+    public boolean onHumanApproved(long userId, int threshold) {
+        boolean released = accountCreditRepository.onHumanApproved(userId, threshold);
+        if (released) {
+            log.info("新人观察期结束（人审通过达阈值 {}）: userId={}, level={}",
+                    threshold, userId, getLevel(userId));
+        }
+        return released;
     }
 
     /** 违规确认（举报成立 / 人审驳回）：扣分降级，并置加严队列。 */

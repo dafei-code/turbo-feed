@@ -12,11 +12,21 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * 账号信用仓储（account_credit 表，单表，落在 ds_0；分片键 user_id 仅用于与 user 同源查询）。
+ * 账号信用仓储（account_credit 表）。
  *
- * <p><b>信用分模型</b>（MVP 简化，可后续细化）：满分 100，新账号默认 L1(100)；
- * 违规确认（举报成立/人审驳回）→ 扣 20，低于 60 降 L0、低于 80 维持 L1、≥80 升 L2；
- * 申诉翻案 → 加 10（封顶 100）。近 30 天有下架 → strictQueue=true（所有内容按 L0 先审后放）。</p>
+ * <p><b>存储形态</b>：{@code account_credit} 是 ShardingSphere {@code autoTables} 逻辑表，
+ * 分片键 {@code user_id}（与 user / media 同键同算法），物理上是 4 张表——
+ * ds_0 → {@code account_credit_0/_2}、ds_1 → {@code account_credit_1/_3}。
+ * 物理表按「全局连续编号」命名（不是每库各 {@code _0/_1}），加列/建表须逐物理表执行。</p>
+ *
+ * <p><b>信用分模型</b>（MVP 简化，可后续细化）：满分 100；新注册账号默认 100 分 / L1，
+ * 但<b>初始处于新人观察期</b>（{@code new_user_watch=1} → 按 L0 口径先审后放），
+ * 人审通过 N 帖后转正常分级。违规确认（举报成立 / 人审驳回）→ 扣 20，
+ * 低于 60 降 L0、低于 80 维持 L1、≥80 升 L2；申诉翻案 → 加 10（封顶 100）。</p>
+ *
+ * <p><b>两条加严路径刻意隔离</b>：{@code strict_queue_flag}（违规加严）与
+ * {@code new_user_watch}（新人观察期）语义不同，<b>不复用同一列</b>——否则「新人转正」
+ * 会顺手把被处罚账号一并解封。{@link #getLevel} 只要任一为真即按 L0 口径处理。</p>
  */
 @Slf4j
 @Repository
@@ -25,11 +35,17 @@ public class AccountCreditRepository {
 
     private final JdbcTemplate jdbcTemplate;
 
-    /** 确保信用行存在（不存在插默认 L1/100）；幂等。 */
+    /**
+     * 确保信用行存在（不存在则插入：100 分 / L1，且<b>进入新人观察期</b>）；幂等。
+     *
+     * <p>{@code ON DUPLICATE KEY UPDATE} 只刷新 {@code updated_at}：存量账号的等级与加严标记
+     * 不受影响，避免本策略上线时把历史账号整体打回「先审后放」。</p>
+     */
     public void ensure(long userId) {
         jdbcTemplate.update(
-                "INSERT INTO account_credit (user_id, credit_score, level, strict_queue_flag, updated_at) "
-                        + "VALUES (?, 100, 1, 0, ?) "
+                "INSERT INTO account_credit (user_id, credit_score, level, strict_queue_flag, "
+                        + "new_user_watch, new_user_approved_count, updated_at) "
+                        + "VALUES (?, 100, 1, 0, 1, 0, ?) "
                         + "ON DUPLICATE KEY UPDATE updated_at = VALUES(updated_at)",
                 userId, java.sql.Timestamp.from(Instant.now()));
     }
@@ -42,19 +58,63 @@ public class AccountCreditRepository {
         if (codes.isEmpty()) {
             return CreditLevel.L1;
         }
-        boolean strict = isStrict(userId);
         CreditLevel base = CreditLevel.fromCode(codes.get(0));
-        return strict ? CreditLevel.L0 : base;
+        return isStrict(userId) ? CreditLevel.L0 : base;
     }
 
+    /**
+     * 是否处于「L0 口径」的加严状态：<b>违规加严</b>（{@code strict_queue_flag}）
+     * 或 <b>新人观察期</b>（{@code new_user_watch}）任一命中即为真。
+     */
     private boolean isStrict(long userId) {
-        List<Integer> flags = jdbcTemplate.query(
-                "SELECT strict_queue_flag FROM account_credit WHERE user_id = ?",
-                (rs, rn) -> rs.getInt("strict_queue_flag"), userId);
-        return !flags.isEmpty() && flags.get(0) == 1;
+        List<Boolean> flags = jdbcTemplate.query(
+                "SELECT (strict_queue_flag = 1 OR new_user_watch = 1) AS strict "
+                        + "FROM account_credit WHERE user_id = ?",
+                (rs, rn) -> rs.getBoolean("strict"), userId);
+        return !flags.isEmpty() && Boolean.TRUE.equals(flags.get(0));
     }
 
-    /** 违规确认：扣分并据分重算等级；近 30 天有下架置 strict_queue。 */
+    /**
+     * 人审通过一帖：累加观察期计数，达到阈值即解除新人观察期（之后按分数正常分级）。
+     *
+     * <p><b>只应由人工审核路径调用</b>（{@code MediaReviewService#reviewByMediaId}）：
+     * 若把先发后审的自动通过也计数，新号第一帖上传后就会把自己顶出观察期，观察期形同虚设。</p>
+     *
+     * <p><b>违规加严不会被本方法解除</b>（{@code strict_queue_flag} 不动）：被处罚账号需要
+     * 独立的申诉/时间窗解除策略。</p>
+     *
+     * <p><b>SQL 赋值顺序说明</b>：MySQL 单表 UPDATE 的赋值<b>从左到右求值，后面的赋值能看到
+     * 前面已改的新值</b>（实测：{@code SET a = a+1, b = a} 得到 {@code b = a+1}）。
+     * 因此这里把依赖「旧计数」的 {@code new_user_watch} 放在前面，计数自增放后面——
+     * 反过来写会导致阈值判断用上自增后的值（差 1 帖）。</p>
+     *
+     * @return 本次调用是否解除了新人观察期
+     */
+    public boolean onHumanApproved(long userId, int threshold) {
+        int rows = jdbcTemplate.update(
+                "UPDATE account_credit SET "
+                        + "new_user_watch = CASE WHEN new_user_approved_count + 1 >= ? THEN 0 ELSE new_user_watch END, "
+                        + "new_user_approved_count = new_user_approved_count + 1, "
+                        + "updated_at = ? WHERE user_id = ?",
+                threshold, java.sql.Timestamp.from(Instant.now()), userId);
+        if (rows == 0) {
+            return false;
+        }
+        Integer watching = jdbcTemplate.queryForObject(
+                "SELECT new_user_watch FROM account_credit WHERE user_id = ?", Integer.class, userId);
+        return watching != null && watching == 0;
+    }
+
+    /**
+     * 违规确认：扣分并据分重算等级；并置 {@code strict_queue_flag}（<b>只增不减</b>，
+     * 目前无自动解除路径，解除策略待定）。
+     *
+     * <p>⚠️ <b>已知缺陷（本次未改，已记录）</b>：本方法先改 {@code credit_score} 再用
+     * {@code credit_score - 20} 算等级，而 MySQL 的赋值是从左到右求值——后面的 CASE 看到的是
+     * <b>已扣分后的</b>分数，等价于按「扣 40 分」判级，导致等级滞后一档
+     * （实测：100 → 80 分时等级算成 L1，按模型应为 L2）。{@code restore()} 有同类问题。
+     * 修正方式是把 CASE 放到分数赋值<b>之前</b>；因涉及行为变更，另行确认后处理。</p>
+     */
     public void deduct(long userId) {
         jdbcTemplate.update(
                 "UPDATE account_credit SET credit_score = GREATEST(0, credit_score - 20), "
@@ -63,7 +123,12 @@ public class AccountCreditRepository {
                 java.sql.Timestamp.from(Instant.now()), userId);
     }
 
-    /** 申诉翻案：加分（封顶 100）并据分重算等级；连续翻案可解除 strict_queue。 */
+    /**
+     * 申诉翻案：加分（封顶 100）并据分重算等级。
+     *
+     * <p>注意：<b>不修改</b> {@code strict_queue_flag}（该标记当前无自动解除路径），
+     * 与 {@link #deduct} 存在同一类赋值顺序缺陷（留待一并修正）。</p>
+     */
     public void restore(long userId) {
         jdbcTemplate.update(
                 "UPDATE account_credit SET credit_score = LEAST(100, credit_score + 10), "
@@ -75,12 +140,15 @@ public class AccountCreditRepository {
     /** 全量读取（仅调试/巡检用）。 */
     public List<AccountCredit> findAll() {
         return jdbcTemplate.query(
-                "SELECT user_id, credit_score, level, strict_queue_flag, updated_at FROM account_credit",
+                "SELECT user_id, credit_score, level, strict_queue_flag, new_user_watch, "
+                        + "new_user_approved_count, updated_at FROM account_credit",
                 (ResultSet rs, int rn) -> new AccountCredit(
                         rs.getLong("user_id"),
                         rs.getInt("credit_score"),
                         CreditLevel.fromCode(rs.getInt("level")),
                         rs.getInt("strict_queue_flag") == 1,
+                        rs.getInt("new_user_watch") == 1,
+                        rs.getInt("new_user_approved_count"),
                         rs.getTimestamp("updated_at").toInstant()));
     }
 }

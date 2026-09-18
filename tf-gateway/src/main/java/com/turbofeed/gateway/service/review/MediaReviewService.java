@@ -206,6 +206,9 @@ public class MediaReviewService {
                 CreditLevel level = accountCreditService.ensure(userId);
                 feedTimelinePublisher.append(post, level.poolLevel());
             }
+            // 人工通过计数：新人观察期据此解除。只统计人工路径——先发后审的自动通过不计入，
+            // 否则新号第一帖上传即把自己顶出观察期，观察期形同虚设。
+            accountCreditService.onHumanApproved(userId, properties.getReview().getNewUserApproveThreshold());
         }
         return outcome.status();
     }
