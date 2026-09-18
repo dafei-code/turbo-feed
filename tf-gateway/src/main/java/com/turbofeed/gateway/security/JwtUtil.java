@@ -41,9 +41,23 @@ public class JwtUtil {
         this(properties, Clock.systemUTC());
     }
 
-    /** 测试专用构造器：注入可控时钟。 */
+    /**
+     * 测试专用构造器：注入可控时钟。
+     *
+     * <p><b>构造即校验密钥</b>：此处调用 {@link JwtProperties#requireSecret()}。
+     * JwtUtil 是单例 bean，其构造器抛异常发生在 <b>context refresh 阶段</b>，
+     * 效果就是「应用拒绝启动」——而不是等到第一次签发/验签才在 {@link #hmac} 里
+     * 抛 {@link NullPointerException}。这是刻意的：<b>漏配密钥属于部署错误，
+     * 应该在部署阶段暴露，不该拖到运行期某一个请求上。</b></p>
+     *
+     * <p>不放在 {@code @PostConstruct} 里是因为 {@code @ConfigurationProperties} 的
+     * 属性绑定与 JSR-250 初始化回调的执行次序依赖 BeanPostProcessor 顺序，
+     * 构造器里校验则次序确定（属性必然已绑定完成）。</p>
+     */
     JwtUtil(JwtProperties properties, Clock clock) {
         this.properties = properties;
+        // 缺失/弱密钥在这里引爆：越过这一步即代表密钥可用
+        properties.requireSecret();
         this.clock = clock;
     }
 
