@@ -153,10 +153,10 @@ public class MediaProperties {
     public static class Minio {
         /** MinIO 服务地址（含协议与端口），如 http://127.0.0.1:9000 */
         private String endpoint = "http://127.0.0.1:9000";
-        /** Access Key（生产用环境变量/密钥管理注入，勿硬编码） */
-        private String accessKey = "";
-        /** Secret Key */
-        private String secretKey = "";
+        /** Access Key（必须由环境变量/密钥管理注入，无默认值，禁止硬编码，见 MinioStorageClient#requireCredentials） */
+        private String accessKey;
+        /** Secret Key（同上，无默认值） */
+        private String secretKey;
         /** 媒体桶名（应用启动时会预检，不存在则尝试创建） */
         private String bucket = "turbo-feed-media";
 
