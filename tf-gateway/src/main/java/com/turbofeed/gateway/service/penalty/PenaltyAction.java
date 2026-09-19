@@ -16,7 +16,9 @@ public enum PenaltyAction {
     /** 临时封禁。 */
     BAN_TEMP(4),
     /** 永久封禁。 */
-    BAN_PERM(5);
+    BAN_PERM(5),
+    /** 解除封禁（撤销 / 申诉翻案）。<b>非违规动作</b>，仅用于审计留痕。 */
+    LIFT(6);
 
     private final int code;
 
