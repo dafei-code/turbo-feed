@@ -15,6 +15,7 @@ import com.turbofeed.gateway.service.feed.FeedTimelinePublisher;
 import com.turbofeed.gateway.service.idempotency.UploadIdempotency;
 import com.turbofeed.gateway.service.moderation.ContentScene;
 import com.turbofeed.gateway.service.moderation.ContentSecurityService;
+import com.turbofeed.gateway.service.penalty.PenaltyService;
 import com.turbofeed.gateway.service.presign.PresignRequest;
 import com.turbofeed.gateway.service.presign.PresignResponse;
 import com.turbofeed.gateway.service.presign.UploadAccepted;
@@ -29,7 +30,6 @@ import com.turbofeed.gateway.service.validation.UploadValidationChain;
 import com.turbofeed.gateway.storage.MediaStorageClient;
 import com.turbofeed.gateway.util.CaptionMarkParser;
 import com.turbofeed.shared.result.ErrorCode;
-import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -78,7 +78,6 @@ import java.util.UUID;
  * <p>UGC 口径下上传成功仅代表受理，进入待审核态（PENDING），审核通过后才对前端可见。</p>
  */
 @Service
-@RequiredArgsConstructor
 public class MediaUploadService {
 
     private static final Logger log = LoggerFactory.getLogger(MediaUploadService.class);
@@ -100,6 +99,47 @@ public class MediaUploadService {
     private final ContentSecurityService contentSecurityService;
     private final UploadReservationStore reservationStore;
     private final MediaUploadFinalizer uploadFinalizer;
+    private final PenaltyService penaltyService;
+
+    /**
+     * 构造器注入（原为 {@code @RequiredArgsConstructor}）。
+     *
+     * <p>⚠️ <b>改为显式声明的原因</b>：本机构建环境下 Lombok 注解处理对「重新编译的文件」不生效，
+     * 表现为所有 final 字段报「未在默认构造器中初始化」——即本类在该环境下<b>一旦被修改就无法编译</b>。
+     * 为使封禁闸门能落在本类（上传写入的唯一收口），这里改为显式构造器，与
+     * {@code service/penalty} 包保持一致：不依赖 Lombok 代码生成。</p>
+     */
+    public MediaUploadService(MediaProperties properties,
+                              MediaStorageClient storageClient,
+                              MediaEventPublisher eventPublisher,
+                              ImageProcessingChain processingChain,
+                              UploadValidationChain validationChain,
+                              UploadRateLimiter rateLimiter,
+                              UploadIdempotency idempotency,
+                              MediaJdbcRepository mediaRepository,
+                              FeedTimelinePublisher feedTimelinePublisher,
+                              StringRedisTemplate redisTemplate,
+                              CaptionMarkParser captionMarkParser,
+                              ContentSecurityService contentSecurityService,
+                              UploadReservationStore reservationStore,
+                              MediaUploadFinalizer uploadFinalizer,
+                              PenaltyService penaltyService) {
+        this.properties = properties;
+        this.storageClient = storageClient;
+        this.eventPublisher = eventPublisher;
+        this.processingChain = processingChain;
+        this.validationChain = validationChain;
+        this.rateLimiter = rateLimiter;
+        this.idempotency = idempotency;
+        this.mediaRepository = mediaRepository;
+        this.feedTimelinePublisher = feedTimelinePublisher;
+        this.redisTemplate = redisTemplate;
+        this.captionMarkParser = captionMarkParser;
+        this.contentSecurityService = contentSecurityService;
+        this.reservationStore = reservationStore;
+        this.uploadFinalizer = uploadFinalizer;
+        this.penaltyService = penaltyService;
+    }
 
     /** 单条状态缓存前缀（与 MediaReviewService 一致，删除时精确失效） */
     private static final String STATUS_KEY_PREFIX = "tf:media:status:";
@@ -146,10 +186,32 @@ public class MediaUploadService {
      * @param requestId 客户端幂等键（可选，X-Request-Id 请求头；5s 内重复提交去重返回首次结果）
      * @return 帖子视图（含 postId 与按 seq 排序的 images），审核通过后对前端生效
      */
+    /**
+     * 封禁拒写闸门：账号处于封禁态（临时封未到期 / 永久封）时，拒绝一切上传写入。
+     *
+     * <p><b>为何放在最前</b>：早于限流与幂等。放后面有两个副作用——
+     * ① 被封账号仍消耗限流令牌；② 幂等留下 in-progress 记录后才抛异常，
+     * 重试会先撞 {@code UPLOAD_IN_PROGRESS} 而非 {@code FORBIDDEN}，错误语义漂移。</p>
+     *
+     * <p><b>四个写入入口都要拦</b>：{@code upload}(网关收字节) / {@code presign}(发直传凭证) /
+     * {@code complete}(直传完成落库) / {@code updateCaption}(改文案)——
+     * 只拦其中一个，被封账号可从其余绕过（例如只拦 upload，仍能走 presign+complete 直传发布）。</p>
+     *
+     * <p><b>刻意不拦 {@code delete}</b>：删除自有内容是「减害」操作而非发布，
+     * 封禁期间仍应允许其自行清理，拦了反而把不可见内容锁死在系统里。</p>
+     */
+    private void requireWritable(long userId) {
+        if (!penaltyService.canWrite(userId)) {
+            throw new BizException(ErrorCode.FORBIDDEN, "账号已被封禁，暂不能发布内容");
+        }
+    }
+
     @SentinelResource(value = SentinelRateLimitConfig.UPLOAD_RESOURCE,
             entryType = EntryType.IN, blockHandler = "uploadBlocked")
     public MediaItem upload(MultipartFile[] files, String caption, String requestId) {
         String userId = UserContextHolder.requireUserId();
+        long uid = Long.parseLong(userId);
+        requireWritable(uid);
 
         // 用户维度限流（机器维度已由 Sentinel 注解外层放行）
         if (!rateLimiter.tryAcquire(userId)) {
@@ -173,7 +235,6 @@ public class MediaUploadService {
         // 长度上限 + 敏感词统一走内容安全入口（场景 CAPTION），命中即 fail-closed；
         // 解析为 caption_mark 落库。一次上传一个 caption 共享给整帖。
         String rawCaption = caption == null ? "" : caption;
-        long uid = Long.parseLong(userId);
         contentSecurityService.requireClean(ContentScene.CAPTION, rawCaption, uid);
         CaptionMarkParser.ParseResult captionMark = captionMarkParser.parse(rawCaption);
         String postId = POST_ID_PREFIX + userId + "/" + UUID.randomUUID().toString().replace("-", "");
@@ -256,6 +317,7 @@ public class MediaUploadService {
             entryType = EntryType.IN, blockHandler = "presignBlocked")
     public PresignResponse presign(PresignRequest request, String requestId) {
         String userId = UserContextHolder.requireUserId();
+        requireWritable(Long.parseLong(userId));
 
         if (!rateLimiter.tryAcquire(userId)) {
             throw new BizException(ErrorCode.RATE_LIMITED, "上传过于频繁，请稍后再试");
@@ -353,6 +415,7 @@ public class MediaUploadService {
      */
     public UploadAccepted complete(String postId, String requestId) {
         String userId = UserContextHolder.requireUserId();
+        requireWritable(Long.parseLong(userId));
         UploadReservation reservation = reservationStore.load(postId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "上传预约不存在或已过期，请重新申请凭证"));
         if (!reservation.userId().equals(userId)) {
@@ -544,6 +607,7 @@ public class MediaUploadService {
      * @param caption 新描述/标题（可为 null / 空表示清空）
      */
     public void updateCaption(String mediaId, String userId, String caption) {
+        requireWritable(Long.parseLong(userId));
         String raw = caption == null ? "" : caption;
         contentSecurityService.requireClean(ContentScene.CAPTION, raw, Long.parseLong(userId));
         CaptionMarkParser.ParseResult pr = captionMarkParser.parse(raw);

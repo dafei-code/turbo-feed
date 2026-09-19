@@ -434,10 +434,13 @@ public class MediaProperties {
         private int banTempDays = 7;
 
         /**
-         * 严重违规（{@code ViolationSeverity#CRITICAL}）是否直接<b>永久</b>封禁。默认 true。
-         * false 则 CRITICAL 也只临时封禁 {@code banTempDays} 天（上线初期建议先 false 灰度，避免误封不可逆）。
+         * 严重违规（{@code ViolationSeverity#CRITICAL}）是否直接<b>永久</b>封禁。
+         *
+         * <p><b>默认 false（灰度安全值）</b>：true 时一次 CRITICAL 判定即永久封号——不可逆，
+         * 上线初期应先 false，让最重处置也只是临时封禁 {@code banTempDays} 天，
+         * 观察误封率与申诉量稳定后再打开（配合 {@link PenaltyService#liftPenalty} 撤销通道）。</p>
          */
-        private boolean criticalAutoPermBan = true;
+        private boolean criticalAutoPermBan = false;
 
         public int getNewUserApproveThreshold() {
             return newUserApproveThreshold;

@@ -286,7 +286,7 @@ CREATE TABLE `turbo_feed_2`.`account_credit_3` (
 CREATE TABLE `turbo_feed_1`.`violation_record_0` (
   `id`               BIGINT       NOT NULL                COMMENT '违规记录ID, ShardingSphere雪花填充',
   `user_id`          BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id)',
-  `category`         TINYINT      NOT NULL                COMMENT '违规类目 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
+  `category`         TINYINT      NOT NULL                COMMENT '违规类目 0其他(未分类兜底) 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
   `severity`         TINYINT      NOT NULL                COMMENT '严重度 1低 2中 3高 4严重(CRITICAL)',
   `source`           TINYINT      NOT NULL                COMMENT '来源 1机审 2举报 3人审 4申诉翻案',
   `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封',
@@ -301,7 +301,7 @@ CREATE TABLE `turbo_feed_1`.`violation_record_0` (
 CREATE TABLE `turbo_feed_1`.`violation_record_2` (
   `id`               BIGINT       NOT NULL                COMMENT '违规记录ID, ShardingSphere雪花填充',
   `user_id`          BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id)',
-  `category`         TINYINT      NOT NULL                COMMENT '违规类目 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
+  `category`         TINYINT      NOT NULL                COMMENT '违规类目 0其他(未分类兜底) 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
   `severity`         TINYINT      NOT NULL                COMMENT '严重度 1低 2中 3高 4严重(CRITICAL)',
   `source`           TINYINT      NOT NULL                COMMENT '来源 1机审 2举报 3人审 4申诉翻案',
   `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封',
@@ -316,7 +316,7 @@ CREATE TABLE `turbo_feed_1`.`violation_record_2` (
 CREATE TABLE `turbo_feed_2`.`violation_record_1` (
   `id`               BIGINT       NOT NULL                COMMENT '违规记录ID, ShardingSphere雪花填充',
   `user_id`          BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id)',
-  `category`         TINYINT      NOT NULL                COMMENT '违规类目 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
+  `category`         TINYINT      NOT NULL                COMMENT '违规类目 0其他(未分类兜底) 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
   `severity`         TINYINT      NOT NULL                COMMENT '严重度 1低 2中 3高 4严重(CRITICAL)',
   `source`           TINYINT      NOT NULL                COMMENT '来源 1机审 2举报 3人审 4申诉翻案',
   `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封',
@@ -331,7 +331,7 @@ CREATE TABLE `turbo_feed_2`.`violation_record_1` (
 CREATE TABLE `turbo_feed_2`.`violation_record_3` (
   `id`               BIGINT       NOT NULL                COMMENT '违规记录ID, ShardingSphere雪花填充',
   `user_id`          BIGINT       NOT NULL                COMMENT '用户ID, 分片键(user_id)',
-  `category`         TINYINT      NOT NULL                COMMENT '违规类目 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
+  `category`         TINYINT      NOT NULL                COMMENT '违规类目 0其他(未分类兜底) 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
   `severity`         TINYINT      NOT NULL                COMMENT '严重度 1低 2中 3高 4严重(CRITICAL)',
   `source`           TINYINT      NOT NULL                COMMENT '来源 1机审 2举报 3人审 4申诉翻案',
   `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封',

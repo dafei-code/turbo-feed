@@ -8,6 +8,11 @@ package com.turbofeed.gateway.service.penalty;
  */
 public enum ViolationCategory {
 
+    /**
+     * 其他 / 未分类。<b>保守兜底</b>：违规来源暂时无法归类时使用
+     * （如人审驳回只带理由文本、尚无类目映射时），避免为了落库而错分到具体类目。
+     */
+    OTHER(0),
     /** 色情低俗。 */
     CONTENT_PORN(1),
     /** 政治敏感。 */

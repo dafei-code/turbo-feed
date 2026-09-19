@@ -94,6 +94,55 @@ public class PenaltyService {
         return next;
     }
 
+    /**
+     * <b>解除封禁</b>（撤销 / 申诉翻案）——处罚域的「撤销通道」。
+     *
+     * <p><b>为什么必须有</b>：封禁是高不可逆操作。若只有 {@link #recordViolation} 而没有解除通道，
+     * {@link AccountPenaltyStatus#BANNED_PERM} 一旦误封将<b>永久无法撤销</b>
+     * （{@link AccountPenaltyStatus#BANNED_TEMP} 还能靠 {@code ban_until} 到期自愈，永久封不能）。
+     * 因此本方法是封禁写路径上线前的<b>强制配套</b>。</p>
+     *
+     * <p><b>只清封禁字段，不重置累计违规数</b>：撤销一次处罚 ≠ 抹掉历史
+     * （历史仍在 {@code violation_record}，append-only）。若重置计数，再犯要重新攒够阈值才能封，
+     * 等于给惯犯发「免罚卡」；保留计数则解除后再违规会<b>立即</b>按累计次数触发封禁。</p>
+     *
+     * <p><b>审计</b>：写一条 {@link PenaltyAction#LIFT} 的反向记录（不删改任何历史违规记录）。</p>
+     *
+     * @return 是否实际解除了封禁（本来就没被封 → false，调用方无需处理）
+     */
+    public boolean liftPenalty(long userId, ViolationSource source, String operator, String reason) {
+        Optional<AccountPenalty> opt = accountPenaltyRepository.get(userId);
+        if (opt.isEmpty()) {
+            return false;
+        }
+        AccountPenalty cur = opt.get();
+        if (cur.status() != AccountPenaltyStatus.BANNED_TEMP
+                && cur.status() != AccountPenaltyStatus.BANNED_PERM) {
+            return false; // NORMAL / WARN 无需解除
+        }
+
+        // 反向审计留痕：类目沿用被解除的封禁类目（空则 OTHER 兜底）；严重度无意义，用 LOW 占位。
+        violationRecordRepository.insert(new ViolationRecord(
+                null,
+                userId,
+                cur.banCategory() == null ? ViolationCategory.OTHER : cur.banCategory(),
+                ViolationSeverity.LOW,
+                source,
+                PenaltyAction.LIFT,
+                null,
+                reason,
+                operator,
+                Instant.now()));
+
+        AccountPenalty lifted = new AccountPenalty(userId, AccountPenaltyStatus.NORMAL, null, null, null,
+                cur.violationCount(), cur.firstViolationAt(), cur.lastViolationAt(), Instant.now());
+        accountPenaltyRepository.apply(userId, lifted);
+
+        log.info("封禁解除: userId={}, from={}, source={}, operator={}, reason={}",
+                userId, cur.status(), source, operator, reason);
+        return true;
+    }
+
     /** 读取持久化的处罚态（无记录按 NORMAL）。⚠️ 本方法<b>不做过期推导</b>，见 {@link #canWrite}。 */
     public AccountPenaltyStatus getStatus(long userId) {
         return accountPenaltyRepository.get(userId)
