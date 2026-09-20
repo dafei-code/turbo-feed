@@ -6,18 +6,19 @@ import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.repository.ReportRepository;
 import com.turbofeed.gateway.repository.AppealRepository;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
+import com.turbofeed.gateway.service.event.outbox.OutboxEventType;
+import com.turbofeed.gateway.service.event.outbox.OutboxService;
+import com.turbofeed.gateway.service.event.outbox.TimelineAppendPayload;
 import com.turbofeed.gateway.service.feed.FeedTimelinePublisher;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.service.review.credit.CreditLevel;
 import com.turbofeed.shared.result.ErrorCode;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -48,10 +49,16 @@ import java.util.Set;
  * RocketMQ 顺序消息且 fail-fast，由 MQ 重试/DLQ 兜底）：可见性是审核的下一跳，仍不能让引擎抖动
  * 反向阻断审核状态机本身（mq 模式下靠 @Transactional 回滚保证不丢）。</p>
  */
-@Slf4j
 @Service
-@RequiredArgsConstructor
 public class MediaReviewService {
+
+    /**
+     * 显式声明日志与构造器（不用 {@code @Slf4j} / {@code @RequiredArgsConstructor}）：
+     * 本机构建环境对被修改文件的 Lombok 注解处理不生效，会报「log 找不到符号 / final 字段未初始化」。
+     */
+    private static final Logger log = LoggerFactory.getLogger(MediaReviewService.class);
+
+    private static final String STATUS_KEY_PREFIX = "tf:media:status:";
 
     private final MediaJdbcRepository mediaRepository;
     private final StringRedisTemplate redisTemplate;
@@ -61,8 +68,28 @@ public class MediaReviewService {
     private final AccountCreditService accountCreditService;
     private final ReportRepository reportRepository;
     private final AppealRepository appealRepository;
+    /** 发件箱（P0-3）：时间线投递改走「同事务落事件 + 提交后直投 + 中继补偿」。 */
+    private final OutboxService outboxService;
 
-    private static final String STATUS_KEY_PREFIX = "tf:media:status:";
+    public MediaReviewService(MediaJdbcRepository mediaRepository,
+                              StringRedisTemplate redisTemplate,
+                              ContentModerationRouter contentModeration,
+                              FeedTimelinePublisher feedTimelinePublisher,
+                              MediaProperties properties,
+                              AccountCreditService accountCreditService,
+                              ReportRepository reportRepository,
+                              AppealRepository appealRepository,
+                              OutboxService outboxService) {
+        this.mediaRepository = mediaRepository;
+        this.redisTemplate = redisTemplate;
+        this.contentModeration = contentModeration;
+        this.feedTimelinePublisher = feedTimelinePublisher;
+        this.properties = properties;
+        this.accountCreditService = accountCreditService;
+        this.reportRepository = reportRepository;
+        this.appealRepository = appealRepository;
+        this.outboxService = outboxService;
+    }
 
     /**
      * 上传事件处理入口（本地 Spring 事件与 RocketMQ 消费者共用，审核逻辑单一来源）。
@@ -199,10 +226,12 @@ public class MediaReviewService {
      * <p>投递时间线的条件是「<b>本次调用真的完成了流转</b>」，而不是「结果状态是 APPROVED」：
      * 若管理员的点击与异步先发后审撞在一起，CAS 只有一方命中，落空的一方不得再投递一次。</p>
      *
-     * <p><b>事务与 MQ 顺序（P0-4）</b>：整段包 {@code @Transactional}，使「状态 CAS 翻转 +
-     * 新人观察期计数」原子提交；时间线投递注册到事务 {@code afterCommit}——仅当 DB 真正提交成功
-     * 后才发 MQ/HTTP，杜绝「消息已发但事务回滚」导致时间线裸奔、以及「状态/计数部分提交」的分裂。
-     * 投递本身失败（事务已提交不可回滚）属 fail-open 残余，归 P0-3 outbox 补偿。</p>
+     * <p><b>事务与投递顺序（P0-4 + P0-3）</b>：整段包 {@code @Transactional}，使「状态 CAS 翻转 +
+     * 新人观察期计数 + <b>发件箱事件行</b>」原子提交。投递分两步：事件行先随事务落库
+     * （事务提交则消息必然存在，不会丢；事务回滚则消息一并消失，不会发出幽灵消息），
+     * 提交后由 {@link OutboxService#deliverAfterCommit} 直投一次保证低延迟，
+     * 失败则由 {@code OutboxRelay} 轮询重投（至少一次 + 消费端幂等）。
+     * 这补上了改造前「提交后投递、失败只记日志」留下的 fail-open 缺口。</p>
      */
     @Transactional(rollbackFor = Exception.class)
     public MediaStatus reviewByMediaId(String mediaId, boolean approved) {
@@ -212,19 +241,15 @@ public class MediaReviewService {
             MediaItem post = asTimelinePost(mediaRepository.findMedia(mediaId, userId), userId);
             if (post != null) {
                 CreditLevel level = accountCreditService.ensure(userId);
-                // 仅事务提交后投递时间线：DB 回滚则绝不发布，避免「状态未落库却已进公域」的孤儿。
-                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                    @Override
-                    public void afterCommit() {
-                        try {
-                            feedTimelinePublisher.append(post, level.poolLevel());
-                        } catch (Exception e) {
-                            // 事务已提交（内容已可见），时间线投递失败属 fail-open 残余，待 P0-3 outbox 补偿。
-                            log.error("审核通过但时间线投递失败（fail-open，待 outbox 补偿）: mediaId={}, postId={}",
-                                    mediaId, post.postId(), e);
-                        }
-                    }
-                });
+                // P0-3（changelog 0037）：时间线投递改走发件箱。
+                //   ① 事件行与「状态翻转 + 观察期计数」写在<b>同一个本地事务</b>里：
+                //      事务回滚 → 事件一并消失（不会发出「DB 里不存在的帖子」的幽灵消息）；
+                //      事务提交 → 事件必然存在（不会因投递失败而永久丢失）。
+                //   ② 提交后直投一次（低延迟），失败不抛——行留在库里，由 OutboxRelay 补偿重投。
+                // 改造前「提交后投递、失败只记日志」= fail-open：内容已可见却没进时间线，且无人重试。
+                long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_APPEND, mediaId, userId,
+                        new TimelineAppendPayload(post, level.poolLevel()));
+                outboxService.deliverAfterCommit(eventId);
             }
             // 人工通过计数：新人观察期据此解除。只统计人工路径——先发后审的自动通过不计入，
             // 否则新号第一帖上传即把自己顶出观察期，观察期形同虚设。

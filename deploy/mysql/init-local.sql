@@ -17,7 +17,8 @@
 -- 顶部先 DROP 两库再重建，保证 ShardingSphere 元数据以最新 DDL（含 phone 列）为准，
 -- 避免 CREATE TABLE IF NOT EXISTS 跳过重建导致「列不存在」类陈旧元数据问题。
 --
--- 说明：user_phone_router 不分片路由表本 demo 阶段未启用（注册去重走广播 COUNT），此处不建。
+-- 说明：user_phone_router（手机号→UID 路由表）已启用，建在 ds_0 单表——注册去重与登录定位
+--      不再广播全分片。存量库回填语句见本文件 user_phone_router 建表处注释。
 -- =============================================================================
 
 DROP DATABASE IF EXISTS turbo_feed_1;
@@ -565,6 +566,63 @@ CREATE TABLE `turbo_feed_1`.`sensitive_whitelist` (
   KEY `idx_enabled` (`enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='误杀豁免白名单(单表, 内存索引加载源)';
 
+-- ==================== 手机号路由表 user_phone_router（单表，ds_0） ====================
+-- 存在的唯一理由：消除「按手机号查 user」的跨分片广播。
+--   user 分片键是 id，而注册去重 / 登录定位的条件是 phone —— 不带分片键，ShardingSphere
+--   只能广播到全部物理表再合并。改造后：先查本表拿 uid（单表 PK 点查），再按 id 精准命中
+--   user 的单个分片，两次查询都与分片数无关，为扩容（4 → 128）扫清障碍。
+--
+-- 为什么不分片：
+--   · 注册/登录 QPS 比上传、Feed 读取低几个数量级，单表 PK 点查远未到瓶颈；
+--   · 唯一性由一处 PRIMARY KEY(phone) 保证（user 表 uk_phone 只在本片内唯一，拦不住跨片重复）；
+--   · 存量回填 / 人工订正只需一条同实例跨库 INSERT ... SELECT，运维成本最低。
+-- 真到瓶颈时：改按 phone 挂 autoTables + HASH_MOD（该算法走 Object.hashCode()，字符串分片键可用），
+-- 或迁到 Redis / 分布式 KV。
+--
+-- 部署：必须在 shardingsphere-config.yaml 的 `!SINGLE` 里登记 ds_0.user_phone_router，
+--       否则 5.5.3 会抛 TableNotFoundException（未纳规则的表不会自动进逻辑元数据）。
+--
+-- 存量库回填（本文件是 DROP 重建，不需要；线上已有数据时执行一次，可重复执行）：
+--   INSERT IGNORE INTO turbo_feed_1.user_phone_router (phone, user_id) SELECT phone, id FROM turbo_feed_1.user_0;
+--   INSERT IGNORE INTO turbo_feed_1.user_phone_router (phone, user_id) SELECT phone, id FROM turbo_feed_1.user_2;
+--   INSERT IGNORE INTO turbo_feed_1.user_phone_router (phone, user_id) SELECT phone, id FROM turbo_feed_2.user_1;
+--   INSERT IGNORE INTO turbo_feed_1.user_phone_router (phone, user_id) SELECT phone, id FROM turbo_feed_2.user_3;
+--   （不回填也不会出错：路由未命中时代码回退广播查询并惰性回填，只是暂时退回旧的广播成本。）
+CREATE TABLE `turbo_feed_1`.`user_phone_router` (
+  `phone`      VARCHAR(20) NOT NULL                COMMENT '登录手机号, 全局唯一(本表是唯一真正 enforce 该约束的地方)',
+  `user_id`    BIGINT      NOT NULL                COMMENT '用户ID(user表分片键), 命中后按 id 精准查 user 单分片',
+  `created_at` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '绑定时间',
+  PRIMARY KEY (`phone`),
+  KEY `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='手机号→UID 路由表(单表, 消灭跨分片广播查重)';
+
+-- ==================== 事务发件箱 outbox_event（单表，ds_0） ====================
+-- P0-3：把「DB 事务」与「投递消息」的分布式原子问题，降维成「本地事务原子 + 至少一次投递」。
+--   事件行与业务数据写在同一个本地事务里（同生共死），提交后由 OutboxRelay 轮询投递，
+--   投失败留着下次再投；因此「消息丢失」变成「消息可能重复」，由消费端幂等消化。
+--
+-- 为什么单表：它就是一张队列表，按 id 顺序消费即可，没有按用户查询的诉求；
+--            单表让「待投递行数」「DEAD 行数」这类对账查询一条 SQL 就能看到全貌。
+-- 部署：必须在 shardingsphere-config.yaml 的 `!SINGLE` 里登记 ds_0.outbox_event。
+-- 运维：DEAD 行不会自动消失（保留供人工对账），确认无需补偿后自行归档删除。
+CREATE TABLE `turbo_feed_1`.`outbox_event` (
+  `id`              BIGINT       NOT NULL                COMMENT '事件ID(雪花), 投递顺序键',
+  `event_type`      VARCHAR(64)  NOT NULL                COMMENT 'TIMELINE_APPEND / TIMELINE_REMOVE',
+  `aggregate_id`    VARCHAR(255) NOT NULL                COMMENT '业务聚合标识(mediaId/postId), 对账与人工补偿定位用',
+  `user_id`         BIGINT       NULL                    COMMENT '关联账号(便于按人排查; 非分片键)',
+  `payload`         JSON         NOT NULL                COMMENT '事件体(投递所需全部信息, 回查库即可重放)',
+  `status`          VARCHAR(16)  NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/SENDING/SENT/FAILED/DEAD',
+  `attempt_count`   INT          NOT NULL DEFAULT 0      COMMENT '已尝试次数(领取时 +1)',
+  `max_attempts`    INT          NOT NULL DEFAULT 5      COMMENT '重试上限, 达上限置 DEAD 等人工',
+  `last_error`      VARCHAR(512)          DEFAULT NULL   COMMENT '最近一次失败原因(截断)',
+  `next_attempt_at` DATETIME     NOT NULL                COMMENT '下次可被领取的时点(退避)',
+  `created_at`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_dispatch` (`status`, `next_attempt_at`),
+  KEY `idx_aggregate` (`aggregate_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='事务发件箱(单表, 杜绝"事务已提交但消息丢失")';
+
 -- ==================== 演示账号种子数据（DB 重建后可直接登录） ====================
 -- 说明：网关登录现走 user 分片表 + BCrypt 校验；旧 application.yml 中 auth.demo-users
 --      配置已废弃。重新执行本脚本后可用以下账号登录：
@@ -573,17 +631,32 @@ CREATE TABLE `turbo_feed_1`.`sensitive_whitelist` (
 --   13900139000 / 123456  → role=USER（普通用户，进 user.html，角色来自 user 表 role 列）
 -- 密码均为 "123456" 的 BCrypt(cost=10) 哈希，生产环境务必移除这些种子。
 
--- 管理员账号：id 1000000000000000000 % 4 = 0 → user_0(ds_0)
+-- ⚠️⚠️ 分片落位必须用 HASH_MOD 的算法算，不能用 id % 4 猜！
+--   HASH_MOD = Math.abs(分片键.hashCode()) % sharding-count；Long.hashCode() = (int)(v ^ (v>>>32))。
+--   两者结果完全不同（例：1000000000000000000 → id%4=0，但 hashCode=-1434143053 → abs%4=1 → user_1）。
+--   本段此前按 id%4 写死了落位，导致三个演示账号被插进了「非路由目标」的物理表：
+--   登录按 phone 广播时能扫到（因为广播扫全部物理表），一旦改成「按 id 精准路由」就永远查不到
+--   ——这是 changelog 0036 端到端验证时实测出来的，已在下表中按 HASH_MOD 真值修正。
+--   以后加种子数据，落位一律先算 abs(hashCode)%4：0/2→ds_0(turbo_feed_1)，1/3→ds_1(turbo_feed_2)。
+--
+-- 管理员账号：abs(hashCode(1000000000000000000))%4 = 1 → user_1 → ds_1(turbo_feed_2)
 -- 密码 "123456" 的 BCrypt(cost=10) 哈希，必须使用 $2a$ 前缀（Spring BCryptPasswordEncoder/jBCrypt 仅原生接受 $2a$，
 -- $2y$/$2b$ 会在 hashpw 抛 Invalid salt revision）。本机用 htpasswd -B 生成的是 $2y$，改前缀为 $2a$ 即可（纯 ASCII 短口令等价）。
-INSERT INTO `turbo_feed_1`.`user_0` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `role`, `created_at`, `updated_at`)
+INSERT INTO `turbo_feed_2`.`user_1` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `role`, `created_at`, `updated_at`)
 VALUES (1000000000000000000, '13800138000', '$2a$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoAdmin', '', 1, 'ADMIN', NOW(), NOW());
 
--- 审核员账号：id 1000000000000000002 % 4 = 2 → user_2(ds_0)
+-- 审核员账号：abs(hashCode(1000000000000000002))%4 = 3 → user_3 → ds_1(turbo_feed_2)
 -- 角色直接写在 user 表 role 列（真 RBAC），登录时 AuthService 读库派生 JWT，不在配置里维护白名单。
-INSERT INTO `turbo_feed_1`.`user_2` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `role`, `created_at`, `updated_at`)
+INSERT INTO `turbo_feed_2`.`user_3` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `role`, `created_at`, `updated_at`)
 VALUES (1000000000000000002, '13700137000', '$2a$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoReviewer', '', 1, 'REVIEWER', NOW(), NOW());
 
--- 普通用户账号：id 1000000000000000001 % 4 = 1 → user_1(ds_1)
-INSERT INTO `turbo_feed_2`.`user_1` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `role`, `created_at`, `updated_at`)
+-- 普通用户账号：abs(hashCode(1000000000000000001))%4 = 2 → user_2 → ds_0(turbo_feed_1)
+INSERT INTO `turbo_feed_1`.`user_2` (`id`, `phone`, `password_hash`, `nickname`, `avatar_url`, `status`, `role`, `created_at`, `updated_at`)
 VALUES (1000000000000000001, '13900139000', '$2a$10$VTw0mKD3rQd2BnXAtOyhjunNcufaid1bSfdyDTk23X9HiRpMghqHi', 'DemoUser', '', 1, 'USER', NOW(), NOW());
+
+-- 路由表种子：与上面三个演示账号一一对应（不写也能登录——代码会广播兜底并惰性回填，
+-- 但写上可让演示环境从第一次起就走单分片路径）。
+INSERT IGNORE INTO `turbo_feed_1`.`user_phone_router` (`phone`, `user_id`) VALUES
+  ('13800138000', 1000000000000000000),
+  ('13700137000', 1000000000000000002),
+  ('13900139000', 1000000000000000001);

@@ -144,7 +144,8 @@ rules:
     keyGenerators:
       snowflake:
         type: SNOWFLAKE
-  # 单表规则（必须显式声明）：未纳入 !SHARDING 的表（当前只有 sensitive_word）
+  # 单表规则（必须显式声明）：未纳入 !SHARDING 的表（当前 sensitive_word / sensitive_whitelist /
+  # user_phone_router）
   # 不会自动进入逻辑元数据——缺此规则时对其查询会抛
   #   TableNotFoundException: Table or view 'sensitive_word' does not exist
   # 进而导致 SensitiveWordService 启动加载失败、保留空 Trie（敏感词过滤静默失效）。
@@ -157,6 +158,15 @@ rules:
     tables:
       - ds_0.sensitive_word
       - ds_0.sensitive_whitelist
+      # 手机号→UID 路由表（changelog 0036）：单表落 ds_0。
+      # 它把「按手机号查 user」从广播全分片降为「单表点查 + 按 id 精准命中一片」，
+      # 是分片数扩容（4 → 128）前必须解决的跨分片查重问题。
+      # ⚠️ 本表只有一份（不是 4 张物理表），别按分片表的惯例去建 user_phone_router_0..3。
+      - ds_0.user_phone_router
+      # 事务发件箱（P0-3 / changelog 0037）：单表落 ds_0。
+      # 队列表，按 id 顺序消费；不按用户分片，是为了让「待投递行数 / DEAD 行数」这类对账查询
+      # 一条 SQL 就能看到全貌（分片后要广播合并才能对账，得不偿失）。
+      - ds_0.outbox_event
 
 props:
   # 开发期打印实际落到的物理库/表与 SQL，便于核对路由；生产可关闭

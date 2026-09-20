@@ -2,6 +2,7 @@ package com.turbofeed.gateway.service.penalty;
 
 import com.turbofeed.gateway.repository.AccountPenaltyRepository;
 import com.turbofeed.gateway.repository.ViolationRecordRepository;
+import com.turbofeed.gateway.service.state.AccountStateCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -44,13 +45,16 @@ public class PenaltyService {
     private final ViolationRecordRepository violationRecordRepository;
     private final AccountPenaltyRepository accountPenaltyRepository;
     private final PenaltyEscalationPolicy escalationPolicy;
+    private final AccountStateCache stateCache;
 
     public PenaltyService(ViolationRecordRepository violationRecordRepository,
                           AccountPenaltyRepository accountPenaltyRepository,
-                          PenaltyEscalationPolicy escalationPolicy) {
+                          PenaltyEscalationPolicy escalationPolicy,
+                          AccountStateCache stateCache) {
         this.violationRecordRepository = violationRecordRepository;
         this.accountPenaltyRepository = accountPenaltyRepository;
         this.escalationPolicy = escalationPolicy;
+        this.stateCache = stateCache;
     }
 
     /**
@@ -88,6 +92,8 @@ public class PenaltyService {
         AccountPenalty next = new AccountPenalty(userId, d.newStatus(), d.banCategory(), d.banReason(),
                 d.banUntil(), newCount, firstAt, now, now);
         accountPenaltyRepository.apply(userId, next);
+        // 本实例缓存立即失效：封禁必须「自己刚封的，自己下一个请求就能看到」。
+        stateCache.invalidate(userId);
 
         log.info("违规处置: userId={}, category={}, severity={}, action={}, status={}, banUntil={}, count={}",
                 userId, category, severity, d.action(), d.newStatus(), d.banUntil(), newCount);
@@ -137,6 +143,8 @@ public class PenaltyService {
         AccountPenalty lifted = new AccountPenalty(userId, AccountPenaltyStatus.NORMAL, null, null, null,
                 cur.violationCount(), cur.firstViolationAt(), cur.lastViolationAt(), Instant.now());
         accountPenaltyRepository.apply(userId, lifted);
+        // 与 recordViolation 同理：本实例缓存立即失效，解除后下一个请求即可写。
+        stateCache.invalidate(userId);
 
         log.info("封禁解除: userId={}, from={}, source={}, operator={}, reason={}",
                 userId, cur.status(), source, operator, reason);
@@ -155,21 +163,28 @@ public class PenaltyService {
      *
      * <p>临时封禁到期<b>不靠定时任务改状态</b>，而是在此读取时按 {@code ban_until} 推导——
      * 与 P0-5 加严窗口同手法（读取时推导优先），保证「到点即恢复」不依赖任务跑过。</p>
+     *
+     * <p><b>缓存（changelog 0039）</b>：本方法是每次上传/评论的写前闸门，直读会每次打一次 DB。
+     * 走 {@link AccountStateCache} 短 TTL 缓存；<b>本实例</b>的封禁/解除写入立即失效缓存
+     * （见 {@link #recordViolation} / {@link #liftPenalty}）。跨实例最长 TTL（默认 15s）后才看到——
+     * 封禁是人工低频操作，这个漏放窗口可接受；要「立即生效」时用 Redis pub/sub 广播失效补齐。</p>
      */
     public boolean canWrite(long userId) {
-        Optional<AccountPenalty> opt = accountPenaltyRepository.get(userId);
-        if (opt.isEmpty()) {
-            return true;
-        }
-        AccountPenalty a = opt.get();
-        return switch (a.status()) {
-            case BANNED_PERM -> false;
-            // 临时封禁：ban_until 已过 → 视为已解除；未过 → 不可写。
-            // ⚠️ ban_until 为空属数据异常（临时封必带到期时点），按 fail-closed 视为仍在封禁中，
-            //    避免脏数据把被封账号静默放出来。
-            case BANNED_TEMP -> !(a.banUntil() == null || a.banUntil().isAfter(Instant.now()));
-            default -> true; // NORMAL / WARN
-        };
+        return stateCache.canWrite(userId, () -> {
+            Optional<AccountPenalty> opt = accountPenaltyRepository.get(userId);
+            if (opt.isEmpty()) {
+                return Boolean.TRUE;
+            }
+            AccountPenalty a = opt.get();
+            return switch (a.status()) {
+                case BANNED_PERM -> Boolean.FALSE;
+                // 临时封禁：ban_until 已过 → 视为已解除；未过 → 不可写。
+                // ⚠️ ban_until 为空属数据异常（临时封必带到期时点），按 fail-closed 视为仍在封禁中，
+                //    避免脏数据把被封账号静默放出来。
+                case BANNED_TEMP -> !(a.banUntil() == null || a.banUntil().isAfter(Instant.now()));
+                default -> Boolean.TRUE; // NORMAL / WARN
+            };
+        });
     }
 
     /** 当前是否处于封禁态（临时封禁已过期的按已解除算，语义等价 {@code !canWrite}）。 */

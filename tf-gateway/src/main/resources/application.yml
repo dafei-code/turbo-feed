@@ -27,9 +27,13 @@ spring:
           # 网关以同步命令为主，但上传限流为并发场景，启用小连接池复用连接、吸收抖动；
           # 依赖 commons-pool2（lettuce-core 的 optional 依赖不传递；已在 tf-gateway pom 显式声明），启用连接池复用连接、吸收抖动
           enabled: true
-          max-active: 16        # 最大连接数（并发上限）
-          max-idle: 8            # 最大空闲连接
-          min-idle: 2            # 最小空闲连接（预热，避免冷启动建连抖动）
+          # 容量估算（changelog 0038）：上传并发上限 200（Sentinel rate-limit.thread）×
+          # 单请求 Redis 次数约 3（用户级限流 + 并发占位 + 状态缓存）× 单次命令约 0.2ms
+          # → 稳态只需 ~12 条连接；取 4 倍余量 64，吸收抖动与偶发慢命令，不至于在 max-wait 前排队。
+          # 上限约束：Redis 侧 maxclients（默认 10000）÷ 网关实例数，别把单实例的池开到吃掉全局配额。
+          max-active: 64         # 最大连接数（并发上限）
+          max-idle: 24           # 最大空闲连接（稳态并发量，避免反复建连/关连）
+          min-idle: 8            # 最小空闲连接（预热，避免冷启动建连抖动）
           max-wait: 1000ms       # 获取连接最大等待（超时即失败，快速失败而非线程堆积）
         shutdown-timeout: 100ms
       # 生产集群 / 哨兵示例（二选一取消注释，并删除上面的单机 host/port）：
@@ -207,6 +211,38 @@ turbofeed:
   # 因此空值占位符做不到「不创建 Bean」，只能靠 profile 让属性真正缺席。
   mq:
     enabled: ${TURBOFEED_MQ_ENABLED:false}
+  # 事务发件箱（P0-3 / changelog 0037）：事件行与业务数据同事务落库，提交后直投 + 中继补偿重投。
+  # 语义是「至少一次投递」，重复由消费端幂等消化（Feed 引擎侧 append/remove 已幂等）。
+  outbox:
+    max-attempts: 5            # 单条事件最大尝试次数，达上限置 DEAD 等待人工对账
+    backoff-seconds: 5         # 退避基数：实际间隔 = backoff × attempt_count（封顶 300s）
+    batch-size: 100            # 中继单轮最多取多少条
+    poll-interval-ms: 2000     # 中继轮询间隔（fixedDelay：上轮没跑完不会开下轮）
+    initial-delay-ms: 10000    # 启动后延迟开始，避开启动期的连接池/依赖未就绪
+    stuck-timeout-seconds: 60  # SENDING 超过此时间未落地视为投递进程崩溃，回收重投
+    relay-enabled: true        # 排障时可临时关掉（不影响落库与快路径直投，只是失去补偿）
+  # Redis 拓扑（changelog 0038）：
+  #   single   = 单机（默认）。此时 RedisTopologyConfig 一个 Bean 都不注册，完全交给 Boot 自动装配，
+  #              与改造前逐字节一致，保证「克隆即跑」。
+  #   cluster  = Redis Cluster，节点地址由 TURBOFEED_REDIS_CLUSTER_NODES 注入（逗号分隔 host:port）。
+  #   sentinel = 哨兵，需同时注入 master 名与哨兵节点。
+  # 节点地址一律外部注入，默认配置刻意不出现任何内网 IP（与 JWT 密钥 / MinIO 凭据同一纪律）。
+  # ⚠️ 集群化有运维硬前提：Cluster 至少 3 主 3 从、Sentinel 至少 3 个哨兵，否则故障切换的正确性
+  #    无从谈起——只起 1~2 个节点并不能叫「上了集群」。
+  redis:
+    mode: ${TURBOFEED_REDIS_MODE:single}
+    cluster-nodes: ${TURBOFEED_REDIS_CLUSTER_NODES:}
+    sentinel-master: ${TURBOFEED_REDIS_SENTINEL_MASTER:}
+    sentinel-nodes: ${TURBOFEED_REDIS_SENTINEL_NODES:}
+    max-redirects: 3
+  # 账号状态本地缓存（changelog 0039）：信用等级 / 可写闸门的进程内短 TTL 缓存，
+  # 消除上传热路径上每次必打的 account_credit 读 + account_penalty 读。
+  # ttl 是「跨实例不一致」的上界：A 实例封禁后，B 实例最长 ttl 后才可见。
+  # 怀疑缓存导致状态不更新时置 enabled=false 即可一键退回直读。
+  state-cache:
+    enabled: ${TURBOFEED_STATE_CACHE_ENABLED:true}
+    ttl-seconds: ${TURBOFEED_STATE_CACHE_TTL_SECONDS:15}
+    max-entries: ${TURBOFEED_STATE_CACHE_MAX_ENTRIES:100000}
   fanout:
     push-threshold: 1000        # 大 V 判定：粉丝数阈值
     inbox-max-size: 2000        # 收件箱 LTRIM 定长

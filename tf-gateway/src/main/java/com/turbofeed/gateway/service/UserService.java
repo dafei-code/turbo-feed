@@ -3,11 +3,11 @@ package com.turbofeed.gateway.service;
 import com.turbofeed.gateway.domain.User;
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.repository.UserJdbcRepository;
+import com.turbofeed.gateway.repository.UserPhoneRouterRepository;
 import com.turbofeed.gateway.service.moderation.ContentScene;
 import com.turbofeed.gateway.service.moderation.ContentSecurityService;
 import com.turbofeed.gateway.util.SnowflakeIdGenerator;
 import com.turbofeed.shared.result.ErrorCode;
-import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -29,14 +29,25 @@ import java.util.Map;
  * 后来者加接口时能看到（历史缺口正是「文案入口没人记得加检测」造成的）。</p>
  */
 @Service
-@RequiredArgsConstructor
 public class UserService {
 
     private final UserJdbcRepository userJdbcRepository;
+    private final UserPhoneRouterRepository phoneRouter;
     /** 雪花 ID 生成器由 {@code SnowflakeConfig} 装配（workerId/datacenterId 必须逐实例区分）。 */
     private final SnowflakeIdGenerator snowflakeIdGenerator;
     private final ContentSecurityService contentSecurityService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+
+    /** 显式构造器（不用 {@code @RequiredArgsConstructor}：本机构建环境对被修改文件的 Lombok 注解处理不生效）。 */
+    public UserService(UserJdbcRepository userJdbcRepository,
+                       UserPhoneRouterRepository phoneRouter,
+                       SnowflakeIdGenerator snowflakeIdGenerator,
+                       ContentSecurityService contentSecurityService) {
+        this.userJdbcRepository = userJdbcRepository;
+        this.phoneRouter = phoneRouter;
+        this.snowflakeIdGenerator = snowflakeIdGenerator;
+        this.contentSecurityService = contentSecurityService;
+    }
 
     public Map<String, Object> register(String phone, String password, String nickname) {
         if (phone == null || !phone.matches("^1[3-9]\\d{9}$")) {
@@ -55,12 +66,28 @@ public class UserService {
         // 昵称内容安全：长度上限 + 敏感词（场景 NICKNAME，尺度最严）。
         // 只检测用户显式传入的昵称——服务端生成的默认昵称（"用户1234"）必然合规，
         // 而「用户+4 位数字」这种形态反而可能撞上词库里的纯数字词条，白挨一次误拦。
+        // ⚠️ 刻意排在「绑定路由表」之前：绑定是一道并发闸门，先做必然失败的校验，
+        //    可避免「昵称违规 → 绑了又解绑」的无谓写放大与崩溃残留窗口。
         if (nickname != null && !nickname.isBlank()) {
             // userId 传本次新生成的 id：注册路径上用户级白名单必然为空命中
             // （该 id 刚刚生成，不可能已有豁免条目），传 0 亦可，此处传真实 id 以便日志可追溯
             contentSecurityService.requireClean(ContentScene.NICKNAME, name, id);
         }
-        userJdbcRepository.insert(new User(id, phone, hash, name, 1));
+        // 并发闸门：路由表主键 phone 是「唯一一处真正 enforce 手机号全局唯一」的约束
+        // （user 表的 uk_phone 只在本分片内唯一，跨分片重复拦不住）。
+        // 两个请求同时注册同一手机号时，INSERT IGNORE 只有一个拿到 rows=1，另一个在此被拒。
+        if (!phoneRouter.bindIfAbsent(phone, id)) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "手机号已注册");
+        }
+        try {
+            userJdbcRepository.insert(new User(id, phone, hash, name, 1));
+        } catch (RuntimeException e) {
+            // 补偿：绑定成功但用户行没落库 → 必须解绑。否则该手机号会永远显示「已注册」
+            // 却又登不进去（路由指向空行），且无法重新注册。
+            // 崩溃（进程挂掉）落在两步之间时补偿执行不到——由登录侧 findByPhone 的自愈解绑兜底。
+            phoneRouter.unbind(phone, id);
+            throw e;
+        }
         return Map.of(
                 "id", id,
                 "phone", phone,
