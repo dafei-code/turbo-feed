@@ -9,7 +9,7 @@ import com.turbofeed.gateway.service.event.MediaUploadedEvent;
 import com.turbofeed.gateway.service.event.outbox.OutboxEventType;
 import com.turbofeed.gateway.service.event.outbox.OutboxService;
 import com.turbofeed.gateway.service.event.outbox.TimelineAppendPayload;
-import com.turbofeed.gateway.service.feed.FeedTimelinePublisher;
+import com.turbofeed.gateway.service.event.outbox.TimelineRemovePayload;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.service.review.credit.CreditLevel;
@@ -63,7 +63,6 @@ public class MediaReviewService {
     private final MediaJdbcRepository mediaRepository;
     private final StringRedisTemplate redisTemplate;
     private final ContentModerationRouter contentModeration;
-    private final FeedTimelinePublisher feedTimelinePublisher;
     private final MediaProperties properties;
     private final AccountCreditService accountCreditService;
     private final ReportRepository reportRepository;
@@ -74,7 +73,6 @@ public class MediaReviewService {
     public MediaReviewService(MediaJdbcRepository mediaRepository,
                               StringRedisTemplate redisTemplate,
                               ContentModerationRouter contentModeration,
-                              FeedTimelinePublisher feedTimelinePublisher,
                               MediaProperties properties,
                               AccountCreditService accountCreditService,
                               ReportRepository reportRepository,
@@ -83,7 +81,6 @@ public class MediaReviewService {
         this.mediaRepository = mediaRepository;
         this.redisTemplate = redisTemplate;
         this.contentModeration = contentModeration;
-        this.feedTimelinePublisher = feedTimelinePublisher;
         this.properties = properties;
         this.accountCreditService = accountCreditService;
         this.reportRepository = reportRepository;
@@ -115,7 +112,7 @@ public class MediaReviewService {
             // 重复投递：已是终态，幂等返回；APPROVED 兜底补齐时间线（按信用池）
             if (existing == MediaStatus.APPROVED) {
                 CreditLevel level = accountCreditService.ensure(userId);
-                feedTimelinePublisher.append(toTimelinePost(event), level.poolLevel());
+                publishAppend(representativeId, userId, toTimelinePost(event), level.poolLevel());
             }
             return;
         }
@@ -136,7 +133,7 @@ public class MediaReviewService {
             ReviewOutcome outcome = review(representativeId, userId, machine == MediaStatus.APPROVED);
             if (outcome.transitioned() && outcome.status() == MediaStatus.APPROVED) {
                 CreditLevel level = accountCreditService.ensure(userId);
-                feedTimelinePublisher.append(toTimelinePost(event), level.poolLevel());
+                publishAppend(representativeId, userId, toTimelinePost(event), level.poolLevel());
             }
             return;
         }
@@ -160,7 +157,7 @@ public class MediaReviewService {
         // 先发后审（L1/L2）：整帖直接 APPROVED 进对应流量池（小池/大池），靠举报/人审兜底
         ReviewOutcome outcome = review(representativeId, userId, true);
         if (outcome.transitioned() && outcome.status() == MediaStatus.APPROVED) {
-            feedTimelinePublisher.append(toTimelinePost(event), level.poolLevel());
+            publishAppend(representativeId, userId, toTimelinePost(event), level.poolLevel());
         }
     }
 
@@ -345,7 +342,8 @@ public class MediaReviewService {
                 MediaItem post = asTimelinePost(mediaRepository.findMedia(mediaId, authorId), authorId);
                 if (post != null) {
                     CreditLevel level = accountCreditService.ensure(authorId);
-                    feedTimelinePublisher.append(post, level.poolLevel());
+                    // 与 reviewByMediaId 同一套路：同事务落事件 + 提交后直投（失败由中继补偿）。
+                    publishAppend(mediaId, authorId, post, level.poolLevel());
                 }
                 accountCreditService.onAppealUpheld(authorId);
                 log.info("申诉翻案→整帖恢复公域: mediaId={}", mediaId);
@@ -409,7 +407,25 @@ public class MediaReviewService {
     private void removeFromTimeline(String mediaId, long userId) {
         String postId = mediaRepository.findPostId(mediaId, userId);
         String key = postId == null || postId.isBlank() ? mediaId : postId;
-        feedTimelinePublisher.remove(key);
+        // 改走发件箱：下架是「安全动作」，丢了比晚了更糟——内容已在 DB 下架，
+        // 若 remove 投递丢失，公域会一直展示已下架内容（改造前正是这个 fail-open）。
+        // 顺序安全：事件按雪花 id 有序消费，且 append 在过审时就已直投，
+        // remove 一定晚于它，不存在「remove 先到、append 后到」把内容又放回来的情况。
+        publishRemove(mediaId, userId, key);
+    }
+
+    /** 入流：同事务落发件箱事件 + 提交后直投（失败留行，由 OutboxRelay 补偿重投）。 */
+    private void publishAppend(String mediaId, long userId, MediaItem post, int poolLevel) {
+        long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_APPEND, mediaId, userId,
+                new TimelineAppendPayload(post, poolLevel));
+        outboxService.deliverAfterCommit(eventId);
+    }
+
+    /** 移出公域：同上，走 TIMELINE_REMOVE。 */
+    private void publishRemove(String mediaId, long userId, String timelineKey) {
+        long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_REMOVE, mediaId, userId,
+                new TimelineRemovePayload(timelineKey));
+        outboxService.deliverAfterCommit(eventId);
     }
 
     private static boolean isHighRisk(String reason) {

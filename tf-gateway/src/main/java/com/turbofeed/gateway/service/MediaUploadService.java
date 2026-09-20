@@ -11,7 +11,9 @@ import com.turbofeed.gateway.security.UserContext;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.event.MediaEventPublisher;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
-import com.turbofeed.gateway.service.feed.FeedTimelinePublisher;
+import com.turbofeed.gateway.service.event.outbox.OutboxEventType;
+import com.turbofeed.gateway.service.event.outbox.OutboxService;
+import com.turbofeed.gateway.service.event.outbox.TimelineRemovePayload;
 import com.turbofeed.gateway.service.idempotency.UploadIdempotency;
 import com.turbofeed.gateway.service.moderation.ContentScene;
 import com.turbofeed.gateway.service.moderation.ContentSecurityService;
@@ -34,6 +36,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayInputStream;
@@ -93,7 +96,8 @@ public class MediaUploadService {
     private final UploadRateLimiter rateLimiter;
     private final UploadIdempotency idempotency;
     private final MediaJdbcRepository mediaRepository;
-    private final FeedTimelinePublisher feedTimelinePublisher;
+    /** 发件箱：删除/下架的「移出公域」也走事件行，杜绝「内容已删、公域还在展示」的 fail-open。 */
+    private final OutboxService outboxService;
     private final StringRedisTemplate redisTemplate;
     private final CaptionMarkParser captionMarkParser;
     private final ContentSecurityService contentSecurityService;
@@ -117,13 +121,13 @@ public class MediaUploadService {
                               UploadRateLimiter rateLimiter,
                               UploadIdempotency idempotency,
                               MediaJdbcRepository mediaRepository,
-                              FeedTimelinePublisher feedTimelinePublisher,
                               StringRedisTemplate redisTemplate,
                               CaptionMarkParser captionMarkParser,
                               ContentSecurityService contentSecurityService,
                               UploadReservationStore reservationStore,
                               MediaUploadFinalizer uploadFinalizer,
-                              PenaltyService penaltyService) {
+                              PenaltyService penaltyService,
+                              OutboxService outboxService) {
         this.properties = properties;
         this.storageClient = storageClient;
         this.eventPublisher = eventPublisher;
@@ -132,13 +136,13 @@ public class MediaUploadService {
         this.rateLimiter = rateLimiter;
         this.idempotency = idempotency;
         this.mediaRepository = mediaRepository;
-        this.feedTimelinePublisher = feedTimelinePublisher;
         this.redisTemplate = redisTemplate;
         this.captionMarkParser = captionMarkParser;
         this.contentSecurityService = contentSecurityService;
         this.reservationStore = reservationStore;
         this.uploadFinalizer = uploadFinalizer;
         this.penaltyService = penaltyService;
+        this.outboxService = outboxService;
     }
 
     /** 单条状态缓存前缀（与 MediaReviewService 一致，删除时精确失效） */
@@ -549,6 +553,7 @@ public class MediaUploadService {
      * @param mediaId 内容唯一标识（帖代表行，形如 media/{userId}/{uuid}.{ext}）
      * @param userId  归属用户（来自 JWT）
      */
+    @Transactional(rollbackFor = Exception.class)
     public void delete(String mediaId, String userId) {
         long uid = Long.parseLong(userId);
         String postId = mediaRepository.findPostId(mediaId, uid);
@@ -574,9 +579,11 @@ public class MediaUploadService {
         // 2) 逻辑删除：MySQL 整帖标记 DELETED（带 user_id 分片键，仅删本人内容）
         mediaRepository.delete(mediaId, uid);
         // 3) 清理公域时间线：键与投递时一致（有 postId 用 postId，历史数据回退 mediaId）。
-        //    fail-open：引擎不可用时仅告警，不阻断删除——内容已物理+逻辑删除，
-        //    可见性残留由引擎侧兜底清理与推荐流缓存 TTL 收敛
-        feedTimelinePublisher.remove(legacySingle ? mediaId : postId);
+        //    改走发件箱：事件行与本方法的逻辑删除在同一事务里——删了就一定有一条待投递的 remove。
+        //    改造前是「提交后直接调引擎、失败仅告警」= fail-open：内容已删，公域却还在展示。
+        long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_REMOVE, mediaId, uid,
+                new TimelineRemovePayload(legacySingle ? mediaId : postId));
+        outboxService.deliverAfterCommit(eventId);
         // 4) 失效整帖状态缓存（旁路缓存 fail-open）：状态是整帖的，只清代表行会让其余图在 TTL 内返回旧状态
         try {
             Set<String> keys = new LinkedHashSet<>();
