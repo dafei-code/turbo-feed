@@ -17,6 +17,11 @@
 -- 顶部先 DROP 两库再重建，保证 ShardingSphere 元数据以最新 DDL（含 phone 列）为准，
 -- 避免 CREATE TABLE IF NOT EXISTS 跳过重建导致「列不存在」类陈旧元数据问题。
 --
+-- ⚠️ 本脚本是 DROP 重建（保证元数据以最新 DDL 为准）。若只想让<b>存量库</b>增量对齐而不想丢数据，
+--    必须自行补：① 新增表（例：0036 的 user_phone_router / 0037 的 outbox_event / 0034 的
+--    violation_record_*、account_penalty_*）② 新增列（例：0033 的 last_violation_at、watch_since）。
+--    漏补的表现是运行期报 TableNotFoundException / ColumnNotFoundException——
+--    ShardingSphere 在启动时加载元数据，补完表/列<b>必须重启应用</b>才生效。
 -- 说明：user_phone_router（手机号→UID 路由表）已启用，建在 ds_0 单表——注册去重与登录定位
 --      不再广播全分片。存量库回填语句见本文件 user_phone_router 建表处注释。
 -- =============================================================================
@@ -290,7 +295,7 @@ CREATE TABLE `turbo_feed_1`.`violation_record_0` (
   `category`         TINYINT      NOT NULL                COMMENT '违规类目 0其他(未分类兜底) 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
   `severity`         TINYINT      NOT NULL                COMMENT '严重度 1低 2中 3高 4严重(CRITICAL)',
   `source`           TINYINT      NOT NULL                COMMENT '来源 1机审 2举报 3人审 4申诉翻案',
-  `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封',
+  `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封 6解除(撤销封禁, changelog 0035)',
   `related_media_id` VARCHAR(255) DEFAULT NULL            COMMENT '关联内容ID(内容违规时填, 账号/行为违规可空)',
   `reason`           VARCHAR(512) DEFAULT NULL            COMMENT '处置理由(人审/运营填写)',
   `operator`         VARCHAR(64)  DEFAULT NULL            COMMENT '操作人(SYSTEM/审核员ID)',
@@ -305,7 +310,7 @@ CREATE TABLE `turbo_feed_1`.`violation_record_2` (
   `category`         TINYINT      NOT NULL                COMMENT '违规类目 0其他(未分类兜底) 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
   `severity`         TINYINT      NOT NULL                COMMENT '严重度 1低 2中 3高 4严重(CRITICAL)',
   `source`           TINYINT      NOT NULL                COMMENT '来源 1机审 2举报 3人审 4申诉翻案',
-  `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封',
+  `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封 6解除(撤销封禁, changelog 0035)',
   `related_media_id` VARCHAR(255) DEFAULT NULL            COMMENT '关联内容ID(内容违规时填, 账号/行为违规可空)',
   `reason`           VARCHAR(512) DEFAULT NULL            COMMENT '处置理由(人审/运营填写)',
   `operator`         VARCHAR(64)  DEFAULT NULL            COMMENT '操作人(SYSTEM/审核员ID)',
@@ -320,7 +325,7 @@ CREATE TABLE `turbo_feed_2`.`violation_record_1` (
   `category`         TINYINT      NOT NULL                COMMENT '违规类目 0其他(未分类兜底) 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
   `severity`         TINYINT      NOT NULL                COMMENT '严重度 1低 2中 3高 4严重(CRITICAL)',
   `source`           TINYINT      NOT NULL                COMMENT '来源 1机审 2举报 3人审 4申诉翻案',
-  `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封',
+  `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封 6解除(撤销封禁, changelog 0035)',
   `related_media_id` VARCHAR(255) DEFAULT NULL            COMMENT '关联内容ID(内容违规时填, 账号/行为违规可空)',
   `reason`           VARCHAR(512) DEFAULT NULL            COMMENT '处置理由(人审/运营填写)',
   `operator`         VARCHAR(64)  DEFAULT NULL            COMMENT '操作人(SYSTEM/审核员ID)',
@@ -335,7 +340,7 @@ CREATE TABLE `turbo_feed_2`.`violation_record_3` (
   `category`         TINYINT      NOT NULL                COMMENT '违规类目 0其他(未分类兜底) 1色情 2政治 3暴力 4广告 5攻击 6账号安全 7刷量',
   `severity`         TINYINT      NOT NULL                COMMENT '严重度 1低 2中 3高 4严重(CRITICAL)',
   `source`           TINYINT      NOT NULL                COMMENT '来源 1机审 2举报 3人审 4申诉翻案',
-  `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封',
+  `action_taken`     TINYINT      NOT NULL DEFAULT 0      COMMENT '处置 0无 1警告 2扣分 3加严 4临时封 5永久封 6解除(撤销封禁, changelog 0035)',
   `related_media_id` VARCHAR(255) DEFAULT NULL            COMMENT '关联内容ID(内容违规时填, 账号/行为违规可空)',
   `reason`           VARCHAR(512) DEFAULT NULL            COMMENT '处置理由(人审/运营填写)',
   `operator`         VARCHAR(64)  DEFAULT NULL            COMMENT '操作人(SYSTEM/审核员ID)',
