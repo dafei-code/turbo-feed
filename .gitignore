@@ -16,3 +16,10 @@ target/
 logs/
 *.log
 application-local.yml
+
+# 工作目录下的本地覆盖配置（Spring Boot 默认加载 file:./application.yml，
+# 优先级高于 classpath，用于放本机 MinIO/Redis/JWT 等凭据）。
+# ⚠️ 只忽略仓库根与 tf-gateway 模块根这两个"工作目录"位置，
+#    绝不忽略 src/main/resources/application.yml（那是被跟踪的默认配置）。
+/application.yml
+/tf-gateway/application.yml
