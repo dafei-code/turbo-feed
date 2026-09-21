@@ -25,5 +25,8 @@ public enum Permission {
     SYSTEM_CONFIG,
 
     /** 信用分管理 */
-    CREDIT_MANAGE
+    CREDIT_MANAGE,
+
+    /** 内容互动（曝光/点赞/评论/分享等行为上报，任何登录用户都可） */
+    FEED_INTERACT
 }

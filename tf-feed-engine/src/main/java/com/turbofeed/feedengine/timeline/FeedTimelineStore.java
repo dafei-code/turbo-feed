@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.shared.model.FeedItemView;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
@@ -16,7 +17,9 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -75,12 +78,19 @@ public class FeedTimelineStore {
     private static final int MERGE_BUCKETS = 3;
     /** 单桶最多拉取条数（防单天批准量过大时归并开销爆炸）。 */
     private static final int PER_BUCKET_CAP = 500;
-    /** 流量池层级上限（L1 小池 / L3 大池，演示 3 级）。 */
-    private static final int MAX_POOL_LEVELS = 3;
+    /** 流量池层级上限（L1 小池 / L3 大池，演示 3 级）。包可见：晋级器据此判断封顶。 */
+    static final int MAX_POOL_LEVELS = 3;
     /** 桶与反查索引的存活时长：超过该天数的桶整体淘汰（发现流只看最新）。 */
     private static final Duration BUCKET_TTL = Duration.ofDays(7);
     /** 反查索引值里「桶 key」与「成员串」的分隔符（SOH 不可打印字符，不会出现在 key 与 JSON 中）。 */
     private static final String IDX_SEP = "\u0001";
+
+    /** 推荐流是否按流量池权重分配每页槽位（抖音式曝光分层）。false 退化为"全池合并+全局倒序"。 */
+    @Value("${turbofeed.feed.pool-read-weight-enabled:true}")
+    private boolean poolReadWeightEnabled;
+    /** 各流量池在推荐流中的曝光权重（按池序 L1..Ln，默认 10%/30%/60%：新内容试水/已验证优质占大头）。 */
+    @Value("${turbofeed.feed.pool-weights:0.1,0.3,0.6}")
+    private String poolWeightsCsv;
 
     /**
      * 审核通过：按信用池写时间线（denormalized {@link FeedItemView} JSON），fail-open。
@@ -139,14 +149,33 @@ public class FeedTimelineStore {
      * @param size 单页条数
      * @return 时间倒序的内容列表（当前页）；空表示无更多内容或 Redis 不可用
      */
+    /**
+     * 游标分页读取公域发现流（入流时间倒序）。
+     *
+     * <p><b>抖音式流量池曝光加权（默认开启）</b>：每个流量池代表不同的公域曝光量级
+     * （L1 小池试水 / L3 大池全量）。开启后，每一页的槽位按 {@code pool-weights} 分配给各池、
+     * 高池（已验证的优质内容）排前面占大头，低池（新内容）占小头——这正是抖音"赛马"的体感：
+     * 新内容先拿到少量曝光，互动率达标才被晋级到更大池放大。关闭权重
+     * （{@code pool-read-weight-enabled=false}）则退化为原"全池合并 + 按入流时刻全局倒序"，
+     * 等价于改造前所有池一视同仁的语义（演示/回滚用）。</p>
+     *
+     * <p>分页在加权模式下按池各自推进游标：第 {@code page} 页时，池 p 贡献其候选列表的
+     * {@code [page*alloc_p, page*alloc_p+alloc_p)} 切片，因此翻页稳定、不会重复或跳漏。</p>
+     *
+     * @param page 页码（从 0 开始）
+     * @param size 单页条数
+     * @return 时间倒序的内容列表（当前页）；空表示无更多内容或 Redis 不可用
+     */
     public List<FeedItemView> readPage(int page, int size) {
         int limit = size <= 0 ? 20 : size;
-        long offset = (long) Math.max(page, 0) * limit;
-        List<ZSetOperations.TypedTuple<String>> candidates = new ArrayList<>();
+        // 先按池收集近 N 天、每池最新的候选（保留 ZSET score 以便回退路径按入流时刻排序）
+        Map<Integer, List<ZSetOperations.TypedTuple<String>>> byPool = new LinkedHashMap<>();
+        for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
+            byPool.put(pool, new ArrayList<>());
+        }
         LocalDate today = LocalDate.now();
         for (int d = 0; d < MERGE_BUCKETS; d++) {
             String date = today.minusDays(d).format(DateTimeFormatter.BASIC_ISO_DATE);
-            // 合并所有流量池（L1..Ln）近 N 天：发布即进对应池，读时统一聚合
             for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
                 String key = TL_PREFIX + pool + ":" + date;
                 try {
@@ -154,7 +183,7 @@ public class FeedTimelineStore {
                             .reverseRangeByScoreWithScores(key, Double.NEGATIVE_INFINITY,
                                     Double.POSITIVE_INFINITY, 0, PER_BUCKET_CAP);
                     if (tuples != null) {
-                        candidates.addAll(tuples);
+                        byPool.get(pool).addAll(tuples);
                     }
                 } catch (Exception e) {
                     log.warn("时间线读取失败: key={}, {}", key, e.getMessage());
@@ -162,23 +191,143 @@ public class FeedTimelineStore {
                 }
             }
         }
-        candidates.sort(Comparator.comparingDouble(
-                (ZSetOperations.TypedTuple<String> t) -> t.getScore() == null ? 0d : t.getScore()).reversed());
-        List<FeedItemView> items = new ArrayList<>(candidates.size());
-        for (ZSetOperations.TypedTuple<String> tuple : candidates) {
-            String json = tuple.getValue();
-            if (json == null) {
+
+        if (!poolReadWeightEnabled) {
+            // 回退：全池合并 + 按入流时刻（ZSET score）全局倒序，等价改造前语义
+            List<ZSetOperations.TypedTuple<String>> merged = new ArrayList<>();
+            for (List<ZSetOperations.TypedTuple<String>> l : byPool.values()) {
+                merged.addAll(l);
+            }
+            merged.sort(Comparator.comparingDouble(
+                    (ZSetOperations.TypedTuple<String> t) -> t.getScore() == null ? 0d : t.getScore()).reversed());
+            long offset = (long) Math.max(page, 0) * limit;
+            List<FeedItemView> items = new ArrayList<>(merged.size());
+            for (ZSetOperations.TypedTuple<String> tuple : merged) {
+                FeedItemView it = parseMember(tuple == null ? null : tuple.getValue());
+                if (it != null) {
+                    items.add(it);
+                }
+            }
+            int from = (int) Math.min(offset, items.size());
+            int to = (int) Math.min(offset + limit, items.size());
+            return items.subList(from, to);
+        }
+
+        // 加权：每页按池权重分配槽位，高池优先排前
+        double[] weights = parsePoolWeights();
+        Map<Integer, List<FeedItemView>> parsed = new LinkedHashMap<>();
+        for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
+            List<FeedItemView> l = new ArrayList<>();
+            for (ZSetOperations.TypedTuple<String> t : byPool.get(pool)) {
+                FeedItemView it = parseMember(t == null ? null : t.getValue());
+                if (it != null) {
+                    l.add(it);
+                }
+            }
+            parsed.put(pool, l);
+        }
+        int[] alloc = allocateSlots(limit, weights, parsed);
+        long offset = (long) Math.max(page, 0) * limit;
+        List<FeedItemView> result = new ArrayList<>(limit);
+        for (int pool = MAX_POOL_LEVELS; pool >= 1; pool--) {
+            List<FeedItemView> items = parsed.get(pool);
+            int per = alloc[pool - 1];
+            if (per <= 0 || items.isEmpty()) {
                 continue;
             }
-            try {
-                items.add(objectMapper.readValue(json, FeedItemView.class));
-            } catch (Exception ignore) {
-                // 单条损坏不影响整体
+            int start = (int) Math.min((long) per * offset, items.size());
+            int end = Math.min(start + per, items.size());
+            if (start < end) {
+                result.addAll(items.subList(start, end));
             }
         }
-        int from = (int) Math.min(offset, items.size());
-        int to = (int) Math.min(offset + limit, items.size());
-        return items.subList(from, to);
+        return result;
+    }
+
+    private FeedItemView parseMember(String json) {
+        if (json == null) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, FeedItemView.class);
+        } catch (Exception ignore) {
+            return null;
+        }
+    }
+
+    /** 解析并归一化池权重（CSV，按池序 L1..Ln）。非法/全零时退化为均匀分布。 */
+    private double[] parsePoolWeights() {
+        double[] w = new double[MAX_POOL_LEVELS];
+        if (poolWeightsCsv != null) {
+            String[] parts = poolWeightsCsv.split(",");
+            for (int i = 0; i < MAX_POOL_LEVELS; i++) {
+                if (i < parts.length) {
+                    try {
+                        w[i] = Double.parseDouble(parts[i].trim());
+                    } catch (NumberFormatException ignore) {
+                        w[i] = 0d;
+                    }
+                } else {
+                    w[i] = 0d;
+                }
+            }
+        }
+        double sum = 0d;
+        for (double x : w) {
+            sum += x;
+        }
+        if (sum <= 0d) {
+            for (int i = 0; i < MAX_POOL_LEVELS; i++) {
+                w[i] = 1.0 / MAX_POOL_LEVELS;
+            }
+        } else {
+            for (int i = 0; i < MAX_POOL_LEVELS; i++) {
+                w[i] /= sum;
+            }
+        }
+        return w;
+    }
+
+    /**
+     * 把单页 {@code limit} 个槽位按权重分配到各池。floor 后把余量补给有内容的池（优先高池），
+     * 并保证"有内容且页足够大"的池至少占 1 槽（新鲜内容永远有试水机会）。
+     */
+    private int[] allocateSlots(int limit, double[] weights, Map<Integer, List<FeedItemView>> byPool) {
+        int[] alloc = new int[weights.length];
+        int remaining = limit;
+        for (int i = 0; i < weights.length; i++) {
+            alloc[i] = (int) Math.floor(limit * weights[i]);
+            remaining -= alloc[i];
+        }
+        if (limit >= weights.length) {
+            for (int i = 0; i < weights.length && remaining >= 0; i++) {
+                if (alloc[i] == 0 && !byPool.get(i + 1).isEmpty()) {
+                    alloc[i] = 1;
+                    remaining--;
+                }
+            }
+        }
+        int idx = weights.length - 1;
+        while (remaining > 0) {
+            if (!byPool.get(idx + 1).isEmpty()) {
+                alloc[idx]++;
+                remaining--;
+            }
+            idx = (idx - 1 + weights.length) % weights.length;
+            if (idx == weights.length - 1 && remaining > 0) {
+                boolean any = false;
+                for (int i = 0; i < weights.length; i++) {
+                    if (!byPool.get(i + 1).isEmpty()) {
+                        any = true;
+                        break;
+                    }
+                }
+                if (!any) {
+                    break;
+                }
+            }
+        }
+        return alloc;
     }
 
     private String bucketOf(Instant t) {
@@ -219,6 +368,93 @@ public class FeedTimelineStore {
             return;
         }
         scanRemoveStrict(timelineKey);
+    }
+
+    /**
+     * 流量池晋级（抖音式赛马）：把某帖从当前池搬到更高池，<b>仅升不降</b>。
+     *
+     * <p>复用现有 ZSET + 反查索引，不引新存储：先按反查索引定位原桶与成员串，
+     * 用 {@code ZSCORE} 取回原始 score（入流时刻），再 {@code ZREM} 旧桶 + {@code ZADD} 新池桶
+     * （同日期、同 score，仅池号 +1），最后把反查索引改写成新桶位置。下架走 {@link #remove}
+     * 时据新索引精确摘除，不会漏删。</p>
+     *
+     * <p>晋级本身不改内容排序（score 不变），改变的是它所在的"曝光池"——
+     * 读路径按池权重分配槽位（见 {@link #readPage}），进更高池 = 在推荐流里拿到更多占位。</p>
+     *
+     * @param timelineKey 帖身份（与 append 一致；有 postId 用 postId，历史数据回退 mediaId）
+     * @param targetPool  目标池（必须 &gt; 当前池且 ≤ {@link #MAX_POOL_LEVELS}）
+     * @return true = 已晋级；false = 不在池中 / 已是更高池 / 参数非法（无需动作）
+     */
+    public boolean promote(String timelineKey, int targetPool) {
+        if (timelineKey == null || targetPool <= 0 || targetPool > MAX_POOL_LEVELS) {
+            return false;
+        }
+        try {
+            String idxKey = IDX_PREFIX + timelineKey;
+            String location = redisTemplate.opsForValue().get(idxKey);
+            if (location == null) {
+                return false;
+            }
+            int sep = location.indexOf(IDX_SEP);
+            if (sep <= 0) {
+                return false;
+            }
+            String bucketKey = location.substring(0, sep);
+            String member = location.substring(sep + IDX_SEP.length());
+            // bucketKey 形如 tf:feed:tl:{oldPool}:{date}
+            String rest = bucketKey.substring(TL_PREFIX.length());
+            int colon = rest.indexOf(':');
+            if (colon <= 0) {
+                return false;
+            }
+            int oldPool = Integer.parseInt(rest.substring(0, colon));
+            String date = rest.substring(colon + 1);
+            if (oldPool >= targetPool) {
+                return false;                       // 仅升不降，避免来回抖动
+            }
+            Double score = redisTemplate.opsForZSet().score(bucketKey, member);
+            if (score == null) {
+                return false;                       // 索引与 ZSET 不一致，放弃晋级
+            }
+            String newBucket = TL_PREFIX + targetPool + ":" + date;
+            redisTemplate.opsForZSet().remove(bucketKey, member);
+            redisTemplate.opsForZSet().add(newBucket, member, score);
+            redisTemplate.expire(newBucket, BUCKET_TTL);
+            // 反查索引改写到新桶位置：否则后续 remove 会 ZREM 旧桶（已空），下架失效
+            redisTemplate.opsForValue().set(idxKey, newBucket + IDX_SEP + member, BUCKET_TTL);
+            return true;
+        } catch (Exception e) {
+            log.warn("流量池晋级失败（不影响主流程）: timelineKey={}, targetPool={}, {}", timelineKey, targetPool, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 读取某帖当前所在流量池（0 = 不在任何池中 / 已过期）。晋级器据此决定目标池，
+     * 并据此把"已离开公域"的帖从待评估集合剔除。
+     */
+    public int currentPool(String timelineKey) {
+        if (timelineKey == null) {
+            return 0;
+        }
+        try {
+            String location = redisTemplate.opsForValue().get(IDX_PREFIX + timelineKey);
+            if (location == null) {
+                return 0;
+            }
+            int sep = location.indexOf(IDX_SEP);
+            if (sep <= 0) {
+                return 0;
+            }
+            String rest = location.substring(0, sep).substring(TL_PREFIX.length());
+            int colon = rest.indexOf(':');
+            if (colon <= 0) {
+                return 0;
+            }
+            return Integer.parseInt(rest.substring(0, colon));
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     /**

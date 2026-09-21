@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.gateway.config.FeedEngineProperties;
 import com.turbofeed.gateway.service.feed.FeedDeliveryHealth;
 import com.turbofeed.gateway.service.query.MediaItem;
+import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.shared.model.FeedItemView;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -49,6 +50,7 @@ public class FeedEngineClient {
     private static final String PATH_RECOMMENDED = "/internal/feed/recommended";
     private static final String PATH_TIMELINE_APPEND = "/internal/feed/timeline/append";
     private static final String PATH_TIMELINE_REMOVE = "/internal/feed/timeline/remove";
+    private static final String PATH_BEHAVIOR = "/internal/feed/behavior";
 
     private final FeedEngineProperties properties;
     private final ObjectMapper objectMapper;
@@ -179,6 +181,28 @@ public class FeedEngineClient {
             log.warn("Feed 引擎下架投递失败（fail-open，不影响删除主流程）: mediaId={}, {}"
                             + " —— 该内容可能仍在发现流展示，请尽快确认引擎状态", mediaId, e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * 上报行为埋点（曝光/完播/点赞/评论/分享/不感兴趣）。fail-open：失败仅告警，
+     * 埋点是推荐优化项，绝不影响审核/发布/浏览主流程。
+     *
+     * @param events 行为事件列表（已转成跨服务契约 {@link FeedBehaviorEvent}）
+     */
+    public void reportBehavior(List<FeedBehaviorEvent> events) {
+        if (events == null || events.isEmpty()) {
+            return;
+        }
+        try {
+            restClient.post()
+                    .uri(PATH_BEHAVIOR)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(events)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (Exception e) {
+            log.warn("行为埋点投递引擎失败（fail-open，不影响主流程）: {}", e.getMessage());
         }
     }
 }

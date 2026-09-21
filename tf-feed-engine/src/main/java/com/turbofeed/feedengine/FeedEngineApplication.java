@@ -2,6 +2,7 @@ package com.turbofeed.feedengine;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Feed 推拉结合引擎入口（独立部署单元，默认端口 8083）。
@@ -13,6 +14,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * 由本进程内组件装配，无需跨包扫描）。契约模型位于 tf-shared。</p>
  */
 @SpringBootApplication
+@EnableScheduling
 public class FeedEngineApplication {
 
     public static void main(String[] args) {

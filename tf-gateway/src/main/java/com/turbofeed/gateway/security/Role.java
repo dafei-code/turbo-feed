@@ -15,8 +15,8 @@ import java.util.Set;
  */
 public enum Role {
 
-    /** 普通用户（默认，最小权限，无后台权限） */
-    USER("USER", Set.of()),
+    /** 普通用户（默认，最小权限；仅具备内容互动上报权限，无后台权限） */
+    USER("USER", Set.of(Permission.FEED_INTERACT)),
 
     /** 审核员：可审内容、高危下架、看板只读，无系统管理权限 */
     REVIEWER("REVIEWER", Set.of(
