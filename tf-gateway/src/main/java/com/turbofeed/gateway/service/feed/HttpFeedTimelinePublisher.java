@@ -23,12 +23,12 @@ public class HttpFeedTimelinePublisher implements FeedTimelinePublisher {
     private final FeedEngineClient feedEngineClient;
 
     @Override
-    public void append(MediaItem item, int poolLevel) {
-        feedEngineClient.append(item, poolLevel);
+    public boolean append(MediaItem item, int poolLevel) {
+        return feedEngineClient.append(item, poolLevel);
     }
 
     @Override
-    public void remove(String timelineKey) {
-        feedEngineClient.remove(timelineKey);
+    public boolean remove(String timelineKey) {
+        return feedEngineClient.remove(timelineKey);
     }
 }

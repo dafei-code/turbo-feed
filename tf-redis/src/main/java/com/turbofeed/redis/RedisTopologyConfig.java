@@ -1,11 +1,12 @@
-package com.turbofeed.gateway.config;
+package com.turbofeed.redis;
 
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration;
 import org.springframework.boot.autoconfigure.data.redis.RedisProperties;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisClusterConfiguration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.connection.RedisSentinelConfiguration;
@@ -21,7 +22,14 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Redis 拓扑配置：<b>单机（默认）→ 哨兵 / 集群</b> 的可切换装配。
+ * Redis 拓扑装配：<b>单机（默认）→ 哨兵 / 集群</b> 的可切换连接工厂。
+ *
+ * <p><b>为什么从 tf-gateway 下沉到本模块</b>：拓扑配置曾经只存在于 {@code tf-gateway}，
+ * 而 {@code tf-feed-engine} 是另一个独立部署单元、同样持有 Redis 读模型（时间线 ZSET）。
+ * 结果是：删除单机 Redis 切换集群（changelog 0044）时只改了网关，引擎仍连已下线的
+ * {@code localhost:6379}，时间线读写静默失败 → 整个推荐流空白。
+ * <b>「两个服务各配一套 Redis」本身就是缺陷</b>，本模块把它收成单一事实源：
+ * 属性命名空间 {@code turbofeed.redis.*} 对所有服务一致。</p>
  *
  * <p><b>为什么不直接在 application.yml 里写 {@code spring.data.redis.cluster.nodes}</b>：
  * Spring Boot 的 {@code RedisAutoConfiguration} 用「属性是否存在」来选拓扑，一旦在默认配置里
@@ -35,15 +43,24 @@ import java.util.Set;
  * </ul>
  * 地址一律来自环境变量 / 外部配置注入，<b>默认配置里不出现任何内网 IP</b>（与 JWT 密钥、MinIO 凭据同一纪律）。</p>
  *
+ * <p><b>为什么用 {@code @AutoConfiguration} 而不是普通 {@code @Configuration}</b>：
+ * 本模块是<b>库</b>，位于引用方的组件扫描路径之外，普通 {@code @Configuration} 不会被扫到，
+ * 引用方必须逐个 {@code @Import}——那是"每加一个服务就要记得导一次"的隐性契约，迟早漏。
+ * 改为 {@code @AutoConfiguration} + {@code AutoConfiguration.imports} 后，
+ * <b>只要引入依赖即生效</b>，无需任何显式导入。</p>
+ *
+ * <p><b>顺序 {@code before = RedisAutoConfiguration}</b>：必须<b>先于</b>官方自动装配注册本工厂，
+ * 否则 {@code RedisAutoConfiguration} 先按单机建好工厂，本类再注册会变成两个
+ * {@code RedisConnectionFactory} → 注入点歧义。先注册则由它的
+ * {@code @ConditionalOnMissingBean} 自动退让。</p>
+ *
  * <p><b>连接池复用 {@code spring.data.redis.lettuce.pool.*}</b>：不另起一套参数，
  * 避免「单机一套、集群另一套」的漂移——切换拓扑时池的行为保持不变。</p>
  *
  * <p><b>集群化的真实前提</b>（运维侧，不是代码能解决的）：
- * Redis Cluster 至少 3 主 3 从才能容忍单节点故障；Sentinel 至少 3 个哨兵才能避免脑裂误判。
- * 本机 docker 只起了一个 Redis，因此默认保持 {@code single}——本类的价值是「切换路径已就绪且被验证」，
- * 而不是假装单机等于集群。</p>
+ * Redis Cluster 至少 3 主 3 从才能容忍单节点故障；Sentinel 至少 3 个哨兵才能避免脑裂误判。</p>
  */
-@Configuration(proxyBeanMethods = false)
+@AutoConfiguration(before = RedisAutoConfiguration.class)
 public class RedisTopologyConfig {
 
     /**

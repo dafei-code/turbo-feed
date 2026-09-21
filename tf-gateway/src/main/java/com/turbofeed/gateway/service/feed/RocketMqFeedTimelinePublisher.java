@@ -38,9 +38,9 @@ public class RocketMqFeedTimelinePublisher implements FeedTimelinePublisher {
     private String topic;
 
     @Override
-    public void append(MediaItem item, int poolLevel) {
+    public boolean append(MediaItem item, int poolLevel) {
         if (item == null) {
-            return;
+            return false;
         }
         FeedItemView view = FeedItemMapper.toContract(item);
         FeedTimelineEvent event = FeedTimelineEvent.append(view, poolLevel);
@@ -49,15 +49,18 @@ public class RocketMqFeedTimelinePublisher implements FeedTimelinePublisher {
         // 出现「remove 先执行、append 后执行 → 已下架内容重新出现」的内容安全事故。
         // syncSendOrderly 失败（no route / 超时 / 连接失败）直接抛异常 → 由调用方事务回滚
         rocketMQTemplate.syncSendOrderly(topic, event, view.timelineKey());
+        // 未抛异常即视为投递成功（本实现是 fail-fast：失败直接抛，不走返回值通道）
+        return true;
     }
 
     @Override
-    public void remove(String timelineKey) {
+    public boolean remove(String timelineKey) {
         if (timelineKey == null) {
-            return;
+            return false;
         }
         FeedTimelineEvent event = FeedTimelineEvent.remove(timelineKey);
         // 与 append 同键，保证同一帖严格有序
         rocketMQTemplate.syncSendOrderly(topic, event, timelineKey);
+        return true;
     }
 }

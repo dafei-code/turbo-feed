@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.turbofeed</groupId>
+        <artifactId>turbo-feed</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>tf-redis</artifactId>
+    <name>tf-redis</name>
+    <description>Redis 接入的单一事实源（进程内 SDK，非独立部署单元）：拓扑装配（单机 / 哨兵 / 集群）
+        与连接池参数集中在此，所有依赖 Redis 的服务引用同一份实现，杜绝「各服务各配一套」的漂移</description>
+
+    <dependencies>
+        <!-- Spring Boot 自动装配机制（@AutoConfiguration + AutoConfiguration.imports）。
+             只依赖 autoconfigure 与 spring-context：本模块是库，不是可执行应用。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+        <!-- spring-data-redis：提供 LettuceConnectionFactory / RedisProperties 等装配素材。
+             不直接引 spring-boot-starter-data-redis —— starter 会带入自动配置与 Jackson 等
+             传递依赖，而「是否启用 Redis 自动配置」应由引用方（各服务自己引 starter）决定，
+             本模块只提供拓扑 Bean，保持依赖面最小。 -->
+        <dependency>
+            <groupId>org.springframework.data</groupId>
+            <artifactId>spring-data-redis</artifactId>
+        </dependency>
+        <!-- Lettuce 客户端：spring-data-redis 未传递具体实现，需显式声明 -->
+        <dependency>
+            <groupId>io.lettuce</groupId>
+            <artifactId>lettuce-core</artifactId>
+        </dependency>
+        <!-- Lettuce 连接池：commons-pool2 是 lettuce-core 的 optional 依赖，需显式声明。
+             版本由 spring-boot-dependencies BOM 托管。 -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-pool2</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- 测试：仅验证配置解析与条件装配，不连真实 Redis -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

@@ -30,19 +30,9 @@ spring:
           min-idle: 2           # 最小空闲连接（预热，避免冷启动建连抖动）
           max-wait: 1000ms      # 获取连接最大等待（超时即失败，快速失败而非线程堆积）
         shutdown-timeout: 100ms
-      # 生产集群 / 哨兵示例（二选一取消注释，并删除上面的单机 host/port）：
-      # cluster:
-      #   nodes:
-      #     - 10.0.0.1:6379
-      #     - 10.0.0.2:6379
-      #     - 10.0.0.3:6379
-      #   max-redirects: 3
-      # sentinel:
-      #   master: turbo-feed-redis
-      #   nodes:
-      #     - 10.0.0.1:26379
-      #     - 10.0.0.2:26379
-      #     - 10.0.0.3:26379
+      # ⚠️ 不要在这里写 cluster.nodes / sentinel：拓扑切换统一走下面的 turbofeed.redis.mode，
+      # 由 tf-redis 模块的 RedisTopologyConfig 装配（与 tf-gateway 同一份实现、同一套属性）。
+      # 这里只保留单机默认值（host/port），保证「克隆即跑」。
 
 server:
   port: 8083
@@ -60,6 +50,18 @@ management:
         include: health,info
 
 turbofeed:
+  # Redis 拓扑开关（与 tf-gateway 完全同名同义，实现来自 tf-redis 模块）：
+  #   single（默认）  —— 用上面 spring.data.redis.host/port，tf-redis 不注册任何 Bean，克隆即跑
+  #   cluster        —— 必须给 cluster-nodes（逗号分隔 host:port，只给部分节点也能自动发现其余）
+  #   sentinel       —— 必须给 sentinel-master + sentinel-nodes
+  # ⚠️ 0044 切集群时本模块因缺少这段配置仍连已下线的单机 6379，导致时间线读写静默失败、
+  #    推荐流全空。切换拓扑时**两个服务必须一起改**，这是把它们收进 tf-redis 的原因。
+  redis:
+    mode: ${TURBOFEED_REDIS_MODE:single}
+    cluster-nodes: ${TURBOFEED_REDIS_CLUSTER_NODES:}
+    sentinel-master: ${TURBOFEED_REDIS_SENTINEL_MASTER:}
+    sentinel-nodes: ${TURBOFEED_REDIS_SENTINEL_NODES:}
+    max-redirects: 3
   # Feed 时间线投递开关：默认 false（走同步 HTTP 兜底，克隆即跑）。
   # 启用真 MQ 需同时激活 application-mq.yml（--spring.profiles.active=mq），
   # 否则 FeedTimelineConsumer / RocketMqFeedTimelinePublisher 不装配。

@@ -3,6 +3,7 @@ package com.turbofeed.gateway.client;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.gateway.config.FeedEngineProperties;
+import com.turbofeed.gateway.service.feed.FeedDeliveryHealth;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.shared.model.FeedItemView;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +53,8 @@ public class FeedEngineClient {
     private final FeedEngineProperties properties;
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
+    /** 投递成功/失败计数：fail-open 不能变成"无声丢失"，失败必须留下可查的痕迹。 */
+    private final FeedDeliveryHealth health;
 
     /**
      * 使用 Spring Boot 自动装配的 {@link RestClient.Builder}（prototype 作用域，故 clone 后使用）：
@@ -61,9 +64,11 @@ public class FeedEngineClient {
      */
     public FeedEngineClient(FeedEngineProperties properties,
                             ObjectMapper objectMapper,
-                            RestClient.Builder restClientBuilder) {
+                            RestClient.Builder restClientBuilder,
+                            FeedDeliveryHealth health) {
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.health = health;
         FeedEngineProperties.Engine engine = properties.getEngine();
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout((int) engine.getConnectTimeout().toMillis());
@@ -97,8 +102,9 @@ public class FeedEngineClient {
             JsonNode root = objectMapper.readTree(body == null ? "{}" : body);
             int code = root.path("code").asInt(-1);
             if (code != 0) {
-                log.warn("Feed 引擎返回失败码，按不可用处理: page={}, size={}, code={}, message={}",
-                        page, limit, code, root.path("message").asText(""));
+                String msg = "引擎返回失败码 code=" + code + " message=" + root.path("message").asText("");
+                health.recordReadFailure(msg);
+                log.warn("Feed 引擎返回失败码，按不可用处理: page={}, size={}, {}", page, limit, msg);
                 return Optional.empty();
             }
             JsonNode data = root.path("data");
@@ -109,6 +115,7 @@ public class FeedEngineClient {
                     objectMapper.getTypeFactory().constructCollectionType(List.class, FeedItemView.class));
             return Optional.of(items.stream().map(FeedItemMapper::toView).toList());
         } catch (Exception e) {
+            health.recordReadFailure(e.toString());
             log.warn("Feed 引擎读取失败（由调用方按 degraded-mode 决定降级口径）: page={}, size={}, {}",
                     page, limit, e.getMessage());
             return Optional.empty();
@@ -118,10 +125,13 @@ public class FeedEngineClient {
     /**
      * 内容过审入流（幂等：引擎侧同一 mediaId 重复投递会先摘旧位置再写新位置）。
      * fail-open：失败仅告警，不阻断审核主流程。
+     *
+     * @return true = 请求送达引擎；false = 投递失败（本次内容不会进流，需事后补投）。
+     *         <b>调用方请务必看这个返回值</b>——忽略它就会出现"补投报告说成功、实际一条没进"的假象。
      */
-    public void append(MediaItem item, int poolLevel) {
+    public boolean append(MediaItem item, int poolLevel) {
         if (item == null) {
-            return;
+            return false;
         }
         try {
             restClient.post()
@@ -132,18 +142,27 @@ public class FeedEngineClient {
                     .body(FeedItemMapper.toContract(item))
                     .retrieve()
                     .toBodilessEntity();
+            health.recordAppendSuccess();
+            return true;
         } catch (Exception e) {
-            log.warn("Feed 引擎入流投递失败（fail-open，不影响审核主流程）: mediaId={}, poolLevel={}, {}",
+            health.recordAppendFailure(e.toString());
+            // 补救指引必须写在告警里：否则值班同学看到 WARN 也不知道下一步该做什么。
+            // 引擎恢复后跑一次 /api/admin/feed/timeline/backfill 即可把这段时间的存量补回来。
+            log.warn("Feed 引擎入流投递失败（fail-open，不影响审核主流程）: mediaId={}, poolLevel={}, {}"
+                            + " —— 该内容不会出现在发现流；引擎恢复后执行 /api/admin/feed/timeline/backfill 补投",
                     item.mediaId(), poolLevel, e.getMessage());
+            return false;
         }
     }
 
     /**
      * 内容移出公域（删除 / 下架 / 申诉中）。fail-open：失败仅告警，不阻断删除主流程。
+     *
+     * @return true = 请求送达引擎；false = 投递失败（该内容可能仍在发现流展示）
      */
-    public void remove(String mediaId) {
+    public boolean remove(String mediaId) {
         if (mediaId == null) {
-            return;
+            return false;
         }
         try {
             restClient.post()
@@ -152,8 +171,14 @@ public class FeedEngineClient {
                             .build())
                     .retrieve()
                     .toBodilessEntity();
+            health.recordRemoveSuccess();
+            return true;
         } catch (Exception e) {
-            log.warn("Feed 引擎下架投递失败（fail-open，不影响删除主流程）: mediaId={}, {}", mediaId, e.getMessage());
+            health.recordRemoveFailure(e.toString());
+            // 下架失败比入流失败更危险：已下架内容会继续在发现流展示。
+            log.warn("Feed 引擎下架投递失败（fail-open，不影响删除主流程）: mediaId={}, {}"
+                            + " —— 该内容可能仍在发现流展示，请尽快确认引擎状态", mediaId, e.getMessage());
+            return false;
         }
     }
 }

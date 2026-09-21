@@ -66,6 +66,9 @@ public class FeedTimelineController {
     public Result<Void> append(@RequestParam(value = "poolLevel", defaultValue = "1") int poolLevel,
                                @RequestBody FeedItemView item) {
         feedTimelineStore.append(item, poolLevel);
+        // 内容进流的同一刻清掉推荐流缓存：否则新内容要等满 15s TTL 才对用户可见。
+        // 放在 store.append 之后——先保证时间线落定，再让缓存失效（顺序颠倒会有"读到旧列表"的窗口）。
+        recommendedFeedService.invalidate();
         return Result.ok();
     }
 
@@ -77,6 +80,8 @@ public class FeedTimelineController {
     @PostMapping("/timeline/remove")
     public Result<Void> remove(@RequestParam("mediaId") String mediaId) {
         feedTimelineStore.remove(mediaId);
+        // 下架比发布更需要及时：内容已从时间线摘除，缓存却还在返回它 = 已下架内容继续展示。
+        recommendedFeedService.invalidate();
         return Result.ok();
     }
 }

@@ -21,6 +21,12 @@
             <groupId>com.turbofeed</groupId>
             <artifactId>tf-shared</artifactId>
         </dependency>
+        <!-- Redis 接入单一事实源：拓扑装配（单机/哨兵/集群）由该模块的 AutoConfiguration 提供。
+             引入即生效（无需 @Import），保证网关与 tf-feed-engine 读同一套 turbofeed.redis.*。 -->
+        <dependency>
+            <groupId>com.turbofeed</groupId>
+            <artifactId>tf-redis</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

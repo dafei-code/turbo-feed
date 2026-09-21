@@ -11,8 +11,10 @@
 ```
 turbo-feed/
 ├── tf-shared/         契约库：跨服务传输模型（Result / ErrorCode / FeedItemView / FeedTimelineEvent），零依赖
+├── tf-redis/          Redis 接入单一事实源（进程内库）：拓扑装配 单机/哨兵/集群 + 连接池，引入即生效
 ├── tf-hotspot/        热点治理 SDK（进程内库）：热 Key 探测 + 广播 + Caffeine L1 —— 模块骨架，待实现
 ├── tf-feed-engine/    Feed 引擎（独立服务 :8083）：公域时间线读模型 —— 多池 ZSET + 反查索引 + 推荐流旁路缓存
+│                      + 存量补投消费端（`/internal/feed/timeline/*`），需与 tf-gateway 同时启动
 ├── tf-counter/        计数服务（独立服务 :8081）：Redis 分桶 + MQ 削峰 + 批量落库 + 三级读缓存(L1/L2/L3) —— 模块骨架，待实现
 ├── tf-gateway/        HTTP 接入层（独立服务 :8080）：认证/RBAC + 媒体上传(一帖多图) + 审核状态机 + Sentinel 流量防护
 ├── tf-benchmark/      压测模块：五场景压测器 + Markdown 报告生成 —— 模块骨架，待实现

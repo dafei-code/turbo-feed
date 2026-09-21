@@ -13,6 +13,8 @@
 
     <modules>
         <module>tf-shared</module>
+        <!-- Redis 接入的单一事实源（库模块，非部署单元）：必须早于依赖它的服务模块声明 -->
+        <module>tf-redis</module>
         <module>tf-hotspot</module>
         <module>tf-feed-engine</module>
         <module>tf-counter</module>
@@ -113,6 +115,11 @@
             <dependency>
                 <groupId>com.turbofeed</groupId>
                 <artifactId>tf-shared</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.turbofeed</groupId>
+                <artifactId>tf-redis</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

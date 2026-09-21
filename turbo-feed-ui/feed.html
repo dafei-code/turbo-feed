@@ -453,22 +453,25 @@
   <aside class="sidebar" data-page-node-id="kOmM8YFXzhkXD8U0Bk1W1X">
     <div class="logo" data-page-node-id="hKlvubXBTIhgIGTacjNoPw"><span class="t" data-page-node-id="GvsJwdC6PnZnoauhGZ6mR8">Turbo</span>Feed</div>
 
-    <div class="nav-item active" data-page-node-id="pg0ddR7BBH8KiCzrm93g58">
+    <!-- P0-4：双 Tab。推荐 = 公域发现流（/api/feed/recommended，依赖 feed-engine）；
+         我的 = 本人作品（/api/media/mine，按 user_id 分片直查库，不依赖 feed-engine）。
+         两者刻意分开：抖音里「自己发的」也不在推荐流里，而在个人中心。 -->
+    <div class="nav-item active" id="navRecommend" data-tab="recommend" data-page-node-id="pg0ddR7BBH8KiCzrm93g58">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" data-page-node-id="CFb1kBJ8rMDaHKA38LToa1"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" data-page-node-id="iYMU93MHYzEaWWuqxDZB07"/></svg>
       推荐
     </div>
 
     <div class="nav-group" data-page-node-id="0iM7KBqUX3RahQW2LLiEx5">关注</div>
-    <div class="nav-item" data-page-node-id="48gUoVacQuaEhHgbR6WjoA">
+    <div class="nav-item" data-tab="todo" data-page-node-id="48gUoVacQuaEhHgbR6WjoA">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" data-page-node-id="s4uuiaBXSoFHh1YfbWOVQw"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" data-page-node-id="c3BZNhSqrC935rgT4HiO1S"/><circle cx="8.5" cy="7" r="4" data-page-node-id="qjLegZk6Ac0QAEVfWnmn0j"/><line x1="20" y1="8" x2="20" y2="14" data-page-node-id="I1gZYw2hlW6KFITMDDyDm1"/><line x1="23" y1="11" x2="17" y2="11" data-page-node-id="hsQa72VYrMy5rZrdpyCJfa"/></svg>
       关注
     </div>
-    <div class="nav-item" data-page-node-id="Q9lMnwlC92awtqO0E1j9JC">
+    <div class="nav-item" data-tab="todo" data-page-node-id="Q9lMnwlC92awtqO0E1j9JC">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" data-page-node-id="Qd5K9nHZa11FrNvIZ0p72f"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" data-page-node-id="LxAKD9fmL7NCw6VqrVJXPO"/><circle cx="9" cy="7" r="4" data-page-node-id="y0pGcVQnJX9i5j3bxDqyG7"/><path d="M23 21v-2a4 4 0 0 0-3-3.87" data-page-node-id="AV6y6p3CJlfdeBUWHTWbsS"/><path d="M16 3.13a4 4 0 0 1 0 7.75" data-page-node-id="Iq4uJXvRQ8tXsO3qBJBSu5"/></svg>
       朋友
       <span class="badge" data-page-node-id="o3Sj6O4oYTL5CG5dEwVPFR">1</span>
     </div>
-    <div class="nav-item" data-page-node-id="TKZT3r5hhNJu2xF4ltFdwv">
+    <div class="nav-item" id="navMine" data-tab="mine" data-page-node-id="TKZT3r5hhNJu2xF4ltFdwv">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" data-page-node-id="lqbICZtJQIBDvCQB1yjqad"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" data-page-node-id="HIcvuH5BDApQO0g9pteCE9"/><circle cx="12" cy="7" r="4" data-page-node-id="SvpxNqsNqAN9SoHrjRiNvo"/></svg>
       我的
     </div>
@@ -575,33 +578,78 @@
    */
   var feedList = document.getElementById('feedList');
 
+  /**
+   * 当前 Tab：'recommend'（公域发现流）| 'mine'（我的作品）。
+   *
+   * 为什么必须分开：抖音里「自己发的」不在推荐流里，而在个人中心——推荐流是算法分发的
+   * 公域池，自己的内容要先过审、进池才可能出现，用它看自己的作品既慢又不可靠。
+   * 「我的」走 /api/media/mine（按 user_id 分片直查库），因此即便 feed-engine 没起也能看到
+   * 自己发过什么（含 PENDING/REJECTED 等非终态），这正是排查"我发了却看不到"的第一现场。
+   */
+  var currentTab = 'recommend';
+
+  /** 从 mediaId（media/{userId}/{uuid}.{ext}）取作者短标识——后端契约暂不带作者字段。 */
+  function authorOf(item) {
+    var id = item.mediaId || '';
+    var parts = id.split('/');
+    if (parts.length >= 2 && /^\d+$/.test(parts[1])) {
+      return '用户' + parts[1].slice(-4);
+    }
+    return '匿名';
+  }
+
+  /** 审核状态的中文展示（「我的」页要能看出为什么某条没进公域）。 */
+  var STATUS_TEXT = {
+    PENDING: '审核中', APPROVED: '已发布', REJECTED: '未通过',
+    DELETED: '已删除', TAKEN_DOWN: '已下架', APPEALING: '申诉中'
+  };
+
   function loadFeed() {
     var TOKEN = localStorage.getItem('turbofeed:token');
     if (!TOKEN) { location.href = 'login.html'; return; }
-    fetch('http://localhost:8080/api/feed/recommended?page=0&size=20', {
-      headers: { 'Authorization': 'Bearer ' + TOKEN }
-    }).then(function (r) { return r.json(); })
+
+    var mine = currentTab === 'mine';
+    var url = mine
+      ? 'http://localhost:8080/api/media/mine?page=0&size=20'
+      : 'http://localhost:8080/api/feed/recommended?page=0&size=20';
+
+    fetch(url, { headers: { 'Authorization': 'Bearer ' + TOKEN } })
+      .then(function (r) { return r.json(); })
       .then(function (res) {
         var items = (res.data || []);
         videos = items.map(function (i) {
           // 一帖多图：images 是整帖图片（按 seq 排序，后端保证非空）；
           // 兼容旧结构：没有 images 时回退成单图 [url]
           var images = (i.images && i.images.length) ? i.images.slice() : (i.url ? [i.url] : []);
+          var statusText = STATUS_TEXT[i.status] || '';
           return {
             id: i.postId || i.mediaId,
-            author: '我',
-            title: i.mediaId.split('/').pop(),
+            author: mine ? '我' : authorOf(i),
+            statusText: statusText,
+            title: (i.mediaId || '').split('/').pop(),
             desc: i.caption || '',
-            tags: '#TurboFeed #UGC',
+            // 「我的」把审核状态并进描述，让人一眼看出这条为什么没进公域
+            tags: mine && statusText ? ('#' + statusText) : '#TurboFeed #UGC',
             music: '—',
             like: 0, comment: 0, fav: 0, share: 0,
             images: images,
             cover: images.length ? images[0] : ''
           };
         });
-        renderFeed();
+        renderFeed(mine);
       })
-      .catch(function (e) { console.error('加载 feed 失败', e); renderFeed(); });
+      .catch(function (e) { console.error('加载 feed 失败', e); renderFeed(mine); });
+  }
+
+  /** Tab 切换：换高亮 + 重拉数据。 */
+  function switchTab(tab) {
+    if (tab === 'todo') { toast('关注流 / 朋友流规划中（P2，需先建关注关系）'); return; }
+    if (tab === currentTab) return;
+    currentTab = tab;
+    Array.prototype.forEach.call(document.querySelectorAll('.nav-item[data-tab]'), function (el) {
+      el.classList.toggle('active', el.dataset.tab === tab);
+    });
+    loadFeed();
   }
 
   // 当前状态
@@ -615,10 +663,14 @@
   }
 
   // 生成 feed DOM（数据来自 loadFeed，仅渲染已有 videos）
-  function renderFeed() {
+  function renderFeed(mine) {
     feedList.innerHTML = '';
     if (!videos.length) {
-      feedList.innerHTML = '<div style="padding:40px;text-align:center;color:#8b98ab">暂无已通过审核的内容，去后台上传图片吧</div>';
+      // 两个 Tab 的空态文案必须不同：推荐空 = 公域没有已过审内容（可能是引擎没起/没补投）；
+      // 我的空 = 这个账号还没上传过。混用一句会让人误判故障范围。
+      feedList.innerHTML = mine
+        ? '<div style="padding:40px;text-align:center;color:#8b98ab">你还没有上传过内容，去「上传」页发一条吧</div>'
+        : '<div style="padding:40px;text-align:center;color:#8b98ab">公域暂无已通过审核的内容<br><span style="font-size:12px">（若库里已有 APPROVED 内容，多半是 feed-engine 未启动或时间线未补投）</span></div>';
       return;
     }
     videos.forEach(function (v, i) {
@@ -712,6 +764,11 @@
     if (carouselTimer) clearInterval(carouselTimer);
     carouselTimer = null;
   }
+
+  // 侧边栏 Tab 切换绑定（推荐 / 我的；关注、朋友为 P2 规划，点击给提示）
+  Array.prototype.forEach.call(document.querySelectorAll('.nav-item[data-tab]'), function (el) {
+    el.addEventListener('click', function () { switchTab(el.dataset.tab); });
+  });
 
   loadFeed();
 

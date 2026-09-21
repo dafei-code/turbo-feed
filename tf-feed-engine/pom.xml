@@ -20,6 +20,13 @@
             <groupId>com.turbofeed</groupId>
             <artifactId>tf-shared</artifactId>
         </dependency>
+        <!-- Redis 接入单一事实源：时间线 ZSET 与推荐流缓存都落 Redis，拓扑必须与服务同侧同源。
+             ⚠️ 0044 切集群时只改了网关，本模块仍连已下线的单机 6379 → 时间线读写静默失败、
+             推荐流全空。改为引入 tf-redis 后与网关共用 turbofeed.redis.*，杜绝再次漂移。 -->
+        <dependency>
+            <groupId>com.turbofeed</groupId>
+            <artifactId>tf-redis</artifactId>
+        </dependency>
         <!-- 热点治理为进程内 SDK（本地 L1 缓存 + 热点广播），以库形式嵌入本服务，非独立部署单元 -->
         <dependency>
             <groupId>com.turbofeed</groupId>

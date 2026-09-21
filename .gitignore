@@ -19,7 +19,9 @@ application-local.yml
 
 # 工作目录下的本地覆盖配置（Spring Boot 默认加载 file:./application.yml，
 # 优先级高于 classpath，用于放本机 MinIO/Redis/JWT 等凭据）。
-# ⚠️ 只忽略仓库根与 tf-gateway 模块根这两个"工作目录"位置，
+# ⚠️ 只忽略"工作目录"位置的 application.yml（仓库根与各部署单元模块根），
 #    绝不忽略 src/main/resources/application.yml（那是被跟踪的默认配置）。
+#    tf-feed-engine 同属部署单元：B1 拆分后它也要独立启动，本机同样需要一份覆盖配置。
 /application.yml
 /tf-gateway/application.yml
+/tf-feed-engine/application.yml
