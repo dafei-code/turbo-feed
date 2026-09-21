@@ -45,6 +45,7 @@ services:
       --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
       --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
       --cluster-announce-port 7000 --cluster-announce-bus-port 17000
+    restart: unless-stopped
     ports: ["7000:7000", "17000:17000"]
     volumes: ["redis-data-7000:/data"]
 
@@ -58,6 +59,7 @@ services:
       --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
       --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
       --cluster-announce-port 7001 --cluster-announce-bus-port 17001
+    restart: unless-stopped
     ports: ["7001:7001", "17001:17001"]
     volumes: ["redis-data-7001:/data"]
 
@@ -71,6 +73,7 @@ services:
       --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
       --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
       --cluster-announce-port 7002 --cluster-announce-bus-port 17002
+    restart: unless-stopped
     ports: ["7002:7002", "17002:17002"]
     volumes: ["redis-data-7002:/data"]
 
@@ -84,6 +87,7 @@ services:
       --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
       --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
       --cluster-announce-port 7003 --cluster-announce-bus-port 17003
+    restart: unless-stopped
     ports: ["7003:7003", "17003:17003"]
     volumes: ["redis-data-7003:/data"]
 
@@ -97,6 +101,7 @@ services:
       --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
       --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
       --cluster-announce-port 7004 --cluster-announce-bus-port 17004
+    restart: unless-stopped
     ports: ["7004:7004", "17004:17004"]
     volumes: ["redis-data-7004:/data"]
 
@@ -110,6 +115,7 @@ services:
       --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
       --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
       --cluster-announce-port 7005 --cluster-announce-bus-port 17005
+    restart: unless-stopped
     ports: ["7005:7005", "17005:17005"]
     volumes: ["redis-data-7005:/data"]
 

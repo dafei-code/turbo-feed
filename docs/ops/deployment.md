@@ -20,8 +20,20 @@ docker compose up -d          # 可选：仅当要启用 MQ 投递时才需要
 | 组件 | 默认地址 | 用途 |
 |---|---|---|
 | MySQL | `127.0.0.1:3306` | 元数据（经 ShardingSphere 分片，2 库 × 2 表） |
-| Redis | `127.0.0.1:6379` | 限流 / 并发护栏 / 状态缓存 / 公域时间线 |
+| Redis | `127.0.0.1:6379`（默认 single 模式） | 限流 / 并发护栏 / 状态缓存 / 公域时间线 |
 | MinIO | `127.0.0.1:9000` | 图片对象存储（bucket `turbo-feed-media` 需**匿名可读**，否则返回的图片 URL 浏览器 403） |
+
+Redis 集群化（可选）：`deploy/redis/docker-compose-cluster.yml` 提供 3 主 3 从（7000-7005，
+详见文件头注释与 changelog 0043）。切换只需两个环境变量，**不改任何代码/配置文件**：
+
+```bash
+TURBOFEED_REDIS_MODE=cluster
+TURBOFEED_REDIS_CLUSTER_NODES=127.0.0.1:7000,127.0.0.1:7001,127.0.0.1:7002
+```
+
+> ⚠️ 集群有硬前提：至少 3 主 3 从、16384 槽全覆盖（`cluster_state:ok`）。
+> 用 `cluster-announce-ip` 填宿主机局域网 IP；填 `127.0.0.1` 容器间握手会失败。
+> 只起 1~2 个节点的「集群」比单点更脆，不要这么做。
 
 建表与种子数据：
 

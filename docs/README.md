@@ -13,7 +13,8 @@ docs/
 │   ├── service-split.md      # 微服务拆分方案：部署单元 / 端口 / 通信矩阵
 │   ├── sharding.md           # 分库分表：分片键选型 / 6 张逻辑表 / 演进与踩坑
 │   ├── moderation-design.md  # 审核体系设计蓝图（P0~P3，**规划中未实施**）
-│   └── content-security-design.md # 内容安全（文本）：五层架构 / 归一化 / 白名单（**S1 已落地，S2+ 规划**）
+│   ├── content-security-design.md # 内容安全（文本）：五层架构 / 归一化 / 白名单（**S1 已落地，S2+ 规划**）
+│   └── recommendation-design.md  # 推荐与用户画像：分表数据聚合分析 / CDC 出仓 / 召回排序（**规划中未实施**）
 ├── modules/                  # 模块级技术文档（与 Maven 模块一一对应）
 │   ├── tf-gateway.md         # 网关：认证与 RBAC / 一帖多图上传 / 审核状态机 / 分片 / 配置
 │   ├── tf-counter.md         # 计数服务：现状（模块骨架）+ 设计蓝图
