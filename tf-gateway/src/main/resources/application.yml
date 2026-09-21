@@ -243,6 +243,9 @@ turbofeed:
     enabled: ${TURBOFEED_STATE_CACHE_ENABLED:true}
     ttl-seconds: ${TURBOFEED_STATE_CACHE_TTL_SECONDS:15}
     max-entries: ${TURBOFEED_STATE_CACHE_MAX_ENTRIES:100000}
+    # 跨实例失效广播（Redis pub/sub，changelog 0042）：关闭后退回「TTL 兜底」，
+    # 不一致窗口从「毫秒级」回到「最长 ttl-seconds」。Redis 不可用时也会自动退化，不会阻断写路径。
+    broadcast-enabled: ${TURBOFEED_STATE_CACHE_BROADCAST_ENABLED:true}
   fanout:
     push-threshold: 1000        # 大 V 判定：粉丝数阈值
     inbox-max-size: 2000        # 收件箱 LTRIM 定长

@@ -4,8 +4,10 @@ import com.turbofeed.gateway.service.review.credit.CreditLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
@@ -19,44 +21,64 @@ import java.util.function.Supplier;
  * 白白吃掉连接池与分片库的行锁/CPU。本地缓存把这两次读降到近乎零。</p>
  *
  * <p><b>为什么是本地缓存而不是 Redis</b>：Redis 能解决多实例一致性，但把一次「本可不发生的读」
- * 换成一次「必然发生的网络往返」，对<em>降低 DB 压力</em>这个目标反而更贵。正确组合是
- * 「本地缓存抗读热点 + Redis 广播失效保证一致性」——本类先解决前者（收益确定、零依赖），
- * 后者见下方「已知边界」。</p>
+ * 换成一次「必然发生的网络往返」，对<em>降低 DB 压力</em>这个目标反而更贵。
+ * 因此采用「本地缓存抗读热点 + Redis pub/sub 广播失效保证一致性」——
+ * 前者消除 99% 的读，后者把这 99% 带来的不一致窗口从「整个 TTL」压到「一次网络往返」。</p>
  *
  * <p><b>为什么不引 Caffeine</b>：只需要「TTL + 上限」，{@code ConcurrentHashMap} 足够；
  * 引入第三方缓存会带进驱逐线程、权重、统计等一整套配置面，而这里恰恰要的是<b>行为可预测</b>。</p>
  *
- * <h3>已知边界（必须知道，否则会误用）</h3>
+ * <h3>一致性模型（补齐广播后的口径）</h3>
  * <ol>
- *   <li><b>跨实例延迟</b>：A 实例封禁了某账号，B 实例的缓存最长 {@code ttl-seconds}（默认 15s）
- *       后才失效，期间该账号在 B 上仍可写。封禁是人工低频操作，15s 漏放窗口可接受；
- *       若要「立即生效」，下一步加 Redis pub/sub 广播 {@link #invalidate} 即可（本类已留出该入口）。</li>
- *   <li><b>本地写入立即失效</b>：本实例的处罚/信用写入路径（{@code recordViolation} /
- *       {@code liftPenalty} / 扣分恢复）都会主动 {@link #invalidate}，不存在「自己改了自己看不见」。</li>
+ *   <li><b>本实例写入</b>：处罚/信用的写路径调 {@link #invalidate}，本地立即失效
+ *       ——不存在「自己改了自己看不见」。</li>
+ *   <li><b>跨实例写入</b>：写方在 {@link #invalidate} 里顺带发一条 Redis pub/sub 广播，
+ *       其余实例收到后调 {@link #invalidateLocal}。窗口从「最长 TTL（15s）」压到「一次 Redis 往返」。</li>
+ *   <li><b>广播不可用时自动退化</b>：Redis 抖动/未部署时 {@code convertAndSend} 失败被吞掉，
+ *       回退到「TTL 兜底」——<b>不会因为 Redis 挂了就让写路径失败</b>。</li>
+ * </ol>
+ *
+ * <h3>其它边界</h3>
+ * <ul>
  *   <li><b>超限整体清空</b>：条目数超过 {@code max-entries} 时直接 {@code clear()}（不是 LRU）。
  *       这是保护性熔断：宁可缓存整体失效退回全量读 DB，也不让 map 无界增长拖垮堆。</li>
- *   <li><b>可一键关闭</b>：{@code turbofeed.state-cache.enabled=false} 即退回直读，
- *       用于「怀疑缓存导致状态不更新」时的快速回滚（与内容安全总开关同手法）。</li>
- * </ol>
+ *   <li><b>可一键关闭</b>：{@code turbofeed.state-cache.enabled=false} 退回直读；
+ *       {@code broadcast-enabled=false} 只关广播、保留本地缓存。</li>
+ * </ul>
  */
 @Component
 public class AccountStateCache {
 
     private static final Logger log = LoggerFactory.getLogger(AccountStateCache.class);
 
+    /** 跨实例失效广播频道。发布方与订阅方共用此常量，改一处即可。 */
+    public static final String INVALIDATE_CHANNEL = "turbofeed:cache:account-state:invalidate";
+
     private final boolean enabled;
     private final long ttlMillis;
     private final int maxEntries;
+    private final boolean broadcastEnabled;
+    private final StringRedisTemplate redisTemplate;
+
+    /**
+     * 本实例标识：广播消息里带上它，收到自己发的消息直接丢弃
+     * （不丢也幂等，但省掉一次无意义的 map 操作，且让日志更干净）。
+     */
+    private final String instanceId = UUID.randomUUID().toString();
 
     private final ConcurrentHashMap<Long, Holder<CreditLevel>> levelCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, Holder<Boolean>> writeCache = new ConcurrentHashMap<>();
 
     public AccountStateCache(@Value("${turbofeed.state-cache.enabled:true}") boolean enabled,
                              @Value("${turbofeed.state-cache.ttl-seconds:15}") long ttlSeconds,
-                             @Value("${turbofeed.state-cache.max-entries:100000}") int maxEntries) {
+                             @Value("${turbofeed.state-cache.max-entries:100000}") int maxEntries,
+                             @Value("${turbofeed.state-cache.broadcast-enabled:true}") boolean broadcastEnabled,
+                             StringRedisTemplate redisTemplate) {
         this.enabled = enabled;
         this.ttlMillis = Math.max(0L, ttlSeconds) * 1000L;
         this.maxEntries = Math.max(1, maxEntries);
+        this.broadcastEnabled = broadcastEnabled;
+        this.redisTemplate = redisTemplate;
     }
 
     /** 信用等级（带缓存）。loader 只在未命中 / 已过期 / 缓存关闭时被调用。 */
@@ -69,10 +91,58 @@ public class AccountStateCache {
         return enabled ? Boolean.TRUE.equals(getOrLoad(writeCache, userId, loader)) : Boolean.TRUE.equals(loader.get());
     }
 
-    /** 失效某账号的全部缓存项（本实例）。信用/处罚任一写入路径都应调用。 */
+    /**
+     * 失效某账号的全部缓存项，并<b>广播</b>给其它实例（先本地失效，再发消息）。
+     *
+     * <p>广播失败不影响主流程：吞异常后由 TTL 兜底。缓存是加速手段，绝不能反向拖垮写路径。</p>
+     */
     public void invalidate(long userId) {
+        invalidateLocal(userId);
+        if (!broadcastEnabled) {
+            return;
+        }
+        try {
+            redisTemplate.convertAndSend(INVALIDATE_CHANNEL, instanceId + ":" + userId);
+        } catch (Exception e) {
+            // Redis 不可用 → 退化到「TTL 兜底」。这里失败频率可能很高（每次处罚写都会走），
+            // 用 warn 会刷屏，故记 debug，由巡检/监控发现（缓存一致性有 TTL 上界兜底，不会无限发散）。
+            log.debug("缓存失效广播发送失败（退化到 TTL 兜底）: userId={}, {}", userId, e.toString());
+        }
+    }
+
+    /** 仅本实例失效（订阅方回调走这里——<b>绝不再次广播</b>，否则形成回环风暴）。 */
+    public void invalidateLocal(long userId) {
         levelCache.remove(userId);
         writeCache.remove(userId);
+    }
+
+    /**
+     * 处理收到的广播消息（格式 {@code instanceId:userId}）。
+     *
+     * @param message 频道消息体
+     * @return 是否真的失效了一个条目（订阅方日志与排障用）
+     */
+    public boolean onInvalidateMessage(String message) {
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        int sep = message.indexOf(':');
+        if (sep <= 0) {
+            return false;
+        }
+        String from = message.substring(0, sep);
+        if (instanceId.equals(from)) {
+            return false; // 自己发的，跳过
+        }
+        try {
+            long userId = Long.parseLong(message.substring(sep + 1));
+            invalidateLocal(userId);
+            log.debug("收到跨实例缓存失效广播: userId={}, from={}", userId, from);
+            return true;
+        } catch (NumberFormatException e) {
+            log.warn("缓存失效广播格式非法: {}", message);
+            return false;
+        }
     }
 
     /** 缓存条目数（巡检 / 排障用）。 */

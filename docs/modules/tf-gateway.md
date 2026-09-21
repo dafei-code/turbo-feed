@@ -77,7 +77,9 @@ com.turbofeed.gateway
 ├── domain/User · exception/ · util/（CaptionMarkParser / SnowflakeIdGenerator）
 └── ※ sharding/ 包曾在 v0 收录自写 HashModShardingAlgorithm，现已删除改用 SS 内置 HASH_MOD（见 changelog 0010+0012）
 ```
-> 资源侧：`shardingsphere-config.yaml`（分片规则，6 张逻辑表）+ `db/{user_schema,media_schema,expand_media_tables_128}.sql`。
+> 资源侧：`shardingsphere-config.yaml`（分片规则，6 张逻辑表）+ `shardingsphere-config-128.yaml`（扩容版）+ `db/{user_schema,media_schema,expand_media_tables_128,rebalance_media_128}.sql`。
+> ⚠️ 分片相关脚本一律遵循 **autoTables 全局连续编号**（`ds_0` 拿偶数下标、`ds_1` 拿奇数下标），
+> 不是「每库从 0 重新编号」——物理表名写错会静默路由不到（见 changelog 0041）。
 
 ## 2. 认证与授权（JWT + RBAC）
 

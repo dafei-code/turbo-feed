@@ -5,7 +5,11 @@
 --   逻辑表 media，分片键 user_id（归属用户 ID，与 user 表分片键 id 同值）
 --   路由：db    = hash(user_id) % 2 -> ds_0(turbo_feed_1) / ds_1(turbo_feed_2)
 --         table = hash(user_id) % 2 -> media_0 / media_1
---   物理表共 4 张：turbo_feed_1.media_0|media_1、turbo_feed_2.media_0|media_1
+--   物理表共 4 张（⚠️ 全局连续编号，非每库从 0 重编）：
+--     turbo_feed_1(ds_0) 拿偶数下标 media_0 / media_2
+--     turbo_feed_2(ds_1) 拿奇数下标 media_1 / media_3
+--   2026-09-21 修正：旧版写成每库 media_0|media_1，与 autoTables 推导的物理表名不符，
+--     照旧版建表会让 4 张表里有一半永远路由不到（见 changelog 0041）。
 --
 -- 建表前置：库已存在（turbo_feed_1 / turbo_feed_2 由 user_schema.sql 建立）。
 --   每个库内执行对应的 media_0 / media_1（下表已按库分组给出）。
@@ -25,60 +29,44 @@
 --    否则应用启动后首次访问 media 表会因认证失败连不上（之前全内存态未暴露此问题）。
 -- =============================================================================
 
--- -------------------- 库 1：turbo_feed_1（ds_0）--------------------
-CREATE TABLE `turbo_feed_1`.`media_0` (
-  `media_id`   VARCHAR(255) NOT NULL                COMMENT '内容唯一标识(业务主键, 形如 media/{userId}/{uuid}.{ext})',
-  `user_id`    BIGINT        NOT NULL                COMMENT '归属用户ID, 分片键(与 user 表同键, 同一用户媒体同片)',
-  `url`        VARCHAR(512) NOT NULL                COMMENT '可访问地址(本地盘或对象存储URL)',
+-- -------------------- 库 turbo_feed_1 --------------------
+CREATE TABLE IF NOT EXISTS `turbo_feed_1`.`media_0` (
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '内容唯一标识(业务主键)',
+  `user_id`    BIGINT        NOT NULL                COMMENT '归属用户ID, 分片键',
+  `url`        VARCHAR(512) NOT NULL                COMMENT '可访问地址',
   `status`     TINYINT       NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED',
-  `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO(本期仅 IMAGE)',
-  `file_size`  BIGINT        NOT NULL DEFAULT 0      COMMENT '字节数',
-  `created_at` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '上传时间',
-  `updated_at` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`media_id`),
-  KEY `idx_user_status` (`user_id`, `status`),
-  KEY `idx_user_created` (`user_id`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体元数据表(物理分片 turbo_feed_1.media_0)';
+  `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO',
+  `caption`     VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '描述/标题（抖音式文案；解析后结构化标记在 caption_mark）',
+  `caption_mark` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '解析后的结构化标记 JSON：@用户 / #话题 / [image:idx:filename]，前端直接消费',
+  `post_id`    VARCHAR(255) NOT NULL DEFAULT ''      COMMENT '帖子ID(一次上传批次=一帖多图;
 
-CREATE TABLE `turbo_feed_1`.`media_1` (
-  `media_id`   VARCHAR(255) NOT NULL                COMMENT '内容唯一标识(业务主键, 形如 media/{userId}/{uuid}.{ext})',
-  `user_id`    BIGINT        NOT NULL                COMMENT '归属用户ID, 分片键(与 user 表同键, 同一用户媒体同片)',
-  `url`        VARCHAR(512) NOT NULL                COMMENT '可访问地址(本地盘或对象存储URL)',
+CREATE TABLE IF NOT EXISTS `turbo_feed_1`.`media_2` (
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '内容唯一标识(业务主键)',
+  `user_id`    BIGINT        NOT NULL                COMMENT '归属用户ID, 分片键',
+  `url`        VARCHAR(512) NOT NULL                COMMENT '可访问地址',
   `status`     TINYINT       NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED',
-  `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO(本期仅 IMAGE)',
-  `file_size`  BIGINT        NOT NULL DEFAULT 0      COMMENT '字节数',
-  `created_at` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '上传时间',
-  `updated_at` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`media_id`),
-  KEY `idx_user_status` (`user_id`, `status`),
-  KEY `idx_user_created` (`user_id`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体元数据表(物理分片 turbo_feed_1.media_1)';
+  `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO',
+  `caption`     VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '描述/标题（抖音式文案；解析后结构化标记在 caption_mark）',
+  `caption_mark` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '解析后的结构化标记 JSON：@用户 / #话题 / [image:idx:filename]，前端直接消费',
+  `post_id`    VARCHAR(255) NOT NULL DEFAULT ''      COMMENT '帖子ID(一次上传批次=一帖多图;
 
--- -------------------- 库 2：turbo_feed_2（ds_1）--------------------
-CREATE TABLE `turbo_feed_2`.`media_0` (
-  `media_id`   VARCHAR(255) NOT NULL                COMMENT '内容唯一标识(业务主键, 形如 media/{userId}/{uuid}.{ext})',
-  `user_id`    BIGINT        NOT NULL                COMMENT '归属用户ID, 分片键(与 user 表同键, 同一用户媒体同片)',
-  `url`        VARCHAR(512) NOT NULL                COMMENT '可访问地址(本地盘或对象存储URL)',
+-- -------------------- 库 turbo_feed_2 --------------------
+CREATE TABLE IF NOT EXISTS `turbo_feed_2`.`media_1` (
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '内容唯一标识(业务主键)',
+  `user_id`    BIGINT        NOT NULL                COMMENT '归属用户ID, 分片键',
+  `url`        VARCHAR(512) NOT NULL                COMMENT '可访问地址',
   `status`     TINYINT       NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED',
-  `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO(本期仅 IMAGE)',
-  `file_size`  BIGINT        NOT NULL DEFAULT 0      COMMENT '字节数',
-  `created_at` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '上传时间',
-  `updated_at` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`media_id`),
-  KEY `idx_user_status` (`user_id`, `status`),
-  KEY `idx_user_created` (`user_id`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体元数据表(物理分片 turbo_feed_2.media_0)';
+  `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO',
+  `caption`     VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '描述/标题（抖音式文案；解析后结构化标记在 caption_mark）',
+  `caption_mark` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '解析后的结构化标记 JSON：@用户 / #话题 / [image:idx:filename]，前端直接消费',
+  `post_id`    VARCHAR(255) NOT NULL DEFAULT ''      COMMENT '帖子ID(一次上传批次=一帖多图;
 
-CREATE TABLE `turbo_feed_2`.`media_1` (
-  `media_id`   VARCHAR(255) NOT NULL                COMMENT '内容唯一标识(业务主键, 形如 media/{userId}/{uuid}.{ext})',
-  `user_id`    BIGINT        NOT NULL                COMMENT '归属用户ID, 分片键(与 user 表同键, 同一用户媒体同片)',
-  `url`        VARCHAR(512) NOT NULL                COMMENT '可访问地址(本地盘或对象存储URL)',
+CREATE TABLE IF NOT EXISTS `turbo_feed_2`.`media_3` (
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '内容唯一标识(业务主键)',
+  `user_id`    BIGINT        NOT NULL                COMMENT '归属用户ID, 分片键',
+  `url`        VARCHAR(512) NOT NULL                COMMENT '可访问地址',
   `status`     TINYINT       NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED',
-  `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO(本期仅 IMAGE)',
-  `file_size`  BIGINT        NOT NULL DEFAULT 0      COMMENT '字节数',
-  `created_at` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '上传时间',
-  `updated_at` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`media_id`),
-  KEY `idx_user_status` (`user_id`, `status`),
-  KEY `idx_user_created` (`user_id`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='媒体元数据表(物理分片 turbo_feed_2.media_1)';
+  `media_type` VARCHAR(16)   NOT NULL DEFAULT 'IMAGE' COMMENT 'IMAGE/VIDEO',
+  `caption`     VARCHAR(2048) NOT NULL DEFAULT '' COMMENT '描述/标题（抖音式文案；解析后结构化标记在 caption_mark）',
+  `caption_mark` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '解析后的结构化标记 JSON：@用户 / #话题 / [image:idx:filename]，前端直接消费',
+  `post_id`    VARCHAR(255) NOT NULL DEFAULT ''      COMMENT '帖子ID(一次上传批次=一帖多图;

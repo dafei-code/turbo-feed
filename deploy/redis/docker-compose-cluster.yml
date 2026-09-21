@@ -1,0 +1,122 @@
+# =============================================================================
+# turbo-feed Redis Cluster：3 主 3 从（7000-7005），用于把 Redis 从「单点」升级为「可容忍单节点故障」
+# -----------------------------------------------------------------------------
+# 前置：镜像 redis:latest 已在本地（无需拉取）。所有端口仅本机验证用，生产请勿照抄端口与密码。
+#
+# ⚠️⚠️ 关键坑：cluster-announce-ip 必须填「宿主机能被容器、且容器能被宿主机访问到的地址」。
+#   - 填 127.0.0.1：容器间互联会连到自己，集群握手失败（每个容器的 127.0.0.1 是它自己）。
+#   - 填 host.docker.internal：容器→宿主可以，但 **Mac 宿主本身解析不了这个名字**，
+#     于是宿主机上的 JVM 收到 MOVED 后连不上其它节点。
+#   - 填宿主机局域网 IP（如 192.168.0.4）：容器→宿主、宿主→容器双向都通。本机验证用这个。
+#     ⚠️ 局域网 IP 会随网络变化，换了 Wi-Fi 要重新 REDIS_CLUSTER_ANNOUNCE_IP 并重建集群。
+#
+# 用法：
+#   1) export REDIS_CLUSTER_ANNOUNCE_IP=$(ipconfig getifaddr en0)   # macOS 取局域网 IP
+#      export REDIS_PASSWORD=123456                                 # 与 TURBOFEED_REDIS_PASSWORD 一致
+#   2) docker compose -f deploy/redis/docker-compose-cluster.yml up -d
+#   3) 建集群（只需一次）：
+#      docker exec redis-7000 redis-cli -a "$REDIS_PASSWORD" --cluster create \
+#        $REDIS_CLUSTER_ANNOUNCE_IP:7000 $REDIS_CLUSTER_ANNOUNCE_IP:7001 \
+#        $REDIS_CLUSTER_ANNOUNCE_IP:7002 $REDIS_CLUSTER_ANNOUNCE_IP:7003 \
+#        $REDIS_CLUSTER_ANNOUNCE_IP:7004 $REDIS_CLUSTER_ANNOUNCE_IP:7005 \
+#        --cluster-replicas 1 --cluster-yes
+#   4) 校验：docker exec redis-7000 redis-cli -a "$REDIS_PASSWORD" cluster info
+#                                        （期望 cluster_state:ok、cluster_slots_assigned:16384）
+#   5) 应用侧切换（不要改 application.yml 默认值，走环境变量）：
+#      TURBOFEED_REDIS_MODE=cluster \
+#      TURBOFEED_REDIS_CLUSTER_NODES=$REDIS_CLUSTER_ANNOUNCE_IP:7000,$REDIS_CLUSTER_ANNOUNCE_IP:7001,$REDIS_CLUSTER_ANNOUNCE_IP:7002
+#      （客户端会自动发现其余节点，不必列全 6 个）
+#
+# 拆除：docker compose -f deploy/redis/docker-compose-cluster.yml down -v
+#
+# 💡 为什么默认仍是 single：本机只跑一个 Redis 时，上集群是「假装高可用」——
+#    1 主 0 从的集群比单点更脆（槽位未全覆盖会直接拒绝写入）。本文件的价值是
+#    「切换路径已就绪且被真实验证过」，见 docs/changelog/0041。
+# =============================================================================
+
+services:
+  redis-7000:
+    image: redis:latest
+    container_name: redis-7000
+    command: >
+      redis-server --port 7000
+      --cluster-enabled yes --cluster-config-file /data/nodes.conf --cluster-node-timeout 5000
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
+      --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
+      --cluster-announce-port 7000 --cluster-announce-bus-port 17000
+    ports: ["7000:7000", "17000:17000"]
+    volumes: ["redis-data-7000:/data"]
+
+  redis-7001:
+    image: redis:latest
+    container_name: redis-7001
+    command: >
+      redis-server --port 7001
+      --cluster-enabled yes --cluster-config-file /data/nodes.conf --cluster-node-timeout 5000
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
+      --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
+      --cluster-announce-port 7001 --cluster-announce-bus-port 17001
+    ports: ["7001:7001", "17001:17001"]
+    volumes: ["redis-data-7001:/data"]
+
+  redis-7002:
+    image: redis:latest
+    container_name: redis-7002
+    command: >
+      redis-server --port 7002
+      --cluster-enabled yes --cluster-config-file /data/nodes.conf --cluster-node-timeout 5000
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
+      --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
+      --cluster-announce-port 7002 --cluster-announce-bus-port 17002
+    ports: ["7002:7002", "17002:17002"]
+    volumes: ["redis-data-7002:/data"]
+
+  redis-7003:
+    image: redis:latest
+    container_name: redis-7003
+    command: >
+      redis-server --port 7003
+      --cluster-enabled yes --cluster-config-file /data/nodes.conf --cluster-node-timeout 5000
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
+      --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
+      --cluster-announce-port 7003 --cluster-announce-bus-port 17003
+    ports: ["7003:7003", "17003:17003"]
+    volumes: ["redis-data-7003:/data"]
+
+  redis-7004:
+    image: redis:latest
+    container_name: redis-7004
+    command: >
+      redis-server --port 7004
+      --cluster-enabled yes --cluster-config-file /data/nodes.conf --cluster-node-timeout 5000
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
+      --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
+      --cluster-announce-port 7004 --cluster-announce-bus-port 17004
+    ports: ["7004:7004", "17004:17004"]
+    volumes: ["redis-data-7004:/data"]
+
+  redis-7005:
+    image: redis:latest
+    container_name: redis-7005
+    command: >
+      redis-server --port 7005
+      --cluster-enabled yes --cluster-config-file /data/nodes.conf --cluster-node-timeout 5000
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
+      --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
+      --cluster-announce-port 7005 --cluster-announce-bus-port 17005
+    ports: ["7005:7005", "17005:17005"]
+    volumes: ["redis-data-7005:/data"]
+
+volumes:
+  redis-data-7000:
+  redis-data-7001:
+  redis-data-7002:
+  redis-data-7003:
+  redis-data-7004:
+  redis-data-7005:

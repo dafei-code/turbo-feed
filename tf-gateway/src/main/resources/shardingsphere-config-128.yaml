@@ -1,7 +1,7 @@
 # =============================================================================
 # ShardingSphere 分片配置【扩容版】：媒体元数据 2 库 × 64 表 = 128 物理表
 # -----------------------------------------------------------------------------
-# 与 shardingsphere-config.yaml 同结构，仅把 media 表分表数从 2 扩到 64，
+# 与 shardingsphere-config.yaml（当前生效）同结构、同算法，仅把 media 的分片数从 4 扩到 128，
 # 以承载百亿级媒体行（单表约千万行，B+Tree 索引友好）。
 #
 # 启用方式：application.yml 中
@@ -9,13 +9,25 @@
 #   + driver-class-name=org.apache.shardingsphere.driver.ShardingSphereDriver
 #
 # ⚠️ 切换前置（务必先执行 db/expand_media_tables_128.sql 建好 128 张物理表）：
-#   分片数变化（table 2 -> 64）会改变 hash 路由目标，直接切换会导致旧数据路由错乱。
+#   分片数变化（4 -> 128）会改变 hash 路由目标，直接切换会导致旧数据路由错乱。
 #   生产切换需做存量再平衡：双写/灰度迁移，而非停机硬切。详见 changelog 0019。
 #
-# 算法：Apache ShardingSphere 5.5.3 内置 HASH_MOD（type: HASH_MOD + props.sharding-count）。
-#   mediaDbSharding  sharding-count=2  （库候选 ds_0/ds_1）
-#   mediaTableSharding sharding-count=64（表候选 media_0..media_63）
-#   user 表维持 2 库 × 2 表（用户量远小于媒体量，无需扩容）。
+# 算法：Apache ShardingSphere 5.5.3 内置 HASH_MOD（type: HASH_MOD + props.sharding-count）
+#   - 实现为 Math.abs(分片键.hashCode()) % sharding-count（javap 实证，见 changelog 0036）
+#   - ⚠️ HASH_MOD 在 5.5.x 属「自动分片算法」，**只能挂在 autoTables**。
+#     挂在手动 tables 上会直接启动失败：
+#       AlgorithmInitializationException: `xxx` tables sharding configuration can not use auto sharding algorithm.
+#     （本文件 2026-09-21 之前正是这么写的，因此它其实**根本起不来**——见 changelog 0041）
+#
+# 物理表分布（autoTables 规则）：第 i 张表落到 actualDataSources.get(i % 库数)
+#   → ds_0(turbo_feed_1) 拿偶数下标：user_0/_2、media_0/_2/_4/.../_126
+#   → ds_1(turbo_feed_2) 拿奇数下标：user_1/_3、media_1/_3/_5/.../_127
+#   命名是<b>全局连续编号</b>（media_0..media_127），不是每库各 media_0..media_63。
+#
+# 各逻辑表分片数：
+#   media        = 128（扩容对象）
+#   user / account_credit / violation_record / account_penalty / report / appeal / comment = 4
+#   （用户/信用/处罚/互动的量级远小于媒体，维持与当前一致，避免无谓的再平衡）
 # =============================================================================
 
 dataSources:
@@ -23,75 +35,128 @@ dataSources:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
     # TODO 生产替换为 ENV: TURBO_FEED_DS_0_URL（密钥管理/配置中心注入）
-    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai
+    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
     username: root
     password: "123456"
+    # 连接池（HikariCP）：与 shardingsphere-config.yaml 保持一致（50/库）。
+    # 扩容后单库承载的物理表从 2 张涨到 64 张，连接竞争更激烈，此处同样不给小值。
+    maximumPoolSize: 50
+    minimumIdle: 10
+    connectionTimeout: 30000
+    idleTimeout: 600000
+    maxLifetime: 1800000
   ds_1:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
-    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai
+    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
     username: root
     password: "123456"
+    # 同 ds_0（见其连接池注释）
+    maximumPoolSize: 50
+    minimumIdle: 10
+    connectionTimeout: 30000
+    idleTimeout: 600000
+    maxLifetime: 1800000
 
 rules:
   - !SHARDING
-    tables:
-      # 逻辑表 user（业务 SQL 只写 user，由 ShardingSphere 路由到物理表）—— 维持 2 库 × 2 表
+    # 采用 autoTables（自动分片）而非 tables（手动分片）：
+    # HASH_MOD 是自动分片算法，只能配在 autoTables 上（见文件头注释）。
+    # autoTables 由 sharding-count 直接推导物理表数量与分布，无需手写 actualDataNodes，
+    # 也就不会出现「DDL 建的表名/分布与配置不一致」这类静默错位。
+    autoTables:
+      # 逻辑表 user：维持 2 库 × 2 表 = 4（与当前一致，避免用户数据再平衡）
       user:
-        actualDataNodes: ds_${0..1}.user_${0..1}
-        databaseStrategy:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
           standard:
             shardingColumn: id
-            shardingAlgorithmName: userDbSharding
-        tableStrategy:
-          standard:
-            shardingColumn: id
-            shardingAlgorithmName: userTableSharding
+            shardingAlgorithmName: hashMod4
         keyGenerateStrategy:
           column: id
           keyGeneratorName: snowflake
       # 逻辑表 media（UGC 媒体元数据）：扩容到 2 库 × 64 表 = 128 物理表
-      # 分片键仍为 user_id，与 user 表同键同算法，保证「我的上传」精准命中单分片。
+      # 分片键仍为 user_id，与 user 表同键，保证「我的上传」精准命中单分片。
       media:
-        actualDataNodes: ds_${0..1}.media_${0..63}
-        databaseStrategy:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
           standard:
             shardingColumn: user_id
-            shardingAlgorithmName: mediaDbSharding
-        tableStrategy:
+            shardingAlgorithmName: hashMod128
+      # 逻辑表 account_credit：分片键 user_id，维持 4（与当前一致）
+      account_credit:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
           standard:
             shardingColumn: user_id
-            shardingAlgorithmName: mediaTableSharding
-    # 分片算法：库 / 表各一条，复用 SS 内置 HASH_MOD，由 sharding-count 显式指定候选数
+            shardingAlgorithmName: hashMod4
+      # 逻辑表 violation_record：分片键 user_id（append-only 审计），id 由雪花填充
+      violation_record:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: hashMod4
+        keyGenerateStrategy:
+          column: id
+          keyGeneratorName: snowflake
+      # 逻辑表 account_penalty：分片键 user_id（账号级处罚态）
+      account_penalty:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: hashMod4
+      # 逻辑表 report / appeal：分片键 media_id
+      report:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: media_id
+            shardingAlgorithmName: hashMod4
+      appeal:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: media_id
+            shardingAlgorithmName: hashMod4
+      # 逻辑表 comment：分片键 media_id（与 media 按 user_id 分片正交），
+      # 保证「读某条内容下所有评论」单分片命中
+      comment:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: media_id
+            shardingAlgorithmName: hashMod4
+        keyGenerateStrategy:
+          column: comment_id
+          keyGeneratorName: snowflake
     shardingAlgorithms:
-      userDbSharding:
+      # 分片数 4：user / account_credit / violation_record / account_penalty / report / appeal / comment
+      hashMod4:
         type: HASH_MOD
         props:
-          sharding-count: 2
-      userTableSharding:
+          sharding-count: 4
+      # 分片数 128：仅 media 使用（扩容目标）
+      hashMod128:
         type: HASH_MOD
         props:
-          sharding-count: 2
-      mediaDbSharding:
-        type: HASH_MOD
-        props:
-          sharding-count: 2
-      mediaTableSharding:
-        type: HASH_MOD
-        props:
-          sharding-count: 64
+          sharding-count: 128
     keyGenerators:
       snowflake:
         type: SNOWFLAKE
-  # 单表规则（必须显式声明）：与 shardingsphere-config.yaml 同因——
-  # 未纳入 !SHARDING 的表（sensitive_word）不会自动进入逻辑元数据，
-  # 缺此规则会抛 TableNotFoundException，导致敏感词库加载失败、过滤静默失效。
+  # 单表规则（必须显式声明）：未纳入 !SHARDING 的表不会自动进入逻辑元数据，
+  # 缺此规则会抛 TableNotFoundException。
   # ⚠️ tables 元素必须是「数据源.表名」全限定格式。
+  # ⚠️ 本段必须与 shardingsphere-config.yaml 保持同步——漏登记的表在切换分片配置后
+  #    会突然报 TableNotFoundException（尤其 outbox_event：漏了它会导致时间线投递整体失效）。
   - !SINGLE
     defaultDataSource: ds_0
     tables:
       - ds_0.sensitive_word
       - ds_0.sensitive_whitelist
+      - ds_0.user_phone_router
+      - ds_0.outbox_event
 
 props:
   sql-show: true
