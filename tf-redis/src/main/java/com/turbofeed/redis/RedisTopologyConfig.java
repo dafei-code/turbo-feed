@@ -66,10 +66,16 @@ public class RedisTopologyConfig {
     /**
      * 集群模式连接工厂。
      *
+     * <p><b>关闭期 "unreleased connections" WARN 修复（#0043）</b>：池化 + {@code shareNativeConnection=false}
+     * 下，容器关闭时若 {@code shutdownTimeout} 过短，底层 netty 连接池在仍有在途连接时即被关闭，
+     * 触发 Commons-Pool 的 "unreleased connections" 警告。显式声明 {@code destroyMethod="destroy"}
+     * 保证工厂随容器优雅销毁、底层池被显式 close；同时将未配置的 {@code shutdownTimeout} 放宽到 2s，
+     * 给池足够时间排空在途连接。运行期无影响。单机模式不走本工厂（交 Boot 自动装配），不出现该 WARN。</p>
+     *
      * @param nodes        逗号分隔的 {@code host:port} 列表（只需给到部分节点，客户端会自动发现其余）
      * @param maxRedirects MOVED/ASK 重定向最大跳数
      */
-    @Bean
+    @Bean(destroyMethod = "destroy")
     @ConditionalOnProperty(name = "turbofeed.redis.mode", havingValue = "cluster")
     public RedisConnectionFactory redisClusterConnectionFactory(
             RedisProperties properties,
@@ -82,8 +88,8 @@ public class RedisTopologyConfig {
         return lettuceFactory(config, properties);
     }
 
-    /** 哨兵模式连接工厂。 */
-    @Bean
+    /** 哨兵模式连接工厂（关闭期 WARN 修复同集群工厂，见 {@link #redisClusterConnectionFactory}）。 */
+    @Bean(destroyMethod = "destroy")
     @ConditionalOnProperty(name = "turbofeed.redis.mode", havingValue = "sentinel")
     public RedisConnectionFactory redisSentinelConnectionFactory(
             RedisProperties properties,
@@ -126,12 +132,19 @@ public class RedisTopologyConfig {
 
     private static LettuceClientConfiguration lettuceClientConfiguration(RedisProperties properties) {
         Duration timeout = properties.getTimeout() == null ? Duration.ofMillis(500) : properties.getTimeout();
+        // 关闭期排空超时：默认仅 100ms（Spring Boot 默认），池化 + shareNativeConnection=false 下
+        // 在途连接往往来不及归还就被关，触发 "unreleased connections" WARN。未显式配置时放宽到 2s，
+        // 给底层 Commons-Pool 足够时间排空（运行期无任何影响，只在进程关闭时起作用）。
+        Duration shutdownTimeout = properties.getLettuce().getShutdownTimeout();
+        if (shutdownTimeout == null || shutdownTimeout.isZero() || shutdownTimeout.isNegative()) {
+            shutdownTimeout = Duration.ofSeconds(2);
+        }
         // 注意：poolConfig(...) 只存在于 LettucePoolingClientConfigurationBuilder 上，
         // 用父类型 LettuceClientConfigurationBuilder 接住会编译不过（方法不在父接口）。
         LettucePoolingClientConfiguration.LettucePoolingClientConfigurationBuilder builder =
                 LettucePoolingClientConfiguration.builder()
                         .commandTimeout(timeout)
-                        .shutdownTimeout(properties.getLettuce().getShutdownTimeout());
+                        .shutdownTimeout(shutdownTimeout);
         RedisProperties.Pool pool = properties.getLettuce().getPool();
         GenericObjectPoolConfig<Object> poolConfig = new GenericObjectPoolConfig<>();
         poolConfig.setMaxTotal(pool.getMaxActive());

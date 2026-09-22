@@ -430,6 +430,64 @@ public class FeedTimelineStore {
     }
 
     /**
+     * 流量池降级（抖音式赛马的差评通道）：把某帖从当前池搬到更低池，<b>仅降不升</b>。
+     *
+     * <p>与 {@link #promote} 完全对称：复用同一套 ZSET + 反查索引，只改池号方向（{@code oldPool > targetPool}）。
+     * score（入流时刻）不变，改变的是"曝光池"——读路径按池权重分配槽位，
+     * 进更低池 = 在推荐流里拿到更少占位。下架走 {@link #remove} 时据新索引精确摘除，不会漏删。</p>
+     *
+     * <p><b>为什么是"步降一级"而非"一步打回 L1"</b>：晋级也是每轮最多升一级
+     * （{@code decideTargetPool} 的语义），降级对称才不会出现"一次差评直接清零、之后要重新赛马爬升"的剧烈抖动；
+     * 差评率持续偏高会在后续多轮扫描里逐级降回 L1，过程平滑、可观测。</p>
+     *
+     * @param timelineKey 帖身份（与 append 一致；有 postId 用 postId，历史数据回退 mediaId）
+     * @param targetPool  目标池（必须 &lt; 当前池且 ≥ 1）
+     * @return true = 已降级；false = 不在池中 / 已是更低池 / 参数非法（无需动作）
+     */
+    public boolean demote(String timelineKey, int targetPool) {
+        if (timelineKey == null || targetPool <= 0 || targetPool >= MAX_POOL_LEVELS) {
+            return false;
+        }
+        try {
+            String idxKey = IDX_PREFIX + timelineKey;
+            String location = redisTemplate.opsForValue().get(idxKey);
+            if (location == null) {
+                return false;
+            }
+            int sep = location.indexOf(IDX_SEP);
+            if (sep <= 0) {
+                return false;
+            }
+            String bucketKey = location.substring(0, sep);
+            String member = location.substring(sep + IDX_SEP.length());
+            String rest = bucketKey.substring(TL_PREFIX.length());
+            int colon = rest.indexOf(':');
+            if (colon <= 0) {
+                return false;
+            }
+            int oldPool = Integer.parseInt(rest.substring(0, colon));
+            String date = rest.substring(colon + 1);
+            if (oldPool <= targetPool) {
+                return false;                       // 仅降不升，避免来回抖动
+            }
+            Double score = redisTemplate.opsForZSet().score(bucketKey, member);
+            if (score == null) {
+                return false;                       // 索引与 ZSET 不一致，放弃降级
+            }
+            String newBucket = TL_PREFIX + targetPool + ":" + date;
+            redisTemplate.opsForZSet().remove(bucketKey, member);
+            redisTemplate.opsForZSet().add(newBucket, member, score);
+            redisTemplate.expire(newBucket, BUCKET_TTL);
+            // 反查索引改写到新桶位置：否则后续 remove 会 ZREM 旧桶（已空），下架失效
+            redisTemplate.opsForValue().set(idxKey, newBucket + IDX_SEP + member, BUCKET_TTL);
+            return true;
+        } catch (Exception e) {
+            log.warn("流量池降级失败（不影响主流程）: timelineKey={}, targetPool={}, {}", timelineKey, targetPool, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * 读取某帖当前所在流量池（0 = 不在任何池中 / 已过期）。晋级器据此决定目标池，
      * 并据此把"已离开公域"的帖从待评估集合剔除。
      */

@@ -626,6 +626,7 @@ CREATE TABLE `turbo_feed_1`.`outbox_event` (
   `updated_at`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
   KEY `idx_dispatch` (`status`, `next_attempt_at`),
+  KEY `idx_reap` (`status`, `updated_at`),
   KEY `idx_aggregate` (`aggregate_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='事务发件箱(单表, 杜绝"事务已提交但消息丢失")';
 

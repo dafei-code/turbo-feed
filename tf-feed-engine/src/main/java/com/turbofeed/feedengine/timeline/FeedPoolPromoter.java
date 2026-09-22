@@ -19,9 +19,12 @@ import java.util.Set;
  *
  * <p><b>晋级判定（阈值外置到 {@link FeedPoolPromoterProperties}，yml 可配，带默认值）</b>：
  * <ul>
- *   <li>样本不足（曝光 &lt; {@code minImpressions}）不晋级，避免小样本误判；</li>
- *   <li>差评率（dislikes/impressions）≥ {@code dislikeDemoteRatio} → 锁在/打回 L1，不给公域放大；</li>
- *   <li>L1 且互动率 ≥ {@code p1ToP2Rate}（默认 5%）→ L2；L2 且互动率 ≥ {@code p2ToP3Rate}（默认 8%）→ L3。</li>
+ *   <li>样本不足（曝光 &lt; {@code minImpressions}）不动，避免小样本误判；</li>
+ *   <li><b>差评降级（对称通道）</b>：差评率（dislikes/impressions）≥ {@code dislikeDemoteRatio}
+ *       → 步降一级（{@code cur-1}，封底 L1）。与晋级每轮最多升一级对称，避免"一次差评直接清零"的剧烈抖动；
+ *       持续差评会在后续多轮逐级降回 L1。这是 P1 赛马原先缺失的降级通道——原先只算降级目标却因
+ *       {@code scanNow} 仅处理 {@code target > cur} 而被静默丢弃，差评内容仍停在高池放大。</li>
+ *   <li>L1 且互动率 ≥ {@code p1ToP2Rate}（默认 5%）→ L2；L2 且互动率 ≥ {@code p2ToP3Rate}（默认 8%）→ L3（晋级）。</li>
  * </ul>
  * 互动率 = (点赞+评论+分享 + playCompleteWeight×完播) / 曝光。完播权重低于主动互动，符合短视频"看完≠喜欢"的直觉。</p>
  *
@@ -72,6 +75,7 @@ public class FeedPoolPromoter {
             return 0;
         }
         int promoted = 0;
+        int demoted = 0;
         for (String timelineKey : tracked) {
             if (timelineKey == null) {
                 continue;
@@ -85,6 +89,7 @@ public class FeedPoolPromoter {
             PostStatService.PostStat stat = statService.snapshot(timelineKey);
             int target = decideTargetPool(cur, stat);
             if (target > cur) {
+                // 晋级（仅升不降）：进更高池 = 在推荐流里拿到更多占位
                 if (timelineStore.promote(timelineKey, target)) {
                     promoted++;
                     recommendedFeedService.invalidate();
@@ -94,12 +99,25 @@ public class FeedPoolPromoter {
                 if (target >= FeedTimelineStore.MAX_POOL_LEVELS) {
                     redisTemplate.opsForSet().remove(PostStatService.TRACKED_KEY, timelineKey);
                 }
+            } else if (target < cur) {
+                // 降级（对称通道）：差评率过高 → 步降一级（cur-1，封底 L1）。
+                // 原先只计算降级目标却因 scanNow 仅处理 target>cur 而被丢弃，差评内容仍停在高池放大。
+                if (timelineStore.demote(timelineKey, target)) {
+                    demoted++;
+                    recommendedFeedService.invalidate();
+                    log.info("流量池降级: timelineKey={}, {}→{} (impressions={}, dislikeRatio={})",
+                            timelineKey, cur, target, stat.impressions(),
+                            stat.impressions() > 0 ? (double) stat.dislikes() / stat.impressions() : 0d);
+                }
             }
         }
         if (promoted > 0) {
             log.info("流量池晋级本轮完成: 晋级 {} 条", promoted);
         }
-        return promoted;
+        if (demoted > 0) {
+            log.info("流量池降级本轮完成: 降级 {} 条", demoted);
+        }
+        return promoted + demoted;
     }
 
     private int decideTargetPool(int cur, PostStatService.PostStat s) {
@@ -109,7 +127,10 @@ public class FeedPoolPromoter {
         }
         double dislikeRatio = imp > 0 ? (double) s.dislikes() / imp : 0d;
         if (dislikeRatio >= props.getDislikeDemoteRatio()) {
-            return 1;                                     // 差评率过高：锁在/打回 L1，不给公域放大
+            // 差评率过高：步降一级（对称于晋级每轮最多升一级），封底 L1。
+            // 原先此处写死返回 1，但 scanNow 只处理 target>cur，导致降级目标被静默丢弃、
+            // 差评内容仍停在高池放大——这是 P1 赛马原先缺失的降级通道。
+            return Math.max(1, cur - 1);
         }
         if (cur == 1 && interactionRate(s) >= props.getP1ToP2Rate()) {
             return 2;
