@@ -15,7 +15,12 @@
 #   - 由 props.sharding-count 显式指定该层候选目标数（不是按 availableTargetNames.size() 自动适配），
 #     扩容/缩容需同步改 sharding-count，避免分母失配。
 #
-# 真实数据源账号密码：本文件内配置仅供克隆即跑；生产请用环境变量/密钥管理注入，勿硬编码。
+# 真实数据源账号密码不落仓库（changelog 0048）：数据源三要素全部为 SS 环境占位符，
+# 加载期由 ShardingSphereURLLoadEngine 渲染（application.yml 的 datasource.url 已携带
+# placeholder-type=ENVIRONMENT，取值来源=进程环境变量，缺失时用占位符内的默认值）。
+#   库 URL  ← TURBOFEED_DB_0_URL / TURBOFEED_DB_1_URL（默认本机开发库）
+#   用户名  ← TURBOFEED_DB_USERNAME（默认 root）
+#   口令    ← TURBOFEED_DB_PASSWORD（无默认值：本机开发请 export，生产由密钥管理/配置中心注入）
 # =============================================================================
 
 # 数据源集合：2 个库（ds_0 / ds_1），对应物理 MySQL 实例 turbo_feed_1 / turbo_feed_2
@@ -23,10 +28,10 @@ dataSources:
   ds_0:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
-    # TODO 生产替换为 ENV: TURBO_FEED_DS_0_URL（密钥管理/配置中心注入）
-    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
-    username: root
-    password: "123456"
+    # 三要素占位符化（语法/取值来源见文件头说明），默认值仅为本机开发兜底、不含真实口令
+    jdbcUrl: $${TURBOFEED_DB_0_URL::jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: $${TURBOFEED_DB_USERNAME::root}
+    password: $${TURBOFEED_DB_PASSWORD::}
     # 连接池（HikariCP）：默认 maximumPoolSize=10/库 → 2 库仅 20 连接，高并发下线程在 getConnection 排队。
     # 按「Sentinel 并发上限 + 上传存储执行器(max 64) + 审核执行器(max 16)」估，50/库=100 总连接留足余量。
     maximumPoolSize: 50
@@ -37,9 +42,9 @@ dataSources:
   ds_1:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
-    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
-    username: root
-    password: "123456"
+    jdbcUrl: $${TURBOFEED_DB_1_URL::jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: $${TURBOFEED_DB_USERNAME::root}
+    password: $${TURBOFEED_DB_PASSWORD::}
     # 同 ds_0（见其连接池注释）
     maximumPoolSize: 50
     minimumIdle: 10

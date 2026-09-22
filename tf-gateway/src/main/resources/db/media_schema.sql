@@ -24,9 +24,9 @@
 --   4) idx_user_status / idx_user_created：支撑「我的上传」按状态过滤与按时间倒序。
 --   5) media_type / file_size：预留字段，本期仅 IMAGE，后续扩视频不动表结构。
 --
--- ⚠️ 连接账号：shardingsphere-config.yaml 中 ds_0/ds_1 的 password 当前为空。
---    若本地 MySQL root 设有密码，请先在 shardingsphere-config.yaml 的 password 处填入，
---    否则应用启动后首次访问 media 表会因认证失败连不上（之前全内存态未暴露此问题）。
+-- ⚠️ 连接账号：shardingsphere-config.yaml 中 ds_0/ds_1 的口令已占位符化（环境变量
+--    TURBOFEED_DB_PASSWORD，仓库内无默认值，见 changelog 0048）。本机开发请先 export
+--    该变量再启动，否则应用启动后首次访问 media 表会因认证失败连不上。
 -- =============================================================================
 
 -- -------------------- 库 turbo_feed_1 --------------------

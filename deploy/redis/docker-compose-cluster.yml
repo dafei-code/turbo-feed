@@ -12,7 +12,7 @@
 #
 # 用法：
 #   1) export REDIS_CLUSTER_ANNOUNCE_IP=$(ipconfig getifaddr en0)   # macOS 取局域网 IP
-#      export REDIS_PASSWORD=123456                                 # 与 TURBOFEED_REDIS_PASSWORD 一致
+#      export REDIS_PASSWORD=<本机 Redis 口令>                        # 必须设置（与应用侧 TURBOFEED_REDIS_PASSWORD 一致；未设置 compose 直接报错退出）
 #   2) docker compose -f deploy/redis/docker-compose-cluster.yml up -d
 #   3) 建集群（只需一次）：
 #      docker exec redis-7000 redis-cli -a "$REDIS_PASSWORD" --cluster create \
@@ -42,7 +42,7 @@ services:
       redis-server --port 7000
       --cluster-enabled yes --cluster-config-file /data/nodes.conf --cluster-node-timeout 5000
       --appendonly yes
-      --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be exported (与 TURBOFEED_REDIS_PASSWORD 一致)} --masterauth ${REDIS_PASSWORD:?REDIS_PASSWORD must be exported (与 TURBOFEED_REDIS_PASSWORD 一致)}
       --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
       --cluster-announce-port 7000 --cluster-announce-bus-port 17000
     restart: unless-stopped
@@ -56,7 +56,7 @@ services:
       redis-server --port 7001
       --cluster-enabled yes --cluster-config-file /data/nodes.conf --cluster-node-timeout 5000
       --appendonly yes
-      --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be exported (与 TURBOFEED_REDIS_PASSWORD 一致)} --masterauth ${REDIS_PASSWORD:?REDIS_PASSWORD must be exported (与 TURBOFEED_REDIS_PASSWORD 一致)}
       --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
       --cluster-announce-port 7001 --cluster-announce-bus-port 17001
     restart: unless-stopped
@@ -70,7 +70,7 @@ services:
       redis-server --port 7002
       --cluster-enabled yes --cluster-config-file /data/nodes.conf --cluster-node-timeout 5000
       --appendonly yes
-      --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be exported (与 TURBOFEED_REDIS_PASSWORD 一致)} --masterauth ${REDIS_PASSWORD:?REDIS_PASSWORD must be exported (与 TURBOFEED_REDIS_PASSWORD 一致)}
       --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
       --cluster-announce-port 7002 --cluster-announce-bus-port 17002
     restart: unless-stopped
@@ -84,7 +84,7 @@ services:
       redis-server --port 7003
       --cluster-enabled yes --cluster-config-file /data/nodes.conf --cluster-node-timeout 5000
       --appendonly yes
-      --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be exported (与 TURBOFEED_REDIS_PASSWORD 一致)} --masterauth ${REDIS_PASSWORD:?REDIS_PASSWORD must be exported (与 TURBOFEED_REDIS_PASSWORD 一致)}
       --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
       --cluster-announce-port 7003 --cluster-announce-bus-port 17003
     restart: unless-stopped
@@ -98,7 +98,7 @@ services:
       redis-server --port 7004
       --cluster-enabled yes --cluster-config-file /data/nodes.conf --cluster-node-timeout 5000
       --appendonly yes
-      --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be exported (与 TURBOFEED_REDIS_PASSWORD 一致)} --masterauth ${REDIS_PASSWORD:?REDIS_PASSWORD must be exported (与 TURBOFEED_REDIS_PASSWORD 一致)}
       --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
       --cluster-announce-port 7004 --cluster-announce-bus-port 17004
     restart: unless-stopped
@@ -112,7 +112,7 @@ services:
       redis-server --port 7005
       --cluster-enabled yes --cluster-config-file /data/nodes.conf --cluster-node-timeout 5000
       --appendonly yes
-      --requirepass ${REDIS_PASSWORD:-123456} --masterauth ${REDIS_PASSWORD:-123456}
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be exported (与 TURBOFEED_REDIS_PASSWORD 一致)} --masterauth ${REDIS_PASSWORD:?REDIS_PASSWORD must be exported (与 TURBOFEED_REDIS_PASSWORD 一致)}
       --cluster-announce-ip ${REDIS_CLUSTER_ANNOUNCE_IP:?必须设置宿主机可达 IP，见文件头注释}
       --cluster-announce-port 7005 --cluster-announce-bus-port 17005
     restart: unless-stopped

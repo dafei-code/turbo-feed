@@ -34,10 +34,11 @@ dataSources:
   ds_0:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
-    # TODO 生产替换为 ENV: TURBO_FEED_DS_0_URL（密钥管理/配置中心注入）
-    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
-    username: root
-    password: "123456"
+    # 三要素占位符化（与 shardingsphere-config.yaml 同一机制，见其文件头说明）；
+    # 128 扩容配置当前未启用，保持与现网配置同构
+    jdbcUrl: $${TURBOFEED_DB_0_URL::jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: $${TURBOFEED_DB_USERNAME::root}
+    password: $${TURBOFEED_DB_PASSWORD::}
     # 连接池（HikariCP）：与 shardingsphere-config.yaml 保持一致（50/库）。
     # 扩容后单库承载的物理表从 2 张涨到 64 张，连接竞争更激烈，此处同样不给小值。
     maximumPoolSize: 50
@@ -48,9 +49,9 @@ dataSources:
   ds_1:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
-    jdbcUrl: jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
-    username: root
-    password: "123456"
+    jdbcUrl: $${TURBOFEED_DB_1_URL::jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: $${TURBOFEED_DB_USERNAME::root}
+    password: $${TURBOFEED_DB_PASSWORD::}
     # 同 ds_0（见其连接池注释）
     maximumPoolSize: 50
     minimumIdle: 10

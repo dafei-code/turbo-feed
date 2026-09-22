@@ -87,6 +87,7 @@ java -jar tf-feed-engine/target/tf-feed-engine-0.1.0-SNAPSHOT.jar  # :8083
 |---|---|
 | `TURBOFEED_SNOWFLAKE_WORKER_ID` / `TURBOFEED_SNOWFLAKE_DATACENTER_ID` | 雪花实例标识（0~31）。**刻意无默认值：缺失即启动失败**（`SnowflakeConfig#requireInstanceId`），因为 1/1 兜底会让多实例在同一毫秒生成相同 ID、直接撞主键。单实例本地开发也必须显式给一次 |
 | `TURBOFEED_JWT_SECRET` | JWT 签名密钥（HS256），**长度须 ≥ 32 字符，缺失或过短即启动失败**（`JwtProperties#requireSecret`）。HS256 是对称算法，持有密钥即可签发任意 `userId` + 任意 `role` 的令牌，故拒绝任何兜底默认值。生成：`openssl rand -base64 32` |
+| `TURBOFEED_DB_PASSWORD` | MySQL 数据源口令（网关，经 ShardingSphere 数据源）。**仓库内无默认值**（changelog 0048）：SS 配置中口令占位符在加载期从本变量渲染（驱动 URL 携带 `placeholder-type=ENVIRONMENT`）；未注入时空口令连接，认证直接失败。同族的 `TURBOFEED_DB_0_URL` / `TURBOFEED_DB_1_URL` / `TURBOFEED_DB_USERNAME` 可覆盖库 URL（默认本机 `127.0.0.1:3306` 的 `turbo_feed_1` / `turbo_feed_2`）与用户名（默认 `root`） |
 | `TURBOFEED_REDIS_PASSWORD` | Redis 口令。**已外部化，默认空串 = 无密码**；未注入而 Redis 要求鉴权时直接报 NOAUTH（不静默降级） |
 | `TURBOFEED_FEED_ENGINE_BASE_URL` | Feed 引擎地址，默认 `http://localhost:8083` |
 
