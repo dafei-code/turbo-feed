@@ -609,7 +609,7 @@ CREATE TABLE `turbo_feed_1`.`user_phone_router` (
 -- 为什么单表：它就是一张队列表，按 id 顺序消费即可，没有按用户查询的诉求；
 --            单表让「待投递行数」「DEAD 行数」这类对账查询一条 SQL 就能看到全貌。
 -- 部署：必须在 shardingsphere-config.yaml 的 `!SINGLE` 里登记 ds_0.outbox_event。
--- 运维：DEAD 行不会自动消失（保留供人工对账），确认无需补偿后自行归档删除。
+-- 运维：DEAD 行由 OutboxDeadLetterSweeper 周期重投（带冷却、封顶 max-dead-redeliveries），达上限后保留供人工对账，确认无需补偿后自行归档删除。
 CREATE TABLE `turbo_feed_1`.`outbox_event` (
   `id`              BIGINT       NOT NULL                COMMENT '事件ID(雪花), 投递顺序键',
   `event_type`      VARCHAR(64)  NOT NULL                COMMENT 'TIMELINE_APPEND / TIMELINE_REMOVE',
@@ -619,6 +619,7 @@ CREATE TABLE `turbo_feed_1`.`outbox_event` (
   `status`          VARCHAR(16)  NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/SENDING/SENT/FAILED/DEAD',
   `attempt_count`   INT          NOT NULL DEFAULT 0      COMMENT '已尝试次数(领取时 +1)',
   `max_attempts`    INT          NOT NULL DEFAULT 5      COMMENT '重试上限, 达上限置 DEAD 等人工',
+  `dead_count`      INT          NOT NULL DEFAULT 0      COMMENT '死信重投次数(达上限后永久终态, 由 OutboxDeadLetterSweeper 重投)',
   `last_error`      VARCHAR(512)          DEFAULT NULL   COMMENT '最近一次失败原因(截断)',
   `next_attempt_at` DATETIME     NOT NULL                COMMENT '下次可被领取的时点(退避)',
   `created_at`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',

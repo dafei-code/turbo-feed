@@ -17,13 +17,13 @@ import java.util.Set;
  * {@code tf:feed:stat:tracked}，本类按 {@code fixedDelay} 扫这个有界集合，按互动率把内容
  * 从低池晋级到高池（仅升不降）。{@link #scanNow()} 同时供运维/测试手动触发，便于即时验证。</p>
  *
- * <p><b>晋级判定（演示默认值，可按业务调参）</b>：
+ * <p><b>晋级判定（阈值外置到 {@link FeedPoolPromoterProperties}，yml 可配，带默认值）</b>：
  * <ul>
- *   <li>样本不足（曝光 &lt; {@code MIN_IMPRESSIONS}）不晋级，避免小样本误判；</li>
- *   <li>差评率（dislikes/impressions）≥ {@code DISLIKE_DEMOTE_RATIO} → 锁在/打回 L1，不给公域放大；</li>
- *   <li>L1 且互动率 ≥ {@code P1_TO_P2_RATE}（5%）→ L2；L2 且互动率 ≥ {@code P2_TO_P3_RATE}（8%）→ L3。</li>
+ *   <li>样本不足（曝光 &lt; {@code minImpressions}）不晋级，避免小样本误判；</li>
+ *   <li>差评率（dislikes/impressions）≥ {@code dislikeDemoteRatio} → 锁在/打回 L1，不给公域放大；</li>
+ *   <li>L1 且互动率 ≥ {@code p1ToP2Rate}（默认 5%）→ L2；L2 且互动率 ≥ {@code p2ToP3Rate}（默认 8%）→ L3。</li>
  * </ul>
- * 互动率 = (点赞+评论+分享 + 0.5×完播) / 曝光。完播权重低于主动互动，符合短视频"看完≠喜欢"的直觉。</p>
+ * 互动率 = (点赞+评论+分享 + playCompleteWeight×完播) / 曝光。完播权重低于主动互动，符合短视频"看完≠喜欢"的直觉。</p>
  *
  * <p><b>晋级后即时失效推荐流缓存</b>：内容进更高池，读路径按权重立即给它更多占位，必须让
  * 缓存立刻反映——否则要等 15s TTL，用户体感不到"上热门"。</p>
@@ -39,22 +39,18 @@ public class FeedPoolPromoter {
     private final FeedTimelineStore timelineStore;
     private final RecommendedFeedService recommendedFeedService;
     private final StringRedisTemplate redisTemplate;
-
-    /** 晋级阈值（演示默认；生产应外置配置）。 */
-    private static final long MIN_IMPRESSIONS = 20;
-    private static final double P1_TO_P2_RATE = 0.05;
-    private static final double P2_TO_P3_RATE = 0.08;
-    private static final double PLAY_COMPLETE_WEIGHT = 0.5;
-    private static final double DISLIKE_DEMOTE_RATIO = 0.30;
+    private final FeedPoolPromoterProperties props;
 
     public FeedPoolPromoter(PostStatService statService,
                             FeedTimelineStore timelineStore,
                             RecommendedFeedService recommendedFeedService,
-                            StringRedisTemplate redisTemplate) {
+                            StringRedisTemplate redisTemplate,
+                            FeedPoolPromoterProperties props) {
         this.statService = statService;
         this.timelineStore = timelineStore;
         this.recommendedFeedService = recommendedFeedService;
         this.redisTemplate = redisTemplate;
+        this.props = props;
     }
 
     /** 周期性扫描待评估集合，按互动率晋级（默认 30s，可配 {@code turbofeed.feed.promoter-interval-ms}）。 */
@@ -108,17 +104,17 @@ public class FeedPoolPromoter {
 
     private int decideTargetPool(int cur, PostStatService.PostStat s) {
         long imp = s.impressions();
-        if (imp < MIN_IMPRESSIONS) {
+        if (imp < props.getMinImpressions()) {
             return cur;                                   // 样本不足，暂不动
         }
         double dislikeRatio = imp > 0 ? (double) s.dislikes() / imp : 0d;
-        if (dislikeRatio >= DISLIKE_DEMOTE_RATIO) {
+        if (dislikeRatio >= props.getDislikeDemoteRatio()) {
             return 1;                                     // 差评率过高：锁在/打回 L1，不给公域放大
         }
-        if (cur == 1 && interactionRate(s) >= P1_TO_P2_RATE) {
+        if (cur == 1 && interactionRate(s) >= props.getP1ToP2Rate()) {
             return 2;
         }
-        if (cur == 2 && interactionRate(s) >= P2_TO_P3_RATE) {
+        if (cur == 2 && interactionRate(s) >= props.getP2ToP3Rate()) {
             return 3;
         }
         return cur;
@@ -129,7 +125,7 @@ public class FeedPoolPromoter {
         if (imp <= 0) {
             return 0d;
         }
-        double interactions = s.likes() + s.comments() + s.shares() + PLAY_COMPLETE_WEIGHT * s.playCompletes();
+        double interactions = s.likes() + s.comments() + s.shares() + props.getPlayCompleteWeight() * s.playCompletes();
         return interactions / imp;
     }
 }

@@ -30,8 +30,12 @@ import java.time.Instant;
  * 否则补偿逻辑会因为长期不被执行而腐化，等真正需要它时已经不可用。</p>
  *
  * <p><b>为什么快路径失败不抛异常</b>：此时事务已提交（内容已可见），抛异常既撤不回事务、
- * 又会把「可补偿的失败」变成「用户可见的 500」。正确动作是记日志 + 留行待补偿。
- * 这正是发件箱相对改造前「afterCommit 里 catch 一下就完了」的本质区别：<b>失败有去处</b>。</p>
+ * 又会把「可补偿的失败」变成「用户可见的 500」。正确动作是记日志 + 留行待补偿。</p>
+ *
+ * <p><b>判死即告警</b>：{@link #tryDeliver} 捕获到投递异常后，{@link OutboxEventRepository#markFailed}
+ * 会据尝试次数决定退避重试还是判死（DEAD）；一旦判死立即通过 {@link DeadLetterAlert} 告警
+ * （{@code TIMELINE_REMOVE} 比 {@code TIMELINE_APPEND} 严重）。DEAD 行的后续重投由
+ * {@code OutboxDeadLetterSweeper} 负责，本类不重复投递逻辑。</p>
  */
 @Service
 public class OutboxService {
@@ -42,6 +46,7 @@ public class OutboxService {
     private final FeedTimelinePublisher feedTimelinePublisher;
     private final ObjectMapper objectMapper;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
+    private final DeadLetterAlert deadLetterAlert;
     private final int maxAttempts;
     private final int backoffSeconds;
 
@@ -49,12 +54,14 @@ public class OutboxService {
                          FeedTimelinePublisher feedTimelinePublisher,
                          ObjectMapper objectMapper,
                          SnowflakeIdGenerator snowflakeIdGenerator,
+                         DeadLetterAlert deadLetterAlert,
                          @Value("${turbofeed.outbox.max-attempts:5}") int maxAttempts,
                          @Value("${turbofeed.outbox.backoff-seconds:5}") int backoffSeconds) {
         this.repository = repository;
         this.feedTimelinePublisher = feedTimelinePublisher;
         this.objectMapper = objectMapper;
         this.snowflakeIdGenerator = snowflakeIdGenerator;
+        this.deadLetterAlert = deadLetterAlert;
         this.maxAttempts = maxAttempts;
         this.backoffSeconds = backoffSeconds;
     }
@@ -119,10 +126,14 @@ public class OutboxService {
         } catch (Exception e) {
             // claim 时已把 attempt_count +1，这里回读才能拿到真实的累计次数来决定退避/判死。
             OutboxEventRepository.OutboxEvent fresh = repository.findById(eventId).orElse(event);
-            repository.markFailed(eventId, fresh.attemptCount(), fresh.maxAttempts(),
+            boolean dead = repository.markFailed(eventId, fresh.attemptCount(), fresh.maxAttempts(),
                     String.valueOf(e), backoffSeconds, Instant.now());
             log.error("发件箱投递失败，留待中继重试: id={}, type={}, aggregateId={}, attempt={}/{}",
                     eventId, event.eventType(), event.aggregateId(), fresh.attemptCount(), fresh.maxAttempts(), e);
+            if (dead) {
+                // 彻底失败且重投耗尽：立刻告警（REMOVE 类高严重度），后续重投由 OutboxDeadLetterSweeper 负责。
+                deadLetterAlert.onDead(fresh, e);
+            }
             return false;
         }
     }

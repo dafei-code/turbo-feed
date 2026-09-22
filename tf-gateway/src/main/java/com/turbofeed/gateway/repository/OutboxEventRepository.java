@@ -30,7 +30,11 @@ import java.util.Optional;
  *      ▲                      │
  *      │                      └──失败──▶ FAILED ──(退避后到期)──▶ 再次被领取
  *      │                                    │
- *      │                                    └──attempt_count ≥ max_attempts──▶ DEAD(终态, 人工介入)
+ *      │                                    └──attempt_count ≥ max_attempts──▶ DEAD
+ *      │                                                                    │
+ *      │              【死信重投】OutboxDeadLetterSweeper 周期扫 DEAD            │
+ *      │                dead_count &lt; 上限 → DEAD─reDeadLetter─▶ PENDING(长冷却)
+ *      │                达上限            → 永久终态 + 持续高严重度告警
  *      └────── SENDING 卡死(进程崩溃) 超过 stuck-timeout ──────┘
  * </pre>
  *
@@ -39,6 +43,11 @@ import java.util.Optional;
  * 而 SENDING 卡死（进程在投的过程中挂了）由 {@link #reapStuck} 按超时回收，
  * 因此崩溃不会让事件永久悬停。</p>
  *
+ * <p><b>DEAD 不再是真终点</b>：原状态机到 DEAD 即终止、既不复投也无告警（at-least-once 在 DEAD 处断裂）。
+ * 现由 {@code OutboxDeadLetterSweeper} 周期把未达重投上限的 DEAD 行重新 open 成 PENDING（带冷却），
+ * 交给既有 {@code OutboxRelay} 投递；判死瞬间由 {@code DeadLetterAlert} 触发告警
+ * （{@code TIMELINE_REMOVE} 比 {@code TIMELINE_APPEND} 严重，下架内容持续展示是正向错误）。</p>
+ *
  * <p><b>无 Lombok</b>：显式构造器（本机构建环境对新建文件的 Lombok 注解处理不生效）。</p>
  */
 @Repository
@@ -46,7 +55,7 @@ public class OutboxEventRepository {
 
     /** 终态：已成功投递。 */
     public static final String STATUS_SENT = "SENT";
-    /** 终态：重试耗尽，需人工对账。 */
+    /** 终态（重投前）：重试耗尽；未达重投上限前由死信扫描器重投，达上限后永久需人工对账。 */
     public static final String STATUS_DEAD = "DEAD";
     /** 中间态：已被某个中继/快路径领取，正在投递。 */
     public static final String STATUS_SENDING = "SENDING";
@@ -123,9 +132,9 @@ public class OutboxEventRepository {
     /**
      * 投递失败：attempt_count 已在 {@link #claim} 时 +1，此处据它决定退避重试还是判死。
      *
-     * @param backoffSeconds 基础退避秒数（实际按 attempt_count 线性放大，封顶见调用方）
+     * @return true = 已判死（转 DEAD，触发死信告警）；false = 退回 FAILED 等待退避后重试
      */
-    public void markFailed(long id, int attemptCount, int maxAttempts, String error,
+    public boolean markFailed(long id, int attemptCount, int maxAttempts, String error,
                            long backoffSeconds, Instant now) {
         boolean dead = attemptCount >= maxAttempts;
         String nextStatus = dead ? STATUS_DEAD : STATUS_FAILED;
@@ -133,6 +142,7 @@ public class OutboxEventRepository {
         jdbcTemplate.update(
                 "UPDATE outbox_event SET status = ?, last_error = ?, next_attempt_at = ?, updated_at = ? WHERE id = ?",
                 nextStatus, trim(error, 500), Timestamp.from(next), Timestamp.from(now), id);
+        return dead;
     }
 
     /**
@@ -146,6 +156,30 @@ public class OutboxEventRepository {
                         + "WHERE status = ? AND updated_at < ?",
                 STATUS_FAILED, Timestamp.from(now), Timestamp.from(now),
                 STATUS_SENDING, Timestamp.from(now.minusSeconds(stuckTimeoutSeconds)));
+    }
+
+    /**
+     * 取出一批「到期待重投」的死信 id（DEAD 且未达重投上限）。
+     * 由 {@code OutboxDeadLetterSweeper} 周期调用，把 DEAD 重新 open 成 PENDING 交给既有中继投递。
+     */
+    public List<Long> findDeadIds(int limit, Instant now, int maxDeadRedeliveries) {
+        return jdbcTemplate.queryForList(
+                "SELECT id FROM outbox_event WHERE status = ? AND dead_count < ? AND next_attempt_at <= ? ORDER BY id LIMIT ?",
+                Long.class, STATUS_DEAD, maxDeadRedeliveries, Timestamp.from(now), limit);
+    }
+
+    /**
+     * 死信重投：DEAD → PENDING，dead_count+1、attempt_count 清零（给满额重试预算）、next_attempt_at 推后冷却。
+     *
+     * <p>只负责「重新 open」，真正投递仍走既有 {@code OutboxRelay}（与正常路径同代码，不重复逻辑）。</p>
+     *
+     * @return 1 = 成功 reopen（可被中继重新领取）；0 = 已被别人处理或已非 DEAD
+     */
+    public int reDeadLetter(long id, long cooldownSeconds, Instant now) {
+        return jdbcTemplate.update(
+                "UPDATE outbox_event SET status = ?, dead_count = dead_count + 1, attempt_count = 0, "
+                        + "next_attempt_at = ?, updated_at = ? WHERE id = ? AND status = ?",
+                STATUS_PENDING, Timestamp.from(now.plusSeconds(cooldownSeconds)), Timestamp.from(now), id, STATUS_DEAD);
     }
 
     private static String trim(String s, int max) {
