@@ -122,6 +122,11 @@ public class UserJdbcRepository {
         return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
     }
 
+    /** 改角色（按 id 分片键单分片命中，O(1)，与分片数无关）。用于管理后台角色调整。 */
+    public int updateRole(long id, String role) {
+        return jdbcTemplate.update("UPDATE user SET role = ? WHERE id = ?", role, id);
+    }
+
     /**
      * 仅在路由表未命中时使用的兜底：<b>无分片键，会广播到全部分片</b>。
      *

@@ -141,7 +141,7 @@
       <span class="avatar" id="ava">?</span>
       <span id="whoName">审核员</span>
     </div>
-    <a class="back" href="login.html">退出</a>
+    <a class="back" href="javascript:void(0)" onclick="logout()">退出</a>
   </div>
 
   <div class="main">
@@ -188,6 +188,22 @@
     // 普通用户无审核权限，回退普通用户页；后端 /api/admin/media/** 仍按权限二次拦截。
     // 旧令牌未写入 role 时放行（ADMIN/REVIEWER 或未知），由后端兜底校验。
     window.location.href = 'user.html';
+  }
+
+  // 退出：先调服务端全端登出（吊销该用户全部 AT+RT），再清本地并跳转。fail-open：吊销失败也照常登出。
+  function logout() {
+    var access = localStorage.getItem('turbofeed:token');
+    var refresh = localStorage.getItem('turbofeed:refresh');
+    fetch(API_BASE + '/api/auth/logout?refreshToken=' + encodeURIComponent(refresh || ''), {
+      method: 'POST',
+      headers: access ? { 'Authorization': 'Bearer ' + access } : {}
+    }).catch(function () {}).finally(function () {
+      localStorage.removeItem('turbofeed:token');
+      localStorage.removeItem('turbofeed:refresh');
+      localStorage.removeItem('turbofeed:user');
+      localStorage.removeItem('turbofeed:role');
+      window.location.href = 'login.html';
+    });
   }
 
   // 当前登录用户（login.html 登录成功后写入；未登录直接打开时回退为 reviewer）

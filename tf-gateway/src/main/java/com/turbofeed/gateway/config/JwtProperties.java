@@ -27,8 +27,11 @@ public class JwtProperties {
      */
     private String secret;
 
-    /** 令牌有效期（秒），默认 24 小时。 */
-    private long expireSeconds = 86400;
+    /** 访问令牌有效期（秒），默认 30 分钟。缩短以降低令牌泄露窗口；刷新令牌见 {@link #refreshExpireSeconds}。 */
+    private long expireSeconds = 1800;
+
+    /** 刷新令牌有效期（秒），默认 7 天。刷新令牌服务端有状态存储（见 RefreshTokenStore），可主动吊销 / 轮换。 */
+    private long refreshExpireSeconds = 604800;
 
     /**
      * 校验签名密钥并返回它：<b>缺失或强度不足一律抛 {@link IllegalStateException}</b>，绝不做静默兜底。
@@ -75,5 +78,13 @@ public class JwtProperties {
 
     public void setExpireSeconds(long expireSeconds) {
         this.expireSeconds = expireSeconds;
+    }
+
+    public long getRefreshExpireSeconds() {
+        return refreshExpireSeconds;
+    }
+
+    public void setRefreshExpireSeconds(long refreshExpireSeconds) {
+        this.refreshExpireSeconds = refreshExpireSeconds;
     }
 }

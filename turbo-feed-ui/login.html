@@ -313,14 +313,17 @@
       if (!result || result.code !== 0) {
         return showMsg((result && result.message) || '登录失败');
       }
-      // 存 JWT：后续 /api/media/** 均校验 Authorization: Bearer <token>，缺失即 401。
-      // 令牌里的 sub 是系统内部 uid（非手机号），身份判定以令牌为准，不由前端透传。
-      var token = result.data;
-      localStorage.setItem('turbofeed:token', token);
+      // step 3：登录返回 {accessToken, refreshToken}（双令牌）。
+      // turbofeed:token 仍存访问令牌（其他页面读它当 Bearer，契约不变）；
+      // 刷新令牌单独存 turbofeed:refresh，供静默刷新 / 登出吊销使用。
+      var access = result.data.accessToken;
+      var refresh = result.data.refreshToken;
+      localStorage.setItem('turbofeed:token', access);
+      localStorage.setItem('turbofeed:refresh', refresh);
       localStorage.setItem('turbofeed:user', phone);
       // 按令牌中的角色路由：管理员进系统后台 admin.html，审核员进审核工作台 review.html，
       // 普通用户进 user.html。后端 /api/admin/** 仍按 JWT 中的权限二次校验，页面层仅做快捷拦截。
-      var role = parseJwtRole(token);
+      var role = parseJwtRole(access);
       localStorage.setItem('turbofeed:role', role);
       if (role === 'ADMIN') {
         window.location.href = 'admin.html';

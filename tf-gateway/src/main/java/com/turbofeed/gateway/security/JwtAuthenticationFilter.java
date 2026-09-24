@@ -2,6 +2,8 @@ package com.turbofeed.gateway.security;
 
 import java.io.IOException;
 
+import com.turbofeed.gateway.exception.BizException;
+import com.turbofeed.shared.result.ErrorCode;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -39,6 +41,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final JwtUtil jwtUtil;
+    private final TokenBlacklist tokenBlacklist;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -47,8 +50,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String token = extractBearerToken(request.getHeader(AUTHORIZATION_HEADER));
             if (token != null) {
                 // 验签失败/过期直接抛 UNAUTHORIZED，不静默匿名（见类注释）。
-                // 一次解析出 userId + role，绑定含角色的 UserContext（未知角色降级 USER）。
+                // 一次解析出 userId + role + jti，绑定含角色的 UserContext（未知角色降级 USER）。
                 JwtUtil.JwtClaims claims = jwtUtil.parseClaims(token);
+                // 仅接受访问令牌：刷新令牌（type=refresh）不得用于业务接口，防止 RT 被盗当 AT 用。
+                // 旧格式令牌无 type（null）视为 access，保持向后兼容。
+                if (claims.type() != null && !"access".equals(claims.type())) {
+                    throw new BizException(ErrorCode.UNAUTHORIZED, "令牌类型错误（仅接受访问令牌）");
+                }
+                // 验签通过后二次查黑名单：命中即令牌已被吊销（登出 / 风控 / 盗号止损），
+                // 即便仍在有效期内也必须拒绝——这是纯无状态 JWT 唯一能主动失效的手段。
+                if (tokenBlacklist.isRevoked(claims.jti())) {
+                    throw new BizException(ErrorCode.UNAUTHORIZED, "令牌已吊销，请重新登录");
+                }
                 UserContextHolder.set(UserContext.of(claims.userId(), Role.from(claims.role())));
             }
             filterChain.doFilter(request, response);

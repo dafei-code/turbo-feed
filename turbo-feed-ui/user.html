@@ -1245,11 +1245,21 @@
     renderGrid();
   });
 
-  // 退出
+  // 退出：先调服务端吊销（访问令牌黑名单 + 刷新令牌吊销），再清本地，
+  // 保证 7 天刷新令牌不会被「只清本地」遗留为可用状态。fail-open：吊销失败也照常登出。
   function logout() {
-    localStorage.removeItem('turbofeed:token');
-    localStorage.removeItem('turbofeed:user');
-    window.location.href = 'login.html';
+    var access = localStorage.getItem('turbofeed:token');
+    var refresh = localStorage.getItem('turbofeed:refresh');
+    fetch(API_BASE + '/api/auth/logout?refreshToken=' + encodeURIComponent(refresh || ''), {
+      method: 'POST',
+      headers: access ? { 'Authorization': 'Bearer ' + access } : {}
+    }).catch(function () {}).finally(function () {
+      localStorage.removeItem('turbofeed:token');
+      localStorage.removeItem('turbofeed:refresh');
+      localStorage.removeItem('turbofeed:user');
+      localStorage.removeItem('turbofeed:role');
+      window.location.href = 'login.html';
+    });
   }
 
   // 初始化

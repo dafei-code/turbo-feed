@@ -16,6 +16,7 @@ target/
 logs/
 *.log
 application-local.yml
+shardingsphere-config-local.yml
 
 # 工作目录下的本地覆盖配置（Spring Boot 默认加载 file:./application.yml，
 # 优先级高于 classpath，用于放本机 MinIO/Redis/JWT 等凭据）。

@@ -478,7 +478,7 @@
       <div class="n" id="sideUserName" data-page-node-id="R5SgyU2o6njJZYmMxn4L9i">admin</div>
       <div class="r" data-page-node-id="RYY42cpc5dBbkcoL0zMqsu">超级管理员</div>
     </div>
-    <button class="logout-btn" onclick="location.href='login.html'" data-page-node-id="BKofVrQWfk78IYxODSPmRa">退出</button>
+    <button class="logout-btn" onclick="logout()" data-page-node-id="BKofVrQWfk78IYxODSPmRa">退出</button>
   </div>
 </aside>
 
@@ -649,6 +649,22 @@
     window.location.href = 'review.html';
   } else if (ROLE === 'USER') {
     window.location.href = 'user.html';
+  }
+
+  // 退出：先调服务端全端登出（吊销该用户全部 AT+RT），再清本地并跳转。fail-open：吊销失败也照常登出。
+  function logout() {
+    var access = localStorage.getItem('turbofeed:token');
+    var refresh = localStorage.getItem('turbofeed:refresh');
+    fetch(API_BASE + '/api/auth/logout?refreshToken=' + encodeURIComponent(refresh || ''), {
+      method: 'POST',
+      headers: access ? { 'Authorization': 'Bearer ' + access } : {}
+    }).catch(function () {}).finally(function () {
+      localStorage.removeItem('turbofeed:token');
+      localStorage.removeItem('turbofeed:refresh');
+      localStorage.removeItem('turbofeed:user');
+      localStorage.removeItem('turbofeed:role');
+      window.location.href = 'login.html';
+    });
   }
 
   // 静态演示版：仅侧边栏选中态交互，无后端逻辑
