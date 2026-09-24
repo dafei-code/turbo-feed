@@ -13,6 +13,10 @@ import com.turbofeed.gateway.service.event.outbox.TimelineRemovePayload;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.service.review.credit.CreditLevel;
+import com.turbofeed.gateway.service.penalty.PenaltyService;
+import com.turbofeed.gateway.service.penalty.ViolationCategory;
+import com.turbofeed.gateway.service.penalty.ViolationSeverity;
+import com.turbofeed.gateway.service.penalty.ViolationSource;
 import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,6 +73,8 @@ public class MediaReviewService {
     private final AppealRepository appealRepository;
     /** 发件箱（P0-3）：时间线投递改走「同事务落事件 + 提交后直投 + 中继补偿」。 */
     private final OutboxService outboxService;
+    /** 处罚域（penalty 集成缝接线）：违规确认落处罚、申诉翻案解除封禁。 */
+    private final PenaltyService penaltyService;
 
     public MediaReviewService(MediaJdbcRepository mediaRepository,
                               StringRedisTemplate redisTemplate,
@@ -77,7 +83,8 @@ public class MediaReviewService {
                               AccountCreditService accountCreditService,
                               ReportRepository reportRepository,
                               AppealRepository appealRepository,
-                              OutboxService outboxService) {
+                              OutboxService outboxService,
+                              PenaltyService penaltyService) {
         this.mediaRepository = mediaRepository;
         this.redisTemplate = redisTemplate;
         this.contentModeration = contentModeration;
@@ -86,6 +93,7 @@ public class MediaReviewService {
         this.reportRepository = reportRepository;
         this.appealRepository = appealRepository;
         this.outboxService = outboxService;
+        this.penaltyService = penaltyService;
     }
 
     /**
@@ -281,6 +289,14 @@ public class MediaReviewService {
             }
             removeFromTimeline(mediaId, authorId);
             accountCreditService.onViolationConfirmed(authorId);
+            // penalty 集成缝：高危举报即确认为违规 → 落处罚（与信用扣分同触发点，CAS 保证单次）。
+            penaltyService.recordViolation(authorId,
+                    ViolationCategory.OTHER,
+                    isHighRisk(reason) ? ViolationSeverity.HIGH : ViolationSeverity.MID,
+                    ViolationSource.HUMAN_REPORT,
+                    null,
+                    "SYSTEM",
+                    "高危举报立即下架停推: " + mediaId);
             log.warn("高危举报立即下架停推（整帖）: mediaId={}, reporterUserId={}, reason={}",
                     mediaId, reporterUserId, reason);
         }
@@ -299,6 +315,14 @@ public class MediaReviewService {
             if (rows > 0) {
                 removeFromTimeline(mediaId, authorId);
                 accountCreditService.onViolationConfirmed(authorId);
+                // penalty 集成缝：管理员确认举报违规 → 落处罚（CAS 保证单次，不与高危举报路径重复）。
+                penaltyService.recordViolation(authorId,
+                        ViolationCategory.OTHER,
+                        ViolationSeverity.MID,
+                        ViolationSource.HUMAN_REPORT,
+                        null,
+                        "ADMIN",
+                        "举报确认违规→整帖下架: " + mediaId);
                 log.info("举报确认违规→整帖下架: mediaId={}", mediaId);
             } else {
                 log.info("举报确认违规：内容已不在已发布态，不重复下架/扣信用: mediaId={}", mediaId);
@@ -346,6 +370,9 @@ public class MediaReviewService {
                     publishAppend(mediaId, authorId, post, level.poolLevel());
                 }
                 accountCreditService.onAppealUpheld(authorId);
+                // penalty 集成缝：申诉翻案 → 解除原处罚（误封永久封可由此撤销；非封禁态 liftPenalty 幂等 no-op）。
+                penaltyService.liftPenalty(authorId, ViolationSource.APPEAL_OVERTURN, "ADMIN",
+                        "申诉翻案→解除封禁恢复: " + mediaId);
                 log.info("申诉翻案→整帖恢复公域: mediaId={}", mediaId);
             } else {
                 log.info("申诉翻案 CAS 落空（内容不在申诉中态，不重复恢复/加信用）: mediaId={}", mediaId);

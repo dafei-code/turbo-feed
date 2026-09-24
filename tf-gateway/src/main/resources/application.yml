@@ -2,13 +2,13 @@
 spring:
   application:
     name: turbo-feed-gateway
-  # 数据源走 ShardingSphere 原生驱动：从 classpath 读取 shardingsphere-config.yaml，
+  # 数据源走 ShardingSphere 原生驱动：从 classpath 读取 shardingsphere-config-128.yaml
   # 由该文件定义真实数据源(ds_0/ds_1)与分片规则。URL 携带 placeholder-type=ENVIRONMENT，
   # SS 配置内的环境占位符在加载期由 ShardingSphereURLLoadEngine 从进程环境变量渲染
   # （TURBOFEED_DB_PASSWORD 等，缺失时回落占位符默认值）——仓库内不出现任何真实口令。
   datasource:
     driver-class-name: org.apache.shardingsphere.driver.ShardingSphereDriver
-    url: jdbc:shardingsphere:classpath:shardingsphere-config.yaml?placeholder-type=ENVIRONMENT
+    url: jdbc:shardingsphere:classpath:shardingsphere-config-128.yaml?placeholder-type=ENVIRONMENT
   # multipart 框架层限额（业务层 turbofeed.media.* 之外的前置兜底，略高于业务限额）
   servlet:
     multipart:
