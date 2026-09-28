@@ -360,20 +360,20 @@ public class FeedTimelineStore {
     }
 
     /**
-     * 池内排序的「展示分值」：入流时刻 + 完播率加权 + 兴趣加权。
-     * <ul>
-     *   <li>入流时刻（recency）：内容越新基线越高；</li>
-     *   <li>完播率加权：{@code completionRankWeight × rate × 1h 窗口}，看完即加权（抖音式赛马）；</li>
-     *   <li>兴趣加权：{@code interestBoostWeight × 兴趣匹配分 × 1h 窗口}，
-     *       兴趣匹配分 = 该内容标签与用户画像正向权重的累加（封顶 {@link #INTEREST_SCORE_CAP}）。
-     *       与完播率同量纲，故「命中兴趣」≈ 给内容加上「等同看了若干小时」的排序红利，
-     *       但又不会压过时间序主轴（冷内容仍有曝光，避免信息茧房）。</li>
-     *   <li><b>负反馈惩罚</b>（{@code negative}）：内容标签命中用户负向标签集时减去
-     *       {@link #NEGATIVE_PENALTY_MILLIS}（30 天），在其所属流量池内沉底。
-     *       与前两项叠加而非替换——它不是加分项的反向数值，而是一次性重罚，
-     *       量级远大于任何加权项，保证"明确不要"压过"可能喜欢"。</li>
-     * </ul>
-     * fail-open：统计/画像读不到时退化为纯入流时刻排序（rate / interest 记 0）。
+     * 组装一条候选的排序特征并交给 {@link RankingModel} 打分（<b>本类不再内含打分公式</b>）。
+     *
+     * <p>公式、权重与置信度平滑全部在 {@link com.turbofeed.feedengine.ranking.LinearWeightedRankingModel}
+     * 与 {@link com.turbofeed.feedengine.ranking.RankingProperties} 里，此处只做三件事：
+     * <ol>
+     *   <li>取该内容的实时分（曝光 / 完播 / 点赞 / 评论 / 分享 / 踩）；</li>
+     *   <li>按内容标签与用户画像算兴趣匹配分（封顶交给模型）；</li>
+     *   <li>判定是否命中该用户的负向标签（{@link #matchesNegative}）。</li>
+     * </ol>
+     * 之所以传<b>原始计数</b>而非现成比率：比率一旦算出就把样本量信息丢了，
+     * "1 次曝光的 100%" 与 "万次曝光的 98%" 必须能被模型区分（置信度平滑的前提）。</p>
+     *
+     * <p>fail-open：统计读不到时按零计数处理——平滑后自然回落到先验水平，
+     * 而不是朴素比率的 0 分，新内容不至于被一次性地压到队尾。</p>
      */
     private double scoreOf(ScoredItem s, Map<String, Double> interest, Set<String> negative) {
         PostStatService.PostStat stat = new PostStatService.PostStat(0, 0, 0, 0, 0, 0);
