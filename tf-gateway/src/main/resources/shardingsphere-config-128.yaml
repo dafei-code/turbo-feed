@@ -131,6 +131,14 @@ rules:
           standard:
             shardingColumn: user_id
             shardingAlgorithmName: hashMod128
+      # 逻辑表 media_tag：内容标签持久冷存，分片键 post_id（= 引擎 timelineKey），128 表与 media 同分布
+      # （偶数下标落 ds_0、奇数下标落 ds_1；Redis tf:tag:media/* 为读源，本表可重建，见 changelog 0051）
+      media_tag:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: post_id
+            shardingAlgorithmName: hashMod128
       # 逻辑表 account_credit：分片键 user_id，维持 4（与当前一致）
       account_credit:
         actualDataSources: ds_0, ds_1

@@ -3,6 +3,7 @@ package com.turbofeed.gateway.service.review;
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
+import com.turbofeed.gateway.repository.MediaTagJdbcRepository;
 import com.turbofeed.gateway.repository.ReportRepository;
 import com.turbofeed.gateway.repository.AppealRepository;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
@@ -17,6 +18,7 @@ import com.turbofeed.gateway.service.penalty.PenaltyService;
 import com.turbofeed.gateway.service.penalty.ViolationCategory;
 import com.turbofeed.gateway.service.penalty.ViolationSeverity;
 import com.turbofeed.gateway.service.penalty.ViolationSource;
+import com.turbofeed.shared.caption.CaptionTagParser;
 import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,6 +67,7 @@ public class MediaReviewService {
     private static final String STATUS_KEY_PREFIX = "tf:media:status:";
 
     private final MediaJdbcRepository mediaRepository;
+    private final MediaTagJdbcRepository mediaTagRepository;
     private final StringRedisTemplate redisTemplate;
     private final ContentModerationRouter contentModeration;
     private final MediaProperties properties;
@@ -77,6 +80,7 @@ public class MediaReviewService {
     private final PenaltyService penaltyService;
 
     public MediaReviewService(MediaJdbcRepository mediaRepository,
+                              MediaTagJdbcRepository mediaTagRepository,
                               StringRedisTemplate redisTemplate,
                               ContentModerationRouter contentModeration,
                               MediaProperties properties,
@@ -86,6 +90,7 @@ public class MediaReviewService {
                               OutboxService outboxService,
                               PenaltyService penaltyService) {
         this.mediaRepository = mediaRepository;
+        this.mediaTagRepository = mediaTagRepository;
         this.redisTemplate = redisTemplate;
         this.contentModeration = contentModeration;
         this.properties = properties;
@@ -395,7 +400,8 @@ public class MediaReviewService {
         String representativeId = event.representativeMediaId();
         String cover = event.urls().isEmpty() ? null : event.urls().get(0);
         return new MediaItem(event.postId(), representativeId, cover, event.urls(), 0,
-                MediaStatus.APPROVED, event.occurredAt(), event.caption(), event.captionMark());
+                MediaStatus.APPROVED, event.occurredAt(), event.caption(), event.captionMark(),
+                CaptionTagParser.parse(event.caption()));
     }
 
     /**
@@ -424,7 +430,8 @@ public class MediaReviewService {
             }
         }
         return new MediaItem(row.postId(), row.mediaId(), row.url(), images, 0,
-                MediaStatus.APPROVED, row.createdAt(), row.caption(), row.captionMark());
+                MediaStatus.APPROVED, row.createdAt(), row.caption(), row.captionMark(),
+                CaptionTagParser.parse(row.caption()));
     }
 
     /**
@@ -439,6 +446,9 @@ public class MediaReviewService {
         // 顺序安全：事件按雪花 id 有序消费，且 append 在过审时就已直投，
         // remove 一定晚于它，不存在「remove 先到、append 后到」把内容又放回来的情况。
         publishRemove(mediaId, userId, key);
+        // 内容标签冷存同步摘除：key 与投递时同口径（见 publishAppend），否则新旧标签
+        // 会落在两个索引上。best-effort：清理失败不影响 content 已在 DB 下架这一事实。
+        mediaTagRepository.remove(key);
     }
 
     /** 入流：同事务落发件箱事件 + 提交后直投（失败留行，由 OutboxRelay 补偿重投）。 */
@@ -446,6 +456,10 @@ public class MediaReviewService {
         long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_APPEND, mediaId, userId,
                 new TimelineAppendPayload(post, poolLevel));
         outboxService.deliverAfterCommit(eventId);
+        // 内容标签冷存同步写入：键用 post.timelineKey()（= Redis tf:media:tags 同源），
+        // 标签由 caption 解析、随 post 透传，避免二次解析分叉。best-effort：冷存写入失败
+        // 不阻断发布链路（Redis 才是读源，本表可重建）。
+        mediaTagRepository.save(post.timelineKey(), post.tags());
     }
 
     /** 移出公域：同上，走 TIMELINE_REMOVE。 */
