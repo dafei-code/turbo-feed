@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.controller;
 
+import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.query.MediaQueryService;
 import com.turbofeed.shared.result.Result;
@@ -42,7 +43,8 @@ public class FeedController {
      * 推荐流（按入流时间倒序返回全平台 APPROVED 内容，分页）。
      *
      * <p>公域 feed 默认允许未登录访问（抖音「推荐」页同样未登录可见），故不强制取用户身份；
-     * 若后续需要个性化（关注流、兴趣排序），再叠加身份与推荐参数。</p>
+     * 但<b>已登录用户</b>会把自己的 userId 透传给引擎做兴趣召回/排序（个性化）。匿名访问
+     * （{@code UserContextHolder.get() == null}）按冷启动口径返回纯「入流时刻 + 完播率」排序。</p>
      *
      * @param page 页码（从 0 开始，默认 0）
      * @param size 单页条数（默认 20，≤0 兜底 20）
@@ -52,6 +54,8 @@ public class FeedController {
     public Result<List<MediaItem>> recommended(
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "20") int size) {
-        return Result.ok(mediaQueryService.listRecommended(page, size));
+        // 匿名访问返回 null（不抛）；已登录则取 userId 做个性化。
+        String userId = UserContextHolder.get() == null ? null : UserContextHolder.get().userId();
+        return Result.ok(mediaQueryService.listRecommended(page, size, userId));
     }
 }

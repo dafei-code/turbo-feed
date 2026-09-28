@@ -2,6 +2,7 @@ package com.turbofeed.gateway.controller;
 
 import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
+import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.feed.BehaviorEventPublisher;
 import com.turbofeed.gateway.service.feed.BehaviorReport;
 import com.turbofeed.shared.result.Result;
@@ -40,7 +41,7 @@ public class FeedBehaviorController {
     @PostMapping("/behavior")
     @RequirePermission(Permission.FEED_INTERACT)
     public Result<Void> report(@RequestBody List<BehaviorReport> reports) {
-        publisher.report(reports);
+        publisher.report(reports, UserContextHolder.requireUserId());
         return Result.ok();
     }
 }

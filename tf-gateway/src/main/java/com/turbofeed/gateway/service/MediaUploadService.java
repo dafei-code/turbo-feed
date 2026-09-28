@@ -257,7 +257,7 @@ public class MediaUploadService {
                 urls.add(stored.url());
                 rows.add(new MediaJdbcRepository.MediaRowSpec(
                         postId, stored.mediaId(), Long.parseLong(userId), stored.url(),
-                        MediaStatus.PENDING, rawCaption, markJson, seq, createdAt));
+                        MediaStatus.PENDING, rawCaption, markJson, seq, createdAt, null));
             }
             // 整帖落库：N 张图一次 batch（同 user_id 落同片，rewriteBatchedStatements 合并为单批）
             mediaRepository.batchInsert(rows);
@@ -366,7 +366,8 @@ public class MediaUploadService {
                 throw new BizException(ErrorCode.UPLOAD_INVALID, "文件大小超限: " + meta.size());
             }
             slots.add(new UploadReservation.Slot(seq,
-                    storageClient.generateMediaId(userId, format), format, meta.size()));
+                    storageClient.generateMediaId(userId, format), format, meta.size(),
+                    meta.duration()));
         }
 
         String postId = POST_ID_PREFIX + userId + "/" + UUID.randomUUID().toString().replace("-", "");

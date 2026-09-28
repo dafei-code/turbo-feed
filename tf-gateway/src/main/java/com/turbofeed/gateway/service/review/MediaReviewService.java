@@ -130,7 +130,7 @@ public class MediaReviewService {
         List<String> urls = event.urls();
         for (int i = 0; i < mediaIds.size(); i++) {
             mediaRepository.insert(event.postId(), mediaIds.get(i), userId, urls.get(i),
-                    MediaStatus.PENDING, event.caption(), event.captionMark(), i, event.occurredAt());
+                    MediaStatus.PENDING, event.caption(), event.captionMark(), i, event.occurredAt(), null);
         }
 
         // —— 机审初筛（整帖一次；以首图 url 作为判定输入）——

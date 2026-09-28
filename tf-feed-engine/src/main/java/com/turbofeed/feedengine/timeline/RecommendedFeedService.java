@@ -51,11 +51,12 @@ public class RecommendedFeedService {
     /**
      * 读取公域推荐流（入流时间倒序，分页）。
      *
-     * @param page 页码（从 0 开始）
-     * @param size 单页条数（≤0 兜底 20）
+     * @param page   页码（从 0 开始）
+     * @param size   单页条数（≤0 兜底 20）
+     * @param userId 个性化用户（已登录；匿名为 {@code null}）；{@code null} 退化为纯「入流时刻 + 完播率」排序
      * @return 当前页内容；空表示无更多内容或 Redis 不可用（调用方据此决定降级口径）
      */
-    public List<FeedItemView> recommended(int page, int size) {
+    public List<FeedItemView> recommended(int page, int size, String userId) {
         int limit = size <= 0 ? 20 : size;
         String key = REC_KEY_PREFIX + page + ":" + limit;
         try {
@@ -68,7 +69,7 @@ public class RecommendedFeedService {
             log.warn("推荐流缓存读取失败，回落时间线实时读取: key={}, {}", key, e.getMessage());
         }
 
-        List<FeedItemView> fresh = feedTimelineStore.readPage(page, limit);
+        List<FeedItemView> fresh = feedTimelineStore.readPage(userId, page, limit);
 
         try {
             redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(fresh), REC_CACHE_TTL);

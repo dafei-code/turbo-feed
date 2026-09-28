@@ -2,6 +2,7 @@ package com.turbofeed.gateway.repository;
 
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.MediaStatus;
+import com.turbofeed.shared.caption.CaptionTagParser;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.PessimisticLockingFailureException;
@@ -93,7 +94,8 @@ public class MediaJdbcRepository {
 
         MediaItem toItem() {
             // 行级视图：images 仅含自身（真正的帖内图片由聚合阶段补齐）
-            return new MediaItem(postId, mediaId, url, List.of(url), seq, status, createdAt, caption, captionMark);
+            return new MediaItem(postId, mediaId, url, List.of(url), seq, status, createdAt, caption, captionMark,
+                    CaptionTagParser.parse(caption));
         }
     }
 
@@ -105,7 +107,7 @@ public class MediaJdbcRepository {
      */
     public record MediaRowSpec(String postId, String mediaId, long userId, String url,
                                MediaStatus status, String caption, String captionMark,
-                               int seq, Instant createdAt) {
+                               int seq, Instant createdAt, Integer duration) {
     }
 
     /**
@@ -121,18 +123,19 @@ public class MediaJdbcRepository {
      * @param seq    帖内图片序号（0 起，决定轮播顺序）
      */
     public void insert(String postId, String mediaId, long userId, String url, MediaStatus status,
-                       String caption, String captionMark, int seq, Instant createdAt) {
+                       String caption, String captionMark, int seq, Instant createdAt, Integer duration) {
         jdbcTemplate.update(
                 "INSERT INTO media (post_id, media_id, user_id, url, status, media_type, file_size, "
-                        + "caption, caption_mark, seq, created_at) "
-                        + "VALUES (?, ?, ?, ?, ?, 'IMAGE', 0, ?, ?, ?, ?) "
+                        + "caption, caption_mark, seq, created_at, duration) "
+                        + "VALUES (?, ?, ?, ?, ?, 'IMAGE', 0, ?, ?, ?, ?, ?) "
                         + "ON DUPLICATE KEY UPDATE status = VALUES(status), url = VALUES(url)",
                 postId == null ? "" : postId,
                 mediaId, userId, url, toCode(status),
                 caption == null ? "" : caption,
                 captionMark == null ? "" : captionMark,
                 seq,
-                java.sql.Timestamp.from(createdAt));
+                java.sql.Timestamp.from(createdAt),
+                duration);
         log.debug("媒体落库: postId={}, mediaId={}, seq={}, userId={}, status={}",
                 postId, mediaId, seq, userId, status);
     }
@@ -153,8 +156,8 @@ public class MediaJdbcRepository {
             return;
         }
         String sql = "INSERT INTO media (post_id, media_id, user_id, url, status, media_type, "
-                + "file_size, caption, caption_mark, seq, created_at) "
-                + "VALUES (?, ?, ?, ?, ?, 'IMAGE', 0, ?, ?, ?, ?) "
+                + "file_size, caption, caption_mark, seq, created_at, duration) "
+                + "VALUES (?, ?, ?, ?, ?, 'IMAGE', 0, ?, ?, ?, ?, ?) "
                 + "ON DUPLICATE KEY UPDATE status = VALUES(status), url = VALUES(url)";
         List<Object[]> batch = new ArrayList<>(rows.size());
         for (MediaRowSpec r : rows) {
@@ -163,7 +166,8 @@ public class MediaJdbcRepository {
                     r.mediaId(), r.userId(), r.url(), toCode(r.status()),
                     r.caption() == null ? "" : r.caption(),
                     r.captionMark() == null ? "" : r.captionMark(),
-                    r.seq(), java.sql.Timestamp.from(r.createdAt())
+                    r.seq(), java.sql.Timestamp.from(r.createdAt()),
+                    r.duration()
             });
         }
         jdbcTemplate.batchUpdate(sql, batch);
@@ -497,7 +501,8 @@ public class MediaJdbcRepository {
                 images = r.url() == null ? List.of() : List.of(r.url());
             }
             posts.add(new MediaItem(r.postId(), r.mediaId(), r.url(), images, r.seq(),
-                    r.status(), r.createdAt(), r.caption(), r.captionMark()));
+                    r.status(), r.createdAt(), r.caption(), r.captionMark(),
+                    CaptionTagParser.parse(r.caption())));
         }
         return posts;
     }

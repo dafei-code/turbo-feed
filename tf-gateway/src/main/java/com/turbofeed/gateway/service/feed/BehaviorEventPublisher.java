@@ -16,6 +16,7 @@ public interface BehaviorEventPublisher {
      * （埋点是推荐优化项，不能让"点个赞"失败影响用户主流程）。
      *
      * @param reports 行为事件列表（postId + 类型）
+     * @param userId  行为发起者（登录态注入，用于累积兴趣画像与个性化召回）
      */
-    void report(List<BehaviorReport> reports);
+    void report(List<BehaviorReport> reports, String userId);
 }

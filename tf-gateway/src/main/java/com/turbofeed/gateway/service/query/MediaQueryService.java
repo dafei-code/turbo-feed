@@ -71,12 +71,13 @@ public class MediaQueryService {
      * 是两回事——前者是正常业务结果，后者才触发降级。这样引擎短暂抖动不会把
      * "假空"写进任何缓存层。</p>
      *
-     * @param page 页码（从 0 开始）
-     * @param size 单页条数（≤0 兜底 20）
+     * @param page   页码（从 0 开始）
+     * @param size   单页条数（≤0 兜底 20）
+     * @param userId 个性化用户（已登录态；匿名为 {@code null}），透传给引擎做兴趣召回/排序
      */
-    public List<MediaItem> listRecommended(int page, int size) {
+    public List<MediaItem> listRecommended(int page, int size, String userId) {
         int limit = size <= 0 ? 20 : size;
-        Optional<List<MediaItem>> fromEngine = feedEngineClient.recommended(page, limit);
+        Optional<List<MediaItem>> fromEngine = feedEngineClient.recommended(page, limit, userId);
         if (fromEngine.isPresent()) {
             return fromEngine.get();
         }

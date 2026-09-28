@@ -87,17 +87,20 @@ public class FeedEngineClient {
     /**
      * 读取公域推荐流。
      *
+     * @param userId 个性化用户（已登录态；匿名为 {@code null}）。传给引擎做兴趣召回/排序，
+     *               {@code null} 时引擎退化为纯「入流时刻 + 完播率」排序（冷启动口径）。
      * @return {@code Optional.of(list)} = 引擎正常响应（list 可能为空即"没有更多内容"）；
      *         {@link Optional#empty()} = 引擎不可用（网络异常 / 非 2xx / 业务失败码），
      *         调用方据此决定降级
      */
-    public Optional<List<MediaItem>> recommended(int page, int size) {
+    public Optional<List<MediaItem>> recommended(int page, int size, String userId) {
         int limit = size <= 0 ? 20 : size;
         try {
             String body = restClient.get()
                     .uri(uri -> uri.path(PATH_RECOMMENDED)
                             .queryParam("page", page)
                             .queryParam("size", limit)
+                            .queryParamIfPresent("userId", java.util.Optional.ofNullable(userId))
                             .build())
                     .retrieve()
                     .body(String.class);

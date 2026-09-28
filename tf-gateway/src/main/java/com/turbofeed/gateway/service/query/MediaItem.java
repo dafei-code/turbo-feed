@@ -2,6 +2,7 @@ package com.turbofeed.gateway.service.query;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.turbofeed.gateway.service.review.MediaStatus;
+import com.turbofeed.shared.caption.CaptionTagParser;
 
 import java.time.Instant;
 import java.util.List;
@@ -43,6 +44,10 @@ import java.util.List;
  * @param createdAt   内容创建（上传）时间
  * @param caption     描述/标题（原始文本，前端展示）
  * @param captionMark 描述解析后的结构化标记 JSON（@用户 / #话题 / 图片引用）
+ * @param tags        caption 中解析出的话题标签（小写、去重、按出现顺序；见
+ *                   {@link CaptionTagParser}）。本模型在便捷构造器内<b>直接从 caption 派生</b>，
+ *                   因此调用方无需手动传标签；从引擎契约反向映射时（{@link #MediaItem} 规范构造器）
+ *                   则透传引擎已物化的 {@code tags}，避免二次解析产生不一致。
  */
 public record MediaItem(
         @JsonProperty("postId") String postId,
@@ -53,10 +58,12 @@ public record MediaItem(
         @JsonProperty("status") MediaStatus status,
         @JsonProperty("createdAt") Instant createdAt,
         @JsonProperty("caption") String caption,
-        @JsonProperty("captionMark") String captionMark) {
+        @JsonProperty("captionMark") String captionMark,
+        @JsonProperty("tags") List<String> tags) {
 
     /**
-     * 单行视图（非帖子聚合）便捷构造：{@code images} 回退为 {@code [url]}、{@code seq} 为 0。
+     * 单行视图（非帖子聚合）便捷构造：{@code images} 回退为 {@code [url]}、{@code seq} 为 0，
+     * {@code tags} 由 caption 直接派生（{@link CaptionTagParser#parse}）。
      *
      * <p>用于「一条 media 记录」的中间态（行级读取、审核链路构造时间线条目前身）。
      * 帖子聚合视图应由仓储层显式传入完整 {@code images}，不要用本构造器。</p>
@@ -65,6 +72,17 @@ public record MediaItem(
                      MediaStatus status, Instant createdAt, String caption, String captionMark) {
         this(postId, mediaId, url,
                 url == null ? List.of() : List.of(url),
-                0, status, createdAt, caption, captionMark);
+                0, status, createdAt, caption, captionMark,
+                CaptionTagParser.parse(caption));
+    }
+
+    /**
+     * 时间线的<b>幂等键</b>：优先 {@link #postId}，历史单图数据（无 postId）回退 {@link #mediaId}。
+     *
+     * <p>与引擎侧 {@code FeedItemView#timelineKey()} 口径完全一致——同一条内容在「网关投递」
+     * 与「引擎物化」两侧必须用同一个键，否则下架/标签索引会落在两个不同索引上。</p>
+     */
+    public String timelineKey() {
+        return postId == null || postId.isBlank() ? mediaId : postId;
     }
 }

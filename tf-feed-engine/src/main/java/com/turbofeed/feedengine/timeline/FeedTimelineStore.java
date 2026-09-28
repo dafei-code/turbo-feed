@@ -3,6 +3,7 @@ package com.turbofeed.feedengine.timeline;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.shared.model.FeedItemView;
+import com.turbofeed.feedengine.interest.InterestService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -70,6 +71,20 @@ public class FeedTimelineStore {
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    /** 完播率对推荐流<b>池内排序</b>的加权系数（抖音式"完播即加权"；0 关掉，纯按入流时刻）。 */
+    @Value("${turbofeed.feed.completion-rank-weight:0.15}")
+    private double completionRankWeight;
+    /** 兴趣匹配对池内排序的加权系数（与完播率同量纲，单位"等效入流时刻窗口"；0 关掉个性化）。 */
+    @Value("${turbofeed.feed.interest-boost-weight:1.0}")
+    private double interestBoostWeight;
+    /** 完播率对排序的影响折算成的"等效入流时刻毫秒数"窗口（1 小时），使 rate∈[0,1] 与 recency 量级可比。 */
+    private static final long RANK_RECENCY_WINDOW_MILLIS = 3_600_000L;
+    /** 参与排序的兴趣标签取 TopN（控制 HGETALL 后排序成本，且避免长尾标签噪声）。 */
+    private static final int INTEREST_TOP_N = 30;
+    /** 单条内容的兴趣累加分上限（防止少数强互动把某标签权重推到离谱，淹没时间序）。 */
+    private static final double INTEREST_SCORE_CAP = 3.0;
+    private final PostStatService postStatService;
+    private final InterestService interestService;
 
     private static final String TL_PREFIX = "tf:feed:tl:";
     /** 反查索引前缀：帖身份（postId，历史数据回退 mediaId）-&gt; 所在桶 key + 成员串（用于精确 ZREM）。 */
@@ -162,12 +177,16 @@ public class FeedTimelineStore {
      * <p>分页在加权模式下按池各自推进游标：第 {@code page} 页时，池 p 贡献其候选列表的
      * {@code [page*alloc_p, page*alloc_p+alloc_p)} 切片，因此翻页稳定、不会重复或跳漏。</p>
      *
-     * @param page 页码（从 0 开始）
-     * @param size 单页条数
+     * @param userId 个性化用户（已登录；匿名为 {@code null}）；{@code null} 或画像为空时退化为纯「入流时刻 + 完播率」排序
+     * @param page   页码（从 0 开始）
+     * @param size   单页条数
      * @return 时间倒序的内容列表（当前页）；空表示无更多内容或 Redis 不可用
      */
-    public List<FeedItemView> readPage(int page, int size) {
+    public List<FeedItemView> readPage(String userId, int page, int size) {
         int limit = size <= 0 ? 20 : size;
+        // 一次性取用户兴趣画像（TopN 正向标签→权重）；无画像/匿名→空 Map，走冷启动排序。
+        Map<String, Double> interest = (userId == null || !interestService.hasInterest(userId))
+                ? Map.of() : interestService.weightedTags(userId, INTEREST_TOP_N);
         // 先按池收集近 N 天、每池最新的候选（保留 ZSET score 以便回退路径按入流时刻排序）
         Map<Integer, List<ZSetOperations.TypedTuple<String>>> byPool = new LinkedHashMap<>();
         for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
@@ -216,32 +235,89 @@ public class FeedTimelineStore {
         // 加权：每页按池权重分配槽位，高池优先排前
         double[] weights = parsePoolWeights();
         Map<Integer, List<FeedItemView>> parsed = new LinkedHashMap<>();
+        Map<Integer, List<ScoredItem>> scored = new LinkedHashMap<>();
         for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
             List<FeedItemView> l = new ArrayList<>();
+            List<ScoredItem> sl = new ArrayList<>();
             for (ZSetOperations.TypedTuple<String> t : byPool.get(pool)) {
                 FeedItemView it = parseMember(t == null ? null : t.getValue());
                 if (it != null) {
                     l.add(it);
+                    double recency = t != null && t.getScore() != null ? t.getScore() : 0d;
+                    sl.add(new ScoredItem(it, recency));
                 }
             }
             parsed.put(pool, l);
+            scored.put(pool, sl);
         }
         int[] alloc = allocateSlots(limit, weights, parsed);
         long offset = (long) Math.max(page, 0) * limit;
         List<FeedItemView> result = new ArrayList<>(limit);
         for (int pool = MAX_POOL_LEVELS; pool >= 1; pool--) {
-            List<FeedItemView> items = parsed.get(pool);
+            List<ScoredItem> items = scored.get(pool);
             int per = alloc[pool - 1];
             if (per <= 0 || items.isEmpty()) {
                 continue;
             }
             int start = (int) Math.min((long) per * offset, items.size());
             int end = Math.min(start + per, items.size());
-            if (start < end) {
-                result.addAll(items.subList(start, end));
+            if (start >= end) {
+                continue;
+            }
+            // 池内按"入流时刻 + 完播率加权"重排：完播率高的内容在同类 cohort 里往前排（抖音式"看完即加权"）。
+            // 仅对当页切片重排，Redis 读次数有界（≤ 本池页大小），不扫全量候选。
+            List<ScoredItem> slice = new ArrayList<>(items.subList(start, end));
+            if (completionRankWeight > 0d || (interestBoostWeight > 0d && !interest.isEmpty())) {
+                slice.sort((a, b) -> Double.compare(displayScore(b, interest), displayScore(a, interest)));
+            }
+            for (ScoredItem s : slice) {
+                result.add(s.item());
             }
         }
         return result;
+    }
+
+    /** 池内重排用的"内容 + 入流时刻(score)"持有体。 */
+    private record ScoredItem(FeedItemView item, double recency) {
+    }
+
+    /**
+     * 池内排序的「展示分值」：入流时刻 + 完播率加权 + 兴趣加权。
+     * <ul>
+     *   <li>入流时刻（recency）：内容越新基线越高；</li>
+     *   <li>完播率加权：{@code completionRankWeight × rate × 1h 窗口}，看完即加权（抖音式赛马）；</li>
+     *   <li>兴趣加权：{@code interestBoostWeight × 兴趣匹配分 × 1h 窗口}，
+     *       兴趣匹配分 = 该内容标签与用户画像正向权重的累加（封顶 {@link #INTEREST_SCORE_CAP}）。
+     *       与完播率同量纲，故「命中兴趣」≈ 给内容加上「等同看了若干小时」的排序红利，
+     *       但又不会压过时间序主轴（冷内容仍有曝光，避免信息茧房）。</li>
+     * </ul>
+     * fail-open：统计/画像读不到时退化为纯入流时刻排序（rate / interest 记 0）。
+     */
+    private double displayScore(ScoredItem s, Map<String, Double> interest) {
+        double rate = 0d;
+        try {
+            PostStatService.PostStat stat = postStatService.snapshot(s.item().timelineKey());
+            rate = stat.impressions() > 0 ? (double) stat.playCompletes() / stat.impressions() : 0d;
+        } catch (Exception ignore) {
+            // 统计不可用：退化为纯入流时刻排序
+        }
+        double interestScore = 0d;
+        if (interestBoostWeight > 0d && !interest.isEmpty()) {
+            List<String> tags = s.item().tags();
+            if (tags != null) {
+                double sum = 0d;
+                for (String tag : tags) {
+                    Double w = interest.get(tag);
+                    if (w != null) {
+                        sum += w;
+                    }
+                }
+                interestScore = Math.min(sum, INTEREST_SCORE_CAP);
+            }
+        }
+        return s.recency()
+                + completionRankWeight * rate * RANK_RECENCY_WINDOW_MILLIS
+                + interestBoostWeight * interestScore * RANK_RECENCY_WINDOW_MILLIS;
     }
 
     private FeedItemView parseMember(String json) {

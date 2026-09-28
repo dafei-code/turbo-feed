@@ -46,7 +46,8 @@ public final class FeedItemMapper {
                 item.status() == null ? null : item.status().name(),
                 item.createdAt(),
                 item.caption(),
-                item.captionMark());
+                item.captionMark(),
+                item.tags());
     }
 
     /**
@@ -73,7 +74,8 @@ public final class FeedItemMapper {
                 parseStatus(item.status()),
                 item.createdAt(),
                 item.caption(),
-                item.captionMark());
+                item.captionMark(),
+                item.tags());
     }
 
     /** 保证 {@code images} 非空：缺省时回退为单元素列表（{@code url} 为 null 时为空列表）。 */

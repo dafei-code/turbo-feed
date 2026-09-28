@@ -1,6 +1,7 @@
 package com.turbofeed.feedengine.timeline;
 
 import com.turbofeed.shared.model.FeedBehaviorEvent;
+import com.turbofeed.feedengine.interest.InterestService;
 import org.apache.rocketmq.spring.annotation.ConsumeMode;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
@@ -27,9 +28,11 @@ import org.springframework.stereotype.Component;
 public class FeedBehaviorConsumer implements RocketMQListener<FeedBehaviorEvent> {
 
     private final PostStatService postStatService;
+    private final InterestService interestService;
 
-    public FeedBehaviorConsumer(PostStatService postStatService) {
+    public FeedBehaviorConsumer(PostStatService postStatService, InterestService interestService) {
         this.postStatService = postStatService;
+        this.interestService = interestService;
     }
 
     @Override
@@ -37,6 +40,12 @@ public class FeedBehaviorConsumer implements RocketMQListener<FeedBehaviorEvent>
         if (msg == null) {
             return;
         }
-        postStatService.record(msg.timelineKey(), msg.type());
+        if ("WATCH".equalsIgnoreCase(msg.type())) {
+            postStatService.recordWatch(msg.timelineKey(), msg.watchDuration(), msg.mediaDuration());
+        } else {
+            postStatService.record(msg.timelineKey(), msg.type());
+        }
+        // 同一时刻累积兴趣画像（fail-open）；与 HTTP 接收端共用同一逻辑。
+        interestService.accumulateFromEvent(msg);
     }
 }

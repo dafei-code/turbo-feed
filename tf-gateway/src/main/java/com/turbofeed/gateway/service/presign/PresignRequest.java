@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.service.presign;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
@@ -21,6 +22,10 @@ public record PresignRequest(List<FileMeta> files, String caption) {
      * @param size        声明字节数（服务端在申请阶段做上限初筛，完成阶段用 stat 复检）
      * @param contentType 浏览器侧 MIME（如 {@code image/jpeg}）；无法映射白名单格式即拒绝
      */
-    public record FileMeta(String fileName, long size, String contentType) {
+    public record FileMeta(
+            @JsonProperty("fileName") String fileName,
+            @JsonProperty("size") long size,
+            @JsonProperty("contentType") String contentType,
+            @JsonProperty("duration") Integer duration) {
     }
 }

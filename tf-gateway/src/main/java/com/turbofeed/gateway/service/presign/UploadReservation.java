@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.service.presign;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.turbofeed.gateway.service.ImageFormat;
 
 import java.time.Instant;
@@ -47,7 +48,8 @@ public record UploadReservation(
      * @param format       申请时按 contentType 声明的格式（完成阶段用文件头复检，不信任本值）
      * @param declaredSize 客户端声明的字节数（完成阶段用 statObject 复检，不信任本值）
      */
-    public record Slot(int seq, String mediaId, ImageFormat format, long declaredSize) {
+    public record Slot(int seq, String mediaId, ImageFormat format, long declaredSize,
+                       @JsonProperty("duration") Integer duration) {
     }
 
     /** 预约状态。 */

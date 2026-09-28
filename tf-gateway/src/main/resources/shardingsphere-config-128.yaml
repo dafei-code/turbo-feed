@@ -31,7 +31,9 @@
 # =============================================================================
 
 dataSources:
-  ds_0:
+  # 物理数据源拆分为「主 + 副本」：*_primary 写主库(3306)，*_read 读副本(3307)。
+  # !READWRITE_SPLITTING 把逻辑 ds_0/ds_1 路由到「写→主 / 读→副本」。
+  ds_0_primary:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
     # 三要素占位符化（与 shardingsphere-config.yaml 同一机制，见其文件头说明）；
@@ -46,20 +48,65 @@ dataSources:
     connectionTimeout: 30000
     idleTimeout: 600000
     maxLifetime: 1800000
-  ds_1:
+  ds_1_primary:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
     jdbcUrl: $${TURBOFEED_DB_1_URL::jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
     username: $${TURBOFEED_DB_USERNAME::root}
     password: $${TURBOFEED_DB_PASSWORD::}
-    # 同 ds_0（见其连接池注释）
+    # 同 ds_0_primary（见其连接池注释）
     maximumPoolSize: 50
     minimumIdle: 10
     connectionTimeout: 30000
     idleTimeout: 600000
     maxLifetime: 1800000
+  ds_0_read:
+    dataSourceClassName: com.zaxxer.hikari.HikariDataSource
+    driverClassName: com.mysql.cj.jdbc.Driver
+    # 只读副本（turbo_feed_1）：默认指向本机 3307；生产用 TURBOFEED_REPLICA_DB_0_URL 覆盖。
+    # 凭据复用 TURBOFEED_DB_USERNAME / TURBOFEED_DB_PASSWORD（副本通常与主库同账号）。
+    jdbcUrl: $${TURBOFEED_REPLICA_DB_0_URL::jdbc:mysql://127.0.0.1:3307/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: $${TURBOFEED_DB_USERNAME::root}
+    password: $${TURBOFEED_DB_PASSWORD::}
+    # 读副本连接数略小于主，避免单副本实例被读连接打满
+    maximumPoolSize: 30
+    minimumIdle: 8
+    connectionTimeout: 30000
+    idleTimeout: 600000
+    maxLifetime: 1800000
+  ds_1_read:
+    dataSourceClassName: com.zaxxer.hikari.HikariDataSource
+    driverClassName: com.mysql.cj.jdbc.Driver
+    # 只读副本（turbo_feed_2）：默认指向本机 3307；生产用 TURBOFEED_REPLICA_DB_1_URL 覆盖。
+    jdbcUrl: $${TURBOFEED_REPLICA_DB_1_URL::jdbc:mysql://127.0.0.1:3307/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: $${TURBOFEED_DB_USERNAME::root}
+    password: $${TURBOFEED_DB_PASSWORD::}
+    # 同 ds_0_read
+    maximumPoolSize: 30
+    minimumIdle: 8
+    connectionTimeout: 30000
+    idleTimeout: 600000
+    maxLifetime: 1800000
 
 rules:
+  # ===== 读写分离：逻辑 ds_0/ds_1 = 写主 + 读副本 =====
+  # 部署侧需提供副本地址（TURBOFEED_REPLICA_DB_0_URL / _1_URL）；未提供则回落本机 3307 默认值。
+  # transactional-read-query-strategy=PRIMARY：事务内读走主库，规避写后读复制延迟。
+  - !READWRITE_SPLITTING
+    dataSources:
+      ds_0:
+        type: Static
+        props:
+          write-data-source-name: ds_0_primary
+          read-data-source-names: ds_0_read
+          transactional-read-query-strategy: PRIMARY
+      ds_1:
+        type: Static
+        props:
+          write-data-source-name: ds_1_primary
+          read-data-source-names: ds_1_read
+          transactional-read-query-strategy: PRIMARY
+
   - !SHARDING
     # 采用 autoTables（自动分片）而非 tables（手动分片）：
     # HASH_MOD 是自动分片算法，只能配在 autoTables 上（见文件头注释）。

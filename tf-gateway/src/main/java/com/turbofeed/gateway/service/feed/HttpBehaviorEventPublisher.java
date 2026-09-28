@@ -25,14 +25,14 @@ public class HttpBehaviorEventPublisher implements BehaviorEventPublisher {
     }
 
     @Override
-    public void report(List<BehaviorReport> reports) {
+    public void report(List<BehaviorReport> reports, String userId) {
         if (reports == null || reports.isEmpty()) {
             return;
         }
         List<FeedBehaviorEvent> events = new ArrayList<>();
         for (BehaviorReport r : reports) {
             if (r != null && r.postId() != null) {
-                events.add(new FeedBehaviorEvent(r.postId(), r.type()));
+                events.add(new FeedBehaviorEvent(r.postId(), r.type(), r.watchDuration(), r.mediaDuration(), userId));
             }
         }
         feedEngineClient.reportBehavior(events);

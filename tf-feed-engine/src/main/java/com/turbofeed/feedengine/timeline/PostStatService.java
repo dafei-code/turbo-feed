@@ -40,6 +40,8 @@ public class PostStatService {
     static final String TRACKED_KEY = "tf:feed:stat:tracked";
     /** 统计存活时长：略长于时间线桶 TTL，内容离开公域后统计自然过期。 */
     private static final Duration STAT_TTL = Duration.ofDays(8);
+    /** 完播率阈值：观看进度达到该比例才记一次"完播"（计入 playCompletes）。 */
+    private static final double PLAY_COMPLETE_RATIO = 0.7;
 
     public PostStatService(StringRedisTemplate redisTemplate) {
         this.redisTemplate = redisTemplate;
@@ -60,6 +62,33 @@ public class PostStatService {
             redisTemplate.opsForSet().add(TRACKED_KEY, timelineKey);
         } catch (Exception e) {
             log.warn("行为埋点写入失败（不影响主流程）: timelineKey={}, type={}, {}", timelineKey, type, e.getMessage());
+        }
+    }
+
+    /**
+     * 完播上报（携带观看时长）：曝光 +1 恒定（抖音式"划到即曝光"）；
+     * 观看比例 {@code watchDuration / mediaDuration} 达到 {@link #PLAY_COMPLETE_RATIO} 再记一次完播。
+     *
+     * <p><b>为什么是比例而非二进制</b>：旧端只发 {@code PLAY_COMPLETE}（看完即 +1），新端发
+     * {@code WATCH} 携带精确进度——比例更贴近抖音"完播率"语义，且能区分"看了 30%"与"看了 99%"。
+     * 二者都写入同一个 {@code playCompletes} 字段，晋级器消费口径不变。</p>
+     */
+    public void recordWatch(String timelineKey, Integer watchDuration, Integer mediaDuration) {
+        if (timelineKey == null) {
+            return;
+        }
+        int md = mediaDuration != null ? mediaDuration : 0;
+        int wd = watchDuration != null ? watchDuration : 0;
+        try {
+            redisTemplate.opsForHash().increment(STAT_PREFIX + timelineKey, "impressions", 1);
+            redisTemplate.expire(STAT_PREFIX + timelineKey, STAT_TTL);
+            redisTemplate.opsForSet().add(TRACKED_KEY, timelineKey);
+            if (md > 0 && (double) wd / md >= PLAY_COMPLETE_RATIO) {
+                redisTemplate.opsForHash().increment(STAT_PREFIX + timelineKey, "playCompletes", 1);
+            }
+        } catch (Exception e) {
+            log.warn("完播埋点写入失败（不影响主流程）: timelineKey={}, watch={}, media={}, {}",
+                    timelineKey, wd, md, e.getMessage());
         }
     }
 

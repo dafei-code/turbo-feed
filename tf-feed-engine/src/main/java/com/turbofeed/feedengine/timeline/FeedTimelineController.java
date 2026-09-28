@@ -1,7 +1,10 @@
 package com.turbofeed.feedengine.timeline;
 
+import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.result.Result;
+import com.turbofeed.feedengine.interest.InterestService;
+import com.turbofeed.feedengine.interest.TagIndexService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -41,6 +44,9 @@ public class FeedTimelineController {
 
     private final RecommendedFeedService recommendedFeedService;
     private final FeedTimelineStore feedTimelineStore;
+    private final PostStatService postStatService;
+    private final TagIndexService tagIndexService;
+    private final InterestService interestService;
 
     /**
      * 读取公域推荐流（入流时间倒序，分页）。
@@ -52,8 +58,9 @@ public class FeedTimelineController {
     @GetMapping("/recommended")
     public Result<List<FeedItemView>> recommended(
             @RequestParam(value = "page", defaultValue = "0") int page,
-            @RequestParam(value = "size", defaultValue = "20") int size) {
-        return Result.ok(recommendedFeedService.recommended(page, size));
+            @RequestParam(value = "size", defaultValue = "20") int size,
+            @RequestParam(value = "userId", required = false) String userId) {
+        return Result.ok(recommendedFeedService.recommended(page, size, userId));
     }
 
     /**
@@ -66,6 +73,8 @@ public class FeedTimelineController {
     public Result<Void> append(@RequestParam(value = "poolLevel", defaultValue = "1") int poolLevel,
                                @RequestBody FeedItemView item) {
         feedTimelineStore.append(item, poolLevel);
+        // 同步维护标签反向索引（兴趣召回/画像的基础设施），fail-open：失败只告警。
+        tagIndexService.index(item.timelineKey(), item.tags());
         // 内容进流的同一刻清掉推荐流缓存：否则新内容要等满 15s TTL 才对用户可见。
         // 放在 store.append 之后——先保证时间线落定，再让缓存失效（顺序颠倒会有"读到旧列表"的窗口）。
         recommendedFeedService.invalidate();
@@ -80,8 +89,38 @@ public class FeedTimelineController {
     @PostMapping("/timeline/remove")
     public Result<Void> remove(@RequestParam("mediaId") String mediaId) {
         feedTimelineStore.remove(mediaId);
+        // 同步摘除标签索引（与 append 用同一 timelineKey；见 TagIndexService 说明）。
+        tagIndexService.remove(mediaId);
         // 下架比发布更需要及时：内容已从时间线摘除，缓存却还在返回它 = 已下架内容继续展示。
         recommendedFeedService.invalidate();
+        return Result.ok();
+    }
+
+    /**
+     * 行为埋点接收（网关同步 HTTP 兜底路径 / 测试直连）。
+     *
+     * <p>与 RocketMQ 消费者 {@link FeedBehaviorConsumer} 共用同一统计写入逻辑：{@code WATCH} 走
+     * {@link PostStatService#recordWatch} 算完播率，其余类型走 {@link PostStatService#record}。
+     * 原本缺这个接收端，导致 {@code turbofeed.mq.enabled=false}（默认）时埋点静默丢到 404——
+     * 本次补齐，使默认路径也能累积完播/互动分，供流量池晋级器消费。</p>
+     */
+    @PostMapping("/behavior")
+    public Result<Void> behavior(@RequestBody List<FeedBehaviorEvent> events) {
+        if (events != null) {
+            for (FeedBehaviorEvent e : events) {
+                if (e == null || e.timelineKey() == null) {
+                    continue;
+                }
+                if ("WATCH".equalsIgnoreCase(e.type())) {
+                    postStatService.recordWatch(e.timelineKey(), e.watchDuration(), e.mediaDuration());
+                } else {
+                    postStatService.record(e.timelineKey(), e.type());
+                }
+                // 同一时刻累积兴趣画像（fail-open）：埋点带 timelineKey 不带标签，
+                // InterestService 内部经 TagIndexService 反查该内容的标签再累加。
+                interestService.accumulateFromEvent(e);
+            }
+        }
         return Result.ok();
     }
 }

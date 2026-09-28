@@ -133,7 +133,7 @@ public class MediaUploadFinalizer {
             UploadReservation.Slot slot = r.slots().get(i);
             rows.add(new MediaJdbcRepository.MediaRowSpec(
                     r.postId(), slot.mediaId(), uid, urls.get(i), MediaStatus.PENDING,
-                    r.caption(), r.captionMark(), slot.seq(), r.createdAt()));
+                    r.caption(), r.captionMark(), slot.seq(), r.createdAt(), slot.duration()));
         }
         return rows;
     }

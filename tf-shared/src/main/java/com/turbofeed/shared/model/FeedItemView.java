@@ -45,6 +45,9 @@ import java.util.List;
  *                    （分桶与 score 取入流时刻，见引擎侧 {@code FeedTimelineStore}）
  * @param caption     描述/标题（原始文本）
  * @param captionMark 描述解析后的结构化标记 JSON（@用户 / #话题 / 图片引用）
+ * @param tags        caption 中解析出的话题标签（小写、去重、按出现顺序；见
+ *                   {@code com.turbofeed.shared.caption.CaptionTagParser}）。入流时由网关解析
+ *                   并随条目物化进时间线成员串，供引擎做兴趣画像与个性化召回/排序。无标签为 {@code null}
  */
 public record FeedItemView(
         String postId,
@@ -54,7 +57,8 @@ public record FeedItemView(
         String status,
         Instant createdAt,
         String caption,
-        String captionMark) {
+        String captionMark,
+        List<String> tags) {
 
     /** 唯一允许进入公域时间线的状态值（引擎侧写入闸门）。 */
     public static final String STATUS_APPROVED = "APPROVED";
