@@ -19,6 +19,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -106,6 +107,12 @@ public class FeedTimelineStore {
     /** 各流量池在推荐流中的曝光权重（按池序 L1..Ln，默认 10%/30%/60%：新内容试水/已验证优质占大头）。 */
     @Value("${turbofeed.feed.pool-weights:0.1,0.3,0.6}")
     private String poolWeightsCsv;
+    /**
+     * 热点召回占每页槽位的比例（抖音式"热门"独立通路）。
+     * {@code 0} = 关闭，读路径退化为改造前语义（仅按流量池权重切片）。
+     */
+    @Value("${turbofeed.feed.hot-recall-ratio:0.1}")
+    private double hotRecallRatio;
 
     /**
      * 审核通过：按信用池写时间线（denormalized {@link FeedItemView} JSON），fail-open。
@@ -237,6 +244,25 @@ public class FeedTimelineStore {
 
         // 加权：每页按池权重分配槽位，高池优先排前
         double[] weights = parsePoolWeights();
+        // ==================================================================
+        // 热点召回（抖音式"热门"独立通路）：先按热度榜取 Top-N 内容身份，再经反查索引
+        // 还原成完整条目。它是流量池之外的<b>第二路召回</b>，单独占 hot-recall-ratio 的槽位，
+        // 流量池只参与剩下的 (limit - hotCount) 个槽位分配，保证单页总量始终不超 limit。
+        // ==================================================================
+        int hotSlots = hotRecallRatio > 0d
+                ? (int) Math.floor(limit * Math.min(hotRecallRatio, 1.0d))
+                : 0;
+        List<FeedItemView> hotItems = new ArrayList<>();
+        Set<String> hotKeys = new LinkedHashSet<>();
+        if (hotSlots > 0) {
+            for (String tk : postStatService.hotTimelineKeys(hotSlots)) {
+                FeedItemView hot = memberOf(tk);
+                if (hot != null && hotKeys.add(tk)) {
+                    hotItems.add(hot);
+                }
+            }
+        }
+
         Map<Integer, List<FeedItemView>> parsed = new LinkedHashMap<>();
         Map<Integer, List<ScoredItem>> scored = new LinkedHashMap<>();
         for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
@@ -244,25 +270,37 @@ public class FeedTimelineStore {
             List<ScoredItem> sl = new ArrayList<>();
             for (ZSetOperations.TypedTuple<String> t : byPool.get(pool)) {
                 FeedItemView it = parseMember(t == null ? null : t.getValue());
-                if (it != null) {
-                    l.add(it);
-                    double recency = t != null && t.getScore() != null ? t.getScore() : 0d;
-                    sl.add(new ScoredItem(it, recency));
+                if (it == null) {
+                    continue;
                 }
+                // 同页去重：已在热点槽位露出的内容不再占流量池槽位——否则同一页会重复出现
+                // 同一条内容，还白白吃掉一个曝光位（低池内容的试水机会被挤掉）。
+                if (!hotKeys.isEmpty() && hotKeys.contains(it.timelineKey())) {
+                    continue;
+                }
+                l.add(it);
+                double recency = t != null && t.getScore() != null ? t.getScore() : 0d;
+                sl.add(new ScoredItem(it, recency));
             }
             parsed.put(pool, l);
             scored.put(pool, sl);
         }
-        int[] alloc = allocateSlots(limit, weights, parsed);
-        long offset = (long) Math.max(page, 0) * limit;
+        int remainingSlots = Math.max(limit - hotItems.size(), 0);
+        int[] alloc = allocateSlots(remainingSlots, weights, parsed);
+        long pageNum = Math.max(page, 0);
         List<FeedItemView> result = new ArrayList<>(limit);
+        result.addAll(hotItems);
         for (int pool = MAX_POOL_LEVELS; pool >= 1; pool--) {
             List<ScoredItem> items = scored.get(pool);
             int per = alloc[pool - 1];
             if (per <= 0 || items.isEmpty()) {
                 continue;
             }
-            int start = (int) Math.min((long) per * offset, items.size());
+            // 分页游标：本池第 page 页应取 [per*page, per*(page+1))。
+            // 修复前是 per*page*limit（多乘了一次页大小）：page=1 时从 240 条开始切，
+            // 第 0 页之后的大量内容被整段跳过，深池内容永远翻不到——这是原先
+            // "翻页翻着翻着就没了"的直接原因。
+            int start = (int) Math.min(per * pageNum, items.size());
             int end = Math.min(start + per, items.size());
             if (start >= end) {
                 continue;
@@ -373,6 +411,38 @@ public class FeedTimelineStore {
         try {
             return objectMapper.readValue(json, FeedItemView.class);
         } catch (Exception ignore) {
+            return null;
+        }
+    }
+
+    /**
+     * 按内容身份还原完整条目（热点召回用）：读反查索引 {@code tf:feed:idx:{timelineKey}}
+     * 取它所在桶 + 成员串，反序列化为 {@link FeedItemView}。
+     *
+     * <p><b>为什么热点榜只存 timelineKey 而不存整个成员串</b>：榜单需要频繁 ZINCRBY，member
+     * 越短越好；且同一内容的成员串可能因重复 append（同 score 不同 JSON）而改写，存 id 不会
+     * 留下与当前时间线不一致的僵尸成员。代价是召回时多一次 GET——那是 O(1) 点查，
+     * 成本远低于在榜单侧维护冗长 JSON 或做一致性补偿。</p>
+     *
+     * @return 命中的条目；未入公用时间线 / 索引已过期 / JSON 损坏时返回 {@code null}
+     *         （该热点不参与本页，静默丢弃，不影响其余召回路径）
+     */
+    private FeedItemView memberOf(String timelineKey) {
+        if (timelineKey == null) {
+            return null;
+        }
+        try {
+            String location = redisTemplate.opsForValue().get(IDX_PREFIX + timelineKey);
+            if (location == null) {
+                return null;
+            }
+            int sep = location.indexOf(IDX_SEP);
+            if (sep < 0) {
+                return null;
+            }
+            return parseMember(location.substring(sep + IDX_SEP.length()));
+        } catch (Exception e) {
+            log.warn("热点召回还原条目失败（跳过该条）: timelineKey={}, {}", timelineKey, e.getMessage());
             return null;
         }
     }
