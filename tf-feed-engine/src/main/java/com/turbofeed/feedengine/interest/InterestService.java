@@ -105,7 +105,8 @@ public class InterestService {
             }
             List<Map.Entry<String, Double>> entries = new ArrayList<>();
             for (Map.Entry<Object, Object> e : raw.entrySet()) {
-                double v = ((Number) e.getValue()).doubleValue();
+                // StringRedisTemplate 的 Hash 值是 String（如 "2.7"），不能强转 Number（CCE→fail-open 吞掉→画像永远为空）
+                double v = Double.parseDouble(String.valueOf(e.getValue()));
                 if (v > 0) {
                     entries.add(Map.entry(String.valueOf(e.getKey()), v));
                 }
