@@ -187,6 +187,9 @@ public class FeedTimelineStore {
         // 一次性取用户兴趣画像（TopN 正向标签→权重）；无画像/匿名→空 Map，走冷启动排序。
         Map<String, Double> interest = (userId == null || !interestService.hasInterest(userId))
                 ? Map.of() : interestService.weightedTags(userId, INTEREST_TOP_N);
+        // 负向标签（抖音式「不感兴趣 → 对该用户打压同标签内容」）。匿名 / 无负反馈为空集，
+        // 与画像解耦：即使该用户画像为空（冷启动）也照样生效——负反馈不需要先有正反馈。
+        Set<String> negative = interestService.negativeTags(userId);
         // 先按池收集近 N 天、每池最新的候选（保留 ZSET score 以便回退路径按入流时刻排序）
         Map<Integer, List<ZSetOperations.TypedTuple<String>>> byPool = new LinkedHashMap<>();
         for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
@@ -267,8 +270,12 @@ public class FeedTimelineStore {
             // 池内按"入流时刻 + 完播率加权"重排：完播率高的内容在同类 cohort 里往前排（抖音式"看完即加权"）。
             // 仅对当页切片重排，Redis 读次数有界（≤ 本池页大小），不扫全量候选。
             List<ScoredItem> slice = new ArrayList<>(items.subList(start, end));
-            if (completionRankWeight > 0d || (interestBoostWeight > 0d && !interest.isEmpty())) {
-                slice.sort((a, b) -> Double.compare(displayScore(b, interest), displayScore(a, interest)));
+            // 负向同样纳入重排开关：哪怕用户把完播/兴趣加权都关了，负反馈也必须生效——
+            // 它是"用户明确表达不要"，优先级高于任何体验类加权。
+            if (completionRankWeight > 0d || (interestBoostWeight > 0d && !interest.isEmpty())
+                    || !negative.isEmpty()) {
+                slice.sort((a, b) -> Double.compare(displayScore(b, interest, negative),
+                        displayScore(a, interest, negative)));
             }
             for (ScoredItem s : slice) {
                 result.add(s.item());
@@ -282,6 +289,37 @@ public class FeedTimelineStore {
     }
 
     /**
+     * 「不感兴趣」负反馈的排序惩罚：命中用户负向标签的内容在其<b>所属流量池内</b>沉底。
+     *
+     * <p>取 30 天（远大于分桶 TTL 内任意两条内容的入流时刻差，也远大于完播/兴趣加权的
+     * 1h 量级），保证命中即落到该池末尾。惩罚<b>只作用于池内相对序</b>，不跨池、不移出推荐流：
+     * 一次"不感兴趣"应当显著降低同类内容的出场概率，而不是把它物理删除——内容仍可被他人看到、
+     * 仍存在公域候选里，保留了负反馈随时间过期（见 {@code InterestService} 的 30d TTL）
+     * 或被反向操作纠正后的回旋余地。这是"降权"而非"删除"，与内容下架（{@link #remove}）
+     * 是两种不同性质的动作。</p>
+     */
+    private static final long NEGATIVE_PENALTY_MILLIS = 30L * 24 * 3_600_000L;
+
+    /**
+     * 内容是否命中该用户的负向标签（至少一个标签相交即判定命中）。
+     *
+     * <p>用"相交"而非"全部匹配"：短视频的负面标签往往是场景化的（比如在"宠物"下点了不感兴趣，
+     * 是因为不喜欢某类养宠内容而非所有动物），只要内容<b>沾到</b>被否定的标签就应当沉底——
+     * 这与正向兴趣"累加多个标签命中分"形成对称：正向是加分累积，负向是一票否决。</p>
+     */
+    private static boolean matchesNegative(FeedItemView item, Set<String> negative) {
+        if (negative == null || negative.isEmpty() || item.tags() == null) {
+            return false;
+        }
+        for (String tag : item.tags()) {
+            if (negative.contains(tag)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * 池内排序的「展示分值」：入流时刻 + 完播率加权 + 兴趣加权。
      * <ul>
      *   <li>入流时刻（recency）：内容越新基线越高；</li>
@@ -290,10 +328,14 @@ public class FeedTimelineStore {
      *       兴趣匹配分 = 该内容标签与用户画像正向权重的累加（封顶 {@link #INTEREST_SCORE_CAP}）。
      *       与完播率同量纲，故「命中兴趣」≈ 给内容加上「等同看了若干小时」的排序红利，
      *       但又不会压过时间序主轴（冷内容仍有曝光，避免信息茧房）。</li>
+     *   <li><b>负反馈惩罚</b>（{@code negative}）：内容标签命中用户负向标签集时减去
+     *       {@link #NEGATIVE_PENALTY_MILLIS}（30 天），在其所属流量池内沉底。
+     *       与前两项叠加而非替换——它不是加分项的反向数值，而是一次性重罚，
+     *       量级远大于任何加权项，保证"明确不要"压过"可能喜欢"。</li>
      * </ul>
      * fail-open：统计/画像读不到时退化为纯入流时刻排序（rate / interest 记 0）。
      */
-    private double displayScore(ScoredItem s, Map<String, Double> interest) {
+    private double displayScore(ScoredItem s, Map<String, Double> interest, Set<String> negative) {
         double rate = 0d;
         try {
             PostStatService.PostStat stat = postStatService.snapshot(s.item().timelineKey());
@@ -315,9 +357,13 @@ public class FeedTimelineStore {
                 interestScore = Math.min(sum, INTEREST_SCORE_CAP);
             }
         }
+        // 负反馈惩罚：命中用户负向标签即沉底（详见常量 javadoc）。注意它是"减分"而非置零，
+        // 因此同一池里若全部内容都被打压，彼此仍按剩余的入流时刻序相对排序，结果稳定可读。
+        double negativePenalty = matchesNegative(s.item(), negative) ? NEGATIVE_PENALTY_MILLIS : 0d;
         return s.recency()
                 + completionRankWeight * rate * RANK_RECENCY_WINDOW_MILLIS
-                + interestBoostWeight * interestScore * RANK_RECENCY_WINDOW_MILLIS;
+                + interestBoostWeight * interestScore * RANK_RECENCY_WINDOW_MILLIS
+                - negativePenalty;
     }
 
     private FeedItemView parseMember(String json) {
