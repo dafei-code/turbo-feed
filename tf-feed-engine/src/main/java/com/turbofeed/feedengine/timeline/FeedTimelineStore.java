@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.feedengine.interest.InterestService;
+import com.turbofeed.feedengine.ranking.RankingFeatures;
+import com.turbofeed.feedengine.ranking.RankingModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -72,20 +74,15 @@ public class FeedTimelineStore {
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
-    /** 完播率对推荐流<b>池内排序</b>的加权系数（抖音式"完播即加权"；0 关掉，纯按入流时刻）。 */
-    @Value("${turbofeed.feed.completion-rank-weight:0.15}")
-    private double completionRankWeight;
-    /** 兴趣匹配对池内排序的加权系数（与完播率同量纲，单位"等效入流时刻窗口"；0 关掉个性化）。 */
-    @Value("${turbofeed.feed.interest-boost-weight:1.0}")
-    private double interestBoostWeight;
-    /** 完播率对排序的影响折算成的"等效入流时刻毫秒数"窗口（1 小时），使 rate∈[0,1] 与 recency 量级可比。 */
-    private static final long RANK_RECENCY_WINDOW_MILLIS = 3_600_000L;
     /** 参与排序的兴趣标签取 TopN（控制 HGETALL 后排序成本，且避免长尾标签噪声）。 */
     private static final int INTEREST_TOP_N = 30;
-    /** 单条内容的兴趣累加分上限（防止少数强互动把某标签权重推到离谱，淹没时间序）。 */
-    private static final double INTEREST_SCORE_CAP = 3.0;
     private final PostStatService postStatService;
     private final InterestService interestService;
+    /**
+     * 精排打分器（可插拔）。打分从本类抽到 {@link RankingModel}：读路径只负责"取候选 + 组装特征"，
+     * 怎么打分由模型决定——将来换双塔 / 精排模型或接远程推理，都不必再动这段最热的读代码。
+     */
+    private final RankingModel rankingModel;
 
     private static final String TL_PREFIX = "tf:feed:tl:";
     /** 反查索引前缀：帖身份（postId，历史数据回退 mediaId）-&gt; 所在桶 key + 成员串（用于精确 ZREM）。 */
@@ -319,13 +316,11 @@ public class FeedTimelineStore {
             // 池内按"入流时刻 + 完播率加权"重排：完播率高的内容在同类 cohort 里往前排（抖音式"看完即加权"）。
             // 仅对当页切片重排，Redis 读次数有界（≤ 本池页大小），不扫全量候选。
             List<ScoredItem> slice = new ArrayList<>(items.subList(start, end));
-            // 负向同样纳入重排开关：哪怕用户把完播/兴趣加权都关了，负反馈也必须生效——
-            // 它是"用户明确表达不要"，优先级高于任何体验类加权。
-            if (completionRankWeight > 0d || (interestBoostWeight > 0d && !interest.isEmpty())
-                    || !negative.isEmpty()) {
-                slice.sort((a, b) -> Double.compare(displayScore(b, interest, negative),
-                        displayScore(a, interest, negative)));
-            }
+            // 精排：统一交给 RankingModel。原先这里有一个"各加权项全为 0 就跳过排序"的开关，
+            // 现在权重默认非 0 且排序对象是页级切片（≤ 页大小），成本可忽略，故恒重排——
+            // 少一个分支就少一处"权重配置错了却以为在排序"的静默分歧。
+            slice.sort((a, b) -> Double.compare(scoreOf(b, interest, negative),
+                    scoreOf(a, interest, negative)));
             poolPart.addAll(slice);
         }
         if (diversityWindow > 0) {
@@ -341,17 +336,9 @@ public class FeedTimelineStore {
     private record ScoredItem(FeedItemView item, double recency) {
     }
 
-    /**
-     * 「不感兴趣」负反馈的排序惩罚：命中用户负向标签的内容在其<b>所属流量池内</b>沉底。
-     *
-     * <p>取 30 天（远大于分桶 TTL 内任意两条内容的入流时刻差，也远大于完播/兴趣加权的
-     * 1h 量级），保证命中即落到该池末尾。惩罚<b>只作用于池内相对序</b>，不跨池、不移出推荐流：
-     * 一次"不感兴趣"应当显著降低同类内容的出场概率，而不是把它物理删除——内容仍可被他人看到、
-     * 仍存在公域候选里，保留了负反馈随时间过期（见 {@code InterestService} 的 30d TTL）
-     * 或被反向操作纠正后的回旋余地。这是"降权"而非"删除"，与内容下架（{@link #remove}）
-     * 是两种不同性质的动作。</p>
-     */
-    private static final long NEGATIVE_PENALTY_MILLIS = 30L * 24 * 3_600_000L;
+    // 负反馈惩罚的量级已迁至 RankingProperties#negativePenaltyMillis（打分统一归模型）。
+    // 语义不变：命中用户负向标签即在其所属流量池内沉底，只降权、不删除——与内容下架
+    // （{@link #remove}）是两种不同性质的动作。
 
     /**
      * 内容是否命中该用户的负向标签（至少一个标签相交即判定命中）。
@@ -388,16 +375,15 @@ public class FeedTimelineStore {
      * </ul>
      * fail-open：统计/画像读不到时退化为纯入流时刻排序（rate / interest 记 0）。
      */
-    private double displayScore(ScoredItem s, Map<String, Double> interest, Set<String> negative) {
-        double rate = 0d;
+    private double scoreOf(ScoredItem s, Map<String, Double> interest, Set<String> negative) {
+        PostStatService.PostStat stat = new PostStatService.PostStat(0, 0, 0, 0, 0, 0);
         try {
-            PostStatService.PostStat stat = postStatService.snapshot(s.item().timelineKey());
-            rate = stat.impressions() > 0 ? (double) stat.playCompletes() / stat.impressions() : 0d;
+            stat = postStatService.snapshot(s.item().timelineKey());
         } catch (Exception ignore) {
-            // 统计不可用：退化为纯入流时刻排序
+            // 统计不可用：按零计数处理——平滑后自然回落到先验水平，而不是朴素比率的 0
         }
         double interestScore = 0d;
-        if (interestBoostWeight > 0d && !interest.isEmpty()) {
+        if (!interest.isEmpty()) {
             List<String> tags = s.item().tags();
             if (tags != null) {
                 double sum = 0d;
@@ -407,16 +393,18 @@ public class FeedTimelineStore {
                         sum += w;
                     }
                 }
-                interestScore = Math.min(sum, INTEREST_SCORE_CAP);
+                interestScore = sum;          // 封顶交给模型（RankingProperties#interestScoreCap）
             }
         }
-        // 负反馈惩罚：命中用户负向标签即沉底（详见常量 javadoc）。注意它是"减分"而非置零，
-        // 因此同一池里若全部内容都被打压，彼此仍按剩余的入流时刻序相对排序，结果稳定可读。
-        double negativePenalty = matchesNegative(s.item(), negative) ? NEGATIVE_PENALTY_MILLIS : 0d;
-        return s.recency()
-                + completionRankWeight * rate * RANK_RECENCY_WINDOW_MILLIS
-                + interestBoostWeight * interestScore * RANK_RECENCY_WINDOW_MILLIS
-                - negativePenalty;
+        // 关键：传<b>原始计数</b>而不是预先算好的比率。比率一旦算出就把样本量信息丢了，
+        // 而"1 次曝光的 100%"与"万次曝光的 98%"必须能被区分——置信度平滑只有拿到原始
+        // 计数才做得了（见 LinearWeightedRankingModel）。
+        return rankingModel.score(new RankingFeatures(
+                s.recency(),
+                stat.impressions(), stat.playCompletes(), stat.likes(),
+                stat.comments(), stat.shares(), stat.dislikes(),
+                interestScore,
+                matchesNegative(s.item(), negative)));
     }
 
     /**
