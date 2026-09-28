@@ -113,6 +113,12 @@ public class FeedTimelineStore {
      */
     @Value("${turbofeed.feed.hot-recall-ratio:0.1}")
     private double hotRecallRatio;
+    /**
+     * 打散窗口（抖音式"同类不连刷"）：同一标签的内容在连续的该窗口大小内<b>不重复出现</b>。
+     * {@code 0} = 关闭打散，页内严格按重排后的分值顺序输出。
+     */
+    @Value("${turbofeed.feed.diversity-window:3}")
+    private int diversityWindow;
 
     /**
      * 审核通过：按信用池写时间线（denormalized {@link FeedItemView} JSON），fail-open。
@@ -289,7 +295,12 @@ public class FeedTimelineStore {
         int[] alloc = allocateSlots(remainingSlots, weights, parsed);
         long pageNum = Math.max(page, 0);
         List<FeedItemView> result = new ArrayList<>(limit);
+        // 热点槽位<b>固定钉在最前</b>：它是召回策略刻意给的探索位，不参与后续打散，
+        // 否则"热门内容靠前"的策略语义会被重排层抹掉。
         result.addAll(hotItems);
+        // 流量池部分先全量收集，最后统一走一次"同类不连刷"重排——在<b>整页范围</b>内打散，
+        // 而不是每个池各自打散：否则相邻两池的交界处仍会连着刷同一个话题。
+        List<ScoredItem> poolPart = new ArrayList<>();
         for (int pool = MAX_POOL_LEVELS; pool >= 1; pool--) {
             List<ScoredItem> items = scored.get(pool);
             int per = alloc[pool - 1];
@@ -315,9 +326,13 @@ public class FeedTimelineStore {
                 slice.sort((a, b) -> Double.compare(displayScore(b, interest, negative),
                         displayScore(a, interest, negative)));
             }
-            for (ScoredItem s : slice) {
-                result.add(s.item());
-            }
+            poolPart.addAll(slice);
+        }
+        if (diversityWindow > 0) {
+            poolPart = diversify(poolPart, diversityWindow);
+        }
+        for (ScoredItem s : poolPart) {
+            result.add(s.item());
         }
         return result;
     }
@@ -402,6 +417,78 @@ public class FeedTimelineStore {
                 + completionRankWeight * rate * RANK_RECENCY_WINDOW_MILLIS
                 + interestBoostWeight * interestScore * RANK_RECENCY_WINDOW_MILLIS
                 - negativePenalty;
+    }
+
+    /**
+     * <b>重排层</b>：抖音式"同类不连刷"打散——同一标签的内容在连续 {@code window} 条内不重复出现。
+     *
+     * <p><b>为什么需要这一层</b>：前序排序是按分值排的，但分值高不代表多样性好。若某一话题
+     * 恰好批量过审（比如一批都带同一标签），纯按分排会让用户连着刷到同一类内容，体感极差，
+     * 且会<b>挤占其它话题的曝光</b>，反过来拖累后续的兴趣探索与赛马样本质量。
+     * 打分决定"谁更重要"，打散决定"怎么排才好看"，二者是两个不同的问题。</p>
+     *
+     * <p><b>为什么用贪心前扫而不是重打分</b>：目标是"<b>尽量保持打分顺序</b>前提下的最小扰动"
+     * ——逐个输出位干活：在当前滑动窗口允许的前提下，取候选里<b>排名最靠前</b>的那一条。
+     * 这样高分内容的位置最多被推后几名，而不会像"给同类内容统一乘个惩罚系数"那样
+     * 把整个分值分布都改掉（后者会让排序失去可解释性）。</p>
+     *
+     * <p><b>打不散时为何按原序取首条</b>：若窗口内所有候选都撞标签（典型场景：整页只有一个话题，
+     * 或 content 极少），此时<b>不丢内容</b>比"形式上的多样性"更重要——宁可连着刷，也不能少给内容。
+     * 这是重排层的兜底底线。</p>
+     *
+     * <p><b>分页稳定性</b>：本方法只调整当前页内部的相对次序，不会改变哪些内容属于本页
+     * （页成员由 {@code [start,end)} 切片决定），因此翻页不会重复或漏内容。</p>
+     *
+     * @param ranked 已按 {@link #displayScore} 降序排好的候选
+     * @param window 滑动窗口大小（同一标签在该窗口内至多出现一次）
+     */
+    private List<ScoredItem> diversify(List<ScoredItem> ranked, int window) {
+        if (ranked.size() <= 2 || window <= 0) {
+            return ranked;
+        }
+        List<ScoredItem> remaining = new ArrayList<>(ranked);
+        List<ScoredItem> out = new ArrayList<>(ranked.size());
+        List<Set<String>> recent = new ArrayList<>();      // 最近 window 条已输出内容的标签
+        while (!remaining.isEmpty()) {
+            int pick = -1;
+            for (int i = 0; i < remaining.size(); i++) {
+                if (!overlapsWindow(tagsOf(remaining.get(i)), recent)) {
+                    pick = i;
+                    break;
+                }
+            }
+            if (pick < 0) {
+                pick = 0;                                   // 都撞标签：保内容不保形式
+            }
+            ScoredItem chosen = remaining.remove(pick);
+            out.add(chosen);
+            recent.add(tagsOf(chosen));
+            if (recent.size() > window) {
+                recent.remove(0);
+            }
+        }
+        return out;
+    }
+
+    /** 内容的标签集合（{@code null} 安全）。无标签的内容不参与打散判定（永远不会"撞标签"）。 */
+    private static Set<String> tagsOf(ScoredItem s) {
+        List<String> tags = s.item().tags();
+        return tags == null ? Set.of() : new LinkedHashSet<>(tags);
+    }
+
+    /** 该内容的标签是否与滑动窗口内任意一条已输出内容相交。 */
+    private static boolean overlapsWindow(Set<String> tags, List<Set<String>> window) {
+        if (tags.isEmpty()) {
+            return false;
+        }
+        for (Set<String> prev : window) {
+            for (String t : tags) {
+                if (prev.contains(t)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private FeedItemView parseMember(String json) {
