@@ -4,6 +4,7 @@ import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.result.Result;
 import com.turbofeed.feedengine.interest.InterestService;
+import com.turbofeed.feedengine.logging.BehaviorLogSink;
 import com.turbofeed.feedengine.interest.TagIndexService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,6 +48,7 @@ public class FeedTimelineController {
     private final PostStatService postStatService;
     private final TagIndexService tagIndexService;
     private final InterestService interestService;
+    private final BehaviorLogSink behaviorLogSink;
 
     /**
      * 读取公域推荐流（入流时间倒序，分页）。
@@ -103,6 +105,10 @@ public class FeedTimelineController {
      * {@link PostStatService#recordWatch} 算完播率，其余类型走 {@link PostStatService#record}。
      * 原本缺这个接收端，导致 {@code turbofeed.mq.enabled=false}（默认）时埋点静默丢到 404——
      * 本次补齐，使默认路径也能累积完播/互动分，供流量池晋级器消费。</p>
+     *
+     * <p><b>⚠️ 与 {@link FeedBehaviorConsumer} 必须成对修改</b>：两条路径（HTTP 兜底 / MQ）
+     * 最终都落到"统计 + 画像 + 落盘"三件事，任一侧漏改都会造成<b>埋点路径不一致</b>
+     * （典型症状：默认环境有数据、开了 MQ 反而没样本）。改动埋点处理逻辑时两边都要看。</p>
      */
     @PostMapping("/behavior")
     public Result<Void> behavior(@RequestBody List<FeedBehaviorEvent> events) {
@@ -119,6 +125,9 @@ public class FeedTimelineController {
                 // 同一时刻累积兴趣画像（fail-open）：埋点带 timelineKey 不带标签，
                 // InterestService 内部经 TagIndexService 反查该内容的标签再累加。
                 interestService.accumulateFromEvent(e);
+                // M0：原始明细落盘（训练样本的唯一来源）。放在统计/画像之后——
+                // 前两者是线上效果依赖，落盘是离线优化依赖，绝不能反向拖住它们。
+                behaviorLogSink.log(e);
             }
         }
         return Result.ok();

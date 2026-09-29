@@ -604,11 +604,88 @@
     DELETED: '已删除', TAKEN_DOWN: '已下架', APPEALING: '申诉中'
   };
 
+  // ========== 行为埋点（M0：训练样本的唯一来源） ==========
+  // ⚠️ 在此之前前端**完全没有埋点上报**——后端已有的曝光/完播计数（PostStatService）、
+  // 兴趣画像（InterestService）与行为明细落盘（BehaviorLogSink）因为没有客户端上报而恒为空，
+  // 也就是说流量池赛马与个性化此前是**空转**的。埋点不是装饰，它是整条推荐链的输入源。
+  var BEHAVIOR_API = 'http://localhost:8080/api/feed/behavior';
+  var BEHAVIOR_FLUSH_MS = 2000;          // 批量上报间隔（攒批，别一条一请求）
+  var BEHAVIOR_MAX_BUFFER = 50;          // 缓冲上限，到量即发
+  var IMAGE_EXPECTED_DWELL_SEC = 8;      // 图文"期望驻留时长"：图文没有真实时长，用它当分母算完播率
+
+  var currentRequestId = null;           // 本次推荐请求 ID：同一次拉取/刷新共用
+  var behaviorBuffer = [];
+  var dwellIdx = -1;                     // 当前停留条目的下标
+  var dwellStartMs = Date.now();         // 当前条目的停留起点（用于算 WATCH 观看时长）
+
+  function newRequestId() {
+    return 'req-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  }
+
+  /**
+   * 上报一条行为。
+   *
+   * <p>只上报「推荐」Tab：『我的』是自己看自己的作品，不是公域曝光，
+   * 报进去会把"作者自看"当成"公域曝光"，直接污染训练样本。</p>
+   *
+   * <p><b>position 必须带</b>：没有它无法做 position bias 校正——越靠前越容易被看到，
+   * 模型会把"位置靠前"误学成"内容更好"。<b>requestId 必须带</b>：没有它无法把
+   * "当次展示了哪些内容"归组，也就无法把「曝光了但没互动」判定为负样本。</p>
+   */
+  function track(postId, type, opts) {
+    if (!postId || currentTab !== 'recommend') return;
+    var e = { postId: postId, type: type, requestId: currentRequestId };
+    if (opts && typeof opts.position === 'number') e.position = opts.position;
+    if (opts && typeof opts.watchDuration === 'number') {
+      e.watchDuration = Math.round(opts.watchDuration);
+      e.mediaDuration = opts.mediaDuration || IMAGE_EXPECTED_DWELL_SEC;
+    }
+    behaviorBuffer.push(e);
+    if (behaviorBuffer.length >= BEHAVIOR_MAX_BUFFER) flushBehavior();
+  }
+
+  function flushBehavior() {
+    if (!behaviorBuffer.length) return;
+    var TOKEN = localStorage.getItem('turbofeed:token');
+    if (!TOKEN) { behaviorBuffer = []; return; }
+    var batch = behaviorBuffer;
+    behaviorBuffer = [];
+    // keepalive：页面关闭/跳转时最后一批也要能发出去，否则刚看的几条全丢
+    fetch(BEHAVIOR_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
+      body: JSON.stringify(batch),
+      keepalive: true
+    }).catch(function (e) { console.warn('行为埋点上报失败（不影响使用）', e); });
+  }
+  setInterval(flushBehavior, BEHAVIOR_FLUSH_MS);
+  window.addEventListener('beforeunload', flushBehavior);
+
+  /**
+   * 进入第 idx 条：先结算上一条的停留时长（WATCH，带观看时长 → 服务端算完播率），
+   * 再上报本条曝光（IMPRESSION）。顺序不能反——否则"看了多久"永远记在错误的条目上。
+   */
+  function onEnterItem(idx) {
+    var now = Date.now();
+    if (dwellIdx >= 0 && dwellIdx !== idx && videos[dwellIdx]) {
+      track(videos[dwellIdx].id, 'WATCH', {
+        watchDuration: (now - dwellStartMs) / 1000,
+        mediaDuration: IMAGE_EXPECTED_DWELL_SEC,
+        position: dwellIdx
+      });
+    }
+    dwellIdx = idx;
+    dwellStartMs = now;
+    if (videos[idx]) track(videos[idx].id, 'IMPRESSION', { position: idx });
+  }
+
   function loadFeed() {
     var TOKEN = localStorage.getItem('turbofeed:token');
     if (!TOKEN) { location.href = 'login.html'; return; }
 
     var mine = currentTab === 'mine';
+    // 一次拉取 = 一个 requestId：本次结果里所有条目的曝光/互动都归到它下面
+    currentRequestId = newRequestId();
     var url = mine
       ? 'http://localhost:8080/api/media/mine?page=0&size=20'
       : 'http://localhost:8080/api/feed/recommended?page=0&size=20';
@@ -711,6 +788,8 @@
     currentIdx = 0;
     updateInfo(0);
     setPlay(0, true);
+    dwellIdx = -1;              // 重新渲染 = 新一次列表，重置停留计时避免把上一批算进来
+    onEnterItem(0);             // 首条曝光
   }
 
   // ========== 一帖多图：轮播（滑动 + 圆点 + 「n/总数」计数，抖音图文口径） ==========
@@ -843,6 +922,7 @@
     currentIdx = idx;
     updateInfo(idx);
     setPlay(idx, true);
+    onEnterItem(idx);           // 结算上一条停留 + 报本条曝光
     // 把其他 mask 隐藏
     Array.from(feedList.children).forEach((el, i) => {
       if (i !== idx) {
@@ -863,6 +943,7 @@
       currentIdx = best;
       updateInfo(best);
       setPlay(best, true);
+      onEnterItem(best);        // 滑动切条：结算上一条停留 + 报本条曝光
     }
   });
 
@@ -882,6 +963,9 @@
       v.like++;
       this.dataset.liked = '1';
       toast('已点赞 ❤️');
+      // 只报"点赞"，不报"取消点赞"：契约里没有 UNLIKE 类型，而把取消记成负向会
+      // 与「不感兴趣(DISLIKE)」语义混淆——后者是"别再给我看这个"，前者只是手滑收回。
+      track(v.id, 'LIKE', { position: currentIdx });
     } else {
       this.classList.remove('liked');
       v.like--;
@@ -959,6 +1043,7 @@
     if (!txt) return;
     const v = videos[currentIdx];
     v.comment++;
+    track(v.id, 'COMMENT', { position: currentIdx });
     document.getElementById('commentCount').textContent = fmt(v.comment);
     document.getElementById('cmTitle').textContent = `评论 (${fmt(v.comment)})`;
     const list = document.getElementById('cmList');
@@ -994,6 +1079,8 @@
       toast('链接已复制');
     } else if (to === 'friend') {
       v.share++;
+      // 分享是最强的传播信号（服务端热度权重 2.0，高于点赞 1.0）
+      track(v.id, 'SHARE', { position: currentIdx });
       document.getElementById('shareCount').textContent = fmt(v.share);
       toast('已推荐给朋友');
     } else if (to === 'wechat') {

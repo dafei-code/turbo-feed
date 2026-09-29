@@ -43,7 +43,8 @@ public class RocketMqBehaviorEventPublisher implements BehaviorEventPublisher {
             }
             try {
                 rocketMQTemplate.syncSendOrderly(topic,
-                        new FeedBehaviorEvent(r.postId(), r.type(), r.watchDuration(), r.mediaDuration(), userId), r.postId());
+                        new FeedBehaviorEvent(r.postId(), r.type(), r.watchDuration(), r.mediaDuration(),
+                                userId, r.requestId(), r.position()), r.postId());
             } catch (Exception e) {
                 // 非关键路径：MQ 不可用时静默丢弃埋点，仅告警
                 org.slf4j.LoggerFactory.getLogger(RocketMqBehaviorEventPublisher.class)

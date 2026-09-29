@@ -19,6 +19,17 @@ package com.turbofeed.shared.model;
  * @param userId        行为发起者；用于累积兴趣画像与个性化召回（见引擎 {@code InterestService}）。
  *                     由网关登录态注入（行为上报接口要求 {@code FEED_INTERACT} 权限，必为已登录用户）。
  *                     引擎侧消费时按"非空才累积"处理，匿名埋点（理论不存在）不污染画像。
+ * @param requestId    <b>本次推荐请求 ID</b>（客户端拉取列表时生成，同一次刷新的所有条目共用）。
+ *                     作用：把"当次展示了哪些内容"归组——没有它就无法把「曝光了但没互动」正确判定为负样本，
+ *                     也无法还原一次请求内的候选集合（训练样本的必要条件）。可为 {@code null}（旧端兼容）。
+ * @param position     该条目在<b>当次请求</b>结果里的位次（0 起）。用于 <b>position bias 校正</b>：
+ *                     越靠前越容易被看到/点击，若不校正，模型会把"位置靠前"误学成"内容更好"。
+ *                     可为 {@code null}（旧端兼容）。
+ *
+ * <p><b>为什么不落"服务端排序分 score"</b>：分数随模型/权重版本变化，历史分数与新分数不可比，
+ * 落盘反而污染训练集。离线训练时应由<b>特征重算</b>（同一份特征代码在样本时间点重放）得到，
+ * 这也是特征存储要解决的核心问题（训练- serving 一致性）。</p>
  */
-public record FeedBehaviorEvent(String timelineKey, String type, Integer watchDuration, Integer mediaDuration, String userId) {
+public record FeedBehaviorEvent(String timelineKey, String type, Integer watchDuration, Integer mediaDuration,
+                                String userId, String requestId, Integer position) {
 }

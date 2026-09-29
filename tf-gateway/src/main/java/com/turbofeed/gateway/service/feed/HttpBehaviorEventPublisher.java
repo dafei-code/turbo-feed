@@ -32,7 +32,8 @@ public class HttpBehaviorEventPublisher implements BehaviorEventPublisher {
         List<FeedBehaviorEvent> events = new ArrayList<>();
         for (BehaviorReport r : reports) {
             if (r != null && r.postId() != null) {
-                events.add(new FeedBehaviorEvent(r.postId(), r.type(), r.watchDuration(), r.mediaDuration(), userId));
+                events.add(new FeedBehaviorEvent(r.postId(), r.type(), r.watchDuration(), r.mediaDuration(),
+                        userId, r.requestId(), r.position()));
             }
         }
         feedEngineClient.reportBehavior(events);

@@ -72,3 +72,13 @@ turbofeed:
       # Feed 时间线事件 Topic 与消费组（append / remove 共用，靠 body.action 区分，保证同一 mediaId 顺序）
       topic: turbofeed-feed-timeline
       consumer-group: turbofeed-feed-timeline-group
+    # M0 行为明细落盘（训练样本的唯一来源；实现见 logging.BehaviorLogSink）
+    # ⚠️ 默认 false：落盘是"为了攒数据"的行为，不该在任何人的机器上静默写文件。
+    #    需要采集时显式置 true，并自行负责磁盘占用与清理。
+    behavior-log:
+      enabled: ${TURBOFEED_BEHAVIOR_LOG_ENABLED:false}
+      # 落盘目录（相对进程工作目录；文件名为 feed-behavior-{yyyyMMdd}.jsonl）
+      dir: ${TURBOFEED_BEHAVIOR_LOG_DIR:logs/behavior}
+      # 异步队列容量：满了直接丢弃并计数（埋点丢得起，请求卡不起）
+      queue-capacity: 10000
+      flush-interval-millis: 1000

@@ -36,7 +36,10 @@ public class FeedBehaviorController {
     /**
      * 上报一批行为事件。
      *
-     * @param reports 行为事件列表（{@code postId} + {@code type}）
+     * @param reports 行为事件列表（{@code postId} + {@code type}）。
+     *                M0 起客户端应一并带上 {@code requestId}（本次列表拉取的唯一 ID）
+     *                与 {@code position}（该条目在本次结果里的位次）；二者缺省不影响
+     *                统计与画像，但会让落盘明细无法用于训练（无法归组、无法校正位置偏差）。
      */
     @PostMapping("/behavior")
     @RequirePermission(Permission.FEED_INTERACT)
