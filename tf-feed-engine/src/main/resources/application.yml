@@ -77,6 +77,12 @@ turbofeed:
     #   interest-recall-ratio 兴趣位：按用户兴趣标签召回（因人而异）
     hot-recall-ratio: ${TURBOFEED_FEED_HOT_RECALL_RATIO:0.1}
     interest-recall-ratio: ${TURBOFEED_FEED_INTEREST_RECALL_RATIO:0.15}
+    # 兴趣画像的完播加权（观看进度是连续信号，不该压成固定权重）
+    interest:
+      watch-skip-ratio: 0.3        # 低于该观看比例 = 划走，不计画像（划走不表达兴趣）
+      watch-partial-weight: 0.1    # 看一半：弱信号
+      watch-complete-weight: 0.3   # 看完：强信号（与 PostStatService 完播阈值 0.7 同口径）
+      play-complete-weight: 0.3    # 旧端二进制完播事件，等同看完档
     # M0 行为明细落盘（训练样本的唯一来源；实现见 logging.BehaviorLogSink）
     # ⚠️ 默认 false：落盘是"为了攒数据"的行为，不该在任何人的机器上静默写文件。
     #    需要采集时显式置 true，并自行负责磁盘占用与清理。

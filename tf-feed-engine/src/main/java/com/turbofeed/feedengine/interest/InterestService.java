@@ -1,6 +1,7 @@
 package com.turbofeed.feedengine.interest;
 
 import com.turbofeed.shared.model.FeedBehaviorEvent;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -19,7 +20,8 @@ import java.util.stream.Collectors;
  * <p><b>累积来源</b>：行为埋点（点赞 / 评论 / 分享 / 完播 / 不感兴趣）。权重约定：
  * <ul>
  *   <li>{@code LIKE}=+1.0，{@code COMMENT}/{@code SHARE}=+1.5（强意图）；</li>
- *   <li>{@code WATCH}=+0.2（弱意图，看完即轻度感兴趣）；</li>
+ *   <li>{@code WATCH}=<b>按观看进度分段</b>（划走 0 / 看一半 +0.1 / 看完 +0.3，见 {@link #weightOf}）；</li>
+ *   <li>{@code PLAY_COMPLETE}=+0.3（旧端二进制完播，等同看完档）；</li>
  *   <li>{@code DISLIKE}=-1.5（负向，降低该标签召回）；</li>
  *   <li>{@code IMPRESSION} 不计权重（曝光不表达偏好，避免刷屏内容吸走画像）。</li>
  * </ul>
@@ -60,6 +62,28 @@ public class InterestService {
      */
     private static final String NEG_PREFIX = "tf:user:dislike-tags:";
     private static final Duration TTL = Duration.ofDays(30);
+    // ==================================================================
+    // 完播加权的阈值与权重（WATCH / PLAY_COMPLETE）
+    //
+    // 改造前 WATCH 一律 +0.2，**不看观看时长**：划走 5% 和看完 100% 对画像贡献相同。
+    // 后果是画像被"划过"噪声主导——用户手指一滑就给该标签加了分，
+    // 而真正看完的强信号被稀释到和划走一样。完播率只在 PostStatService 里算，没喂给画像。
+    // ==================================================================
+    /** 观看进度低于该比例视为"划走"，**不计入画像**（划走不表达兴趣）。 */
+    @Value("${turbofeed.feed.interest.watch-skip-ratio:0.3}")
+    private double watchSkipRatio = 0.3;
+    /** 看到一半（≥ skip 且 < 完播阈值）的权重：弱信号。 */
+    @Value("${turbofeed.feed.interest.watch-partial-weight:0.1}")
+    private double watchPartialWeight = 0.1;
+    /** 看完（≥ 完播阈值）的权重：与 PostStatService#PLAY_COMPLETE_RATIO 同口径。 */
+    @Value("${turbofeed.feed.interest.watch-complete-weight:0.3}")
+    private double watchCompleteWeight = 0.3;
+    /** 旧端二进制完播事件 {@code PLAY_COMPLETE} 的权重（发即代表看完，等同看完档）。 */
+    @Value("${turbofeed.feed.interest.play-complete-weight:0.3}")
+    private double playCompleteWeight = 0.3;
+    /** 完播判定阈值，与 {@code PostStatService} 保持一致（0.7）。 */
+    private static final double COMPLETE_RATIO = 0.7;
+
     /**
      * 兴趣召回参与轮转的标签数上限（取权重最高的若干个）。
      *
@@ -68,12 +92,17 @@ public class InterestService {
      */
     private static final int RECALL_TAGS = 10;
 
-    /** 行为类型 → 兴趣权重（未知类型按 0 处理，不计画像）。 */
+    /**
+     * 行为类型 → 兴趣权重（未知类型按 0 处理，不计画像）。
+     *
+     * <p><b>刻意不含 {@code WATCH} 与 {@code PLAY_COMPLETE}</b>：这两个是按观看进度
+     * 在 {@link #weightOf} 里分段计算的，放这里是<b>不可达的死配置</b>——
+     * 留着会让人以为改这张表能调整 WATCH 权重（实际毫无作用）。</p>
+     */
     private static final Map<String, Double> WEIGHTS = Map.of(
             "LIKE", 1.0,
             "COMMENT", 1.5,
             "SHARE", 1.5,
-            "WATCH", 0.2,
             "DISLIKE", -1.5);
 
     public InterestService(StringRedisTemplate redisTemplate, TagIndexService tagIndexService) {
@@ -99,9 +128,9 @@ public class InterestService {
             recordNegativeTags(event.userId(), event.timelineKey());
             return;
         }
-        double weight = WEIGHTS.getOrDefault(type, 0.0);
+        double weight = weightOf(type, event);
         if (weight == 0.0) {
-            return; // 曝光等不计画像
+            return; // 曝光、划走等不计画像
         }
         List<String> tags = new ArrayList<>(tagIndexService.tagsOf(event.timelineKey()));
         if (tags.isEmpty()) {
@@ -118,6 +147,46 @@ public class InterestService {
                     .warn("兴趣画像累积失败（不影响主流程）: userId={}, type={}, {}",
                             event.userId(), event.type(), e.getMessage());
         }
+    }
+
+    /**
+     * 行为 → 画像权重。{@code WATCH} / {@code PLAY_COMPLETE} 走完播分段，其余查表。
+     *
+     * <p><b>为什么要分段</b>：观看进度是<b>连续信号</b>，压成固定权重等于丢掉信息。
+     * "划走"其实是最常见的负向信号（用户用脚投票），改造前它和"看完"一样给 +0.2，
+     * 画像因此被大量划走噪声主导。</p>
+     *
+     * <p><b>{@code PLAY_COMPLETE} 为什么要单独处理</b>：旧端只发这个二进制事件
+     * （看完即发），它此前<b>不在权重表里</b> → 老端的完播行为完全不进画像。
+     * 语义上它等同于"看完"，故取看完档权重。</p>
+     */
+    private double weightOf(String type, FeedBehaviorEvent event) {
+        if ("WATCH".equals(type)) {
+            return watchWeight(event);
+        }
+        if ("PLAY_COMPLETE".equals(type)) {
+            return playCompleteWeight;
+        }
+        return WEIGHTS.getOrDefault(type, 0.0);
+    }
+
+    /**
+     * 按观看进度折算权重：划走不计 / 看一半弱信号 / 看完强信号。
+     *
+     * <p><b>缺时长字段时按"看一半"处理</b>（弱信号）：宁可保守也不把未知当"看完"，
+     * 否则一次字段缺失就把噪声当成强兴趣灌进画像。</p>
+     */
+    private double watchWeight(FeedBehaviorEvent event) {
+        Integer wd = event.watchDuration();
+        Integer md = event.mediaDuration();
+        if (wd == null || md == null || md <= 0) {
+            return watchPartialWeight;
+        }
+        double ratio = (double) wd / md;
+        if (ratio < watchSkipRatio) {
+            return 0.0;                 // 划走：不表达兴趣，一分不加
+        }
+        return ratio >= COMPLETE_RATIO ? watchCompleteWeight : watchPartialWeight;
     }
 
     /**
