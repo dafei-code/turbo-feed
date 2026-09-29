@@ -25,6 +25,9 @@ import java.util.List;
  * <b>绝不用 SCAN 通配清除</b>（单线程 Redis 上 SCAN 大 keyspace 会阻塞其它命令）。
  * TTL 仍保留，用于兜住配置外的页大小/页码组合。</p>
  *
+ * <p>⚠️ <b>只缓存匿名结果（已登录用户不缓存）</b>：见 {@link #recommended(int, int, String)}。
+ * 这条约束是缓存作用域的一部分，改动缓存逻辑时不得绕过。</p>
+ *
  * <p><b>fail-open</b>：缓存读写任一环节异常都只告警，直接回落到时间线实时读取；时间线本身
  * 也 fail-open（见 {@link FeedTimelineStore}），因此本服务永不因 Redis 异常向调用方抛错。</p>
  */
@@ -53,34 +56,64 @@ public class RecommendedFeedService {
      *
      * @param page   页码（从 0 开始）
      * @param size   单页条数（≤0 兜底 20）
-     * @param userId 个性化用户（已登录；匿名为 {@code null}）；{@code null} 退化为纯「入流时刻 + 完播率」排序
+     * @param userId 个性化用户（已登录；匿名为 {@code null}）；{@code null} 退化为纯「入流时刻 + 完播率」排序。
+     *               <b>非 null 时不读写缓存</b>——个性化结果与用户身份绑定，跨请求复用会串号
      * @return 当前页内容；空表示无更多内容或 Redis 不可用（调用方据此决定降级口径）
+     *
+     * <p><b>⚠️ 只缓存匿名（{@code userId == null}）结果，已登录用户一律实时读</b>。
+     * 缓存 key 只有「页码 × 页大小」、<b>不含用户身份</b>；若把个性化结果也写进去，
+     * 用户 B 会在 15s TTL 内读到用户 A 的个性化排序（含 A 的兴趣加权与"不感兴趣"打压），
+     * 即<b>跨用户串号</b>。这不是理论风险——引入个性化时（{@code ee1e2ae}）只改了
+     * {@code readPage(userId, ...)} 的入参、漏改缓存 key，实测会复现。</p>
+     *
+     * <p><b>为什么不给个性化结果也加一层用户维度缓存</b>：
+     * <ul>
+     *   <li><b>命中率本来就近零</b>：同一用户在 15s 内重复请求同一页的概率极低，
+     *       缓存带来的收益远小于它引入的一致性问题；</li>
+     *   <li><b>失效会失控</b>：{@link #invalidate()} 靠「10 个确定 key」做有界失效，
+     *       一旦 key 带 userId，用户数无界 → 删不干净 → 只能退化为等 TTL，
+     *       "发布后立刻可见"这条硬需求就没了；</li>
+     *   <li><b>实时读的成本可接受</b>：个性化读是一次 ZSET 分页 + 若干 HASH/SET 读，
+     *       本就是设计内的读路径（匿名缓存只是替匿名流量挡一层）。</li>
+     * </ul>
+     * 若将来量级确实需要个性化缓存，正确做法是给 key 加<b>全局版本号</b>
+     * （{@code invalidate()} 只 {@code INCR} 一个计数，旧 key 自然不可达、随 TTL 回收），
+     * 而不是按用户枚举 key。</p>
      */
     public List<FeedItemView> recommended(int page, int size, String userId) {
         int limit = size <= 0 ? 20 : size;
+        // 匿名结果才可跨请求复用；个性化结果与用户身份强绑定，不可复用。
+        boolean cacheable = userId == null;
         String key = REC_KEY_PREFIX + page + ":" + limit;
-        try {
-            String cached = redisTemplate.opsForValue().get(key);
-            if (cached != null) {
-                return objectMapper.readValue(cached,
-                        objectMapper.getTypeFactory().constructCollectionType(List.class, FeedItemView.class));
+        if (cacheable) {
+            try {
+                String cached = redisTemplate.opsForValue().get(key);
+                if (cached != null) {
+                    return objectMapper.readValue(cached,
+                            objectMapper.getTypeFactory().constructCollectionType(List.class, FeedItemView.class));
+                }
+            } catch (Exception e) {
+                log.warn("推荐流缓存读取失败，回落时间线实时读取: key={}, {}", key, e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("推荐流缓存读取失败，回落时间线实时读取: key={}, {}", key, e.getMessage());
         }
 
         List<FeedItemView> fresh = feedTimelineStore.readPage(userId, page, limit);
 
-        try {
-            redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(fresh), REC_CACHE_TTL);
-        } catch (Exception e) {
-            log.warn("推荐流缓存写入失败（不影响本次读取）: key={}, {}", key, e.getMessage());
+        if (cacheable) {
+            try {
+                redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(fresh), REC_CACHE_TTL);
+            } catch (Exception e) {
+                log.warn("推荐流缓存写入失败（不影响本次读取）: key={}, {}", key, e.getMessage());
+            }
         }
         return fresh;
     }
 
     /**
-     * 时间线变更后主动失效推荐流缓存（发布 / 下架 / 补投后调用）。
+     * 时间线变更后主动失效<b>匿名</b>推荐流缓存（发布 / 下架 / 补投后调用）。
+     *
+     * <p>只覆盖匿名页是刻意的且<b>足够</b>：登录用户本就不缓存（见
+     * {@link #recommended(int, int, String)}），发布后他们下一次读取必然是实时读，天然可见。</p>
      *
      * <p><b>为什么不用 SCAN</b>：按 {@code tf:feed:rec:*} 通配扫描再删，在 keyspace 变大后
      * 会长时间占用 Redis 单线程，把一次"内容发布"放大成全局抖动。这里只对
