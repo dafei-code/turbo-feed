@@ -72,6 +72,11 @@ turbofeed:
       # Feed 时间线事件 Topic 与消费组（append / remove 共用，靠 body.action 区分，保证同一 mediaId 顺序）
       topic: turbofeed-feed-timeline
       consumer-group: turbofeed-feed-timeline-group
+    # 多路召回的每页槽位预算（均从单页 limit 里切，剩余归流量池）
+    #   hot-recall-ratio      热点位：全站探索（人人相似）
+    #   interest-recall-ratio 兴趣位：按用户兴趣标签召回（因人而异）
+    hot-recall-ratio: ${TURBOFEED_FEED_HOT_RECALL_RATIO:0.1}
+    interest-recall-ratio: ${TURBOFEED_FEED_INTEREST_RECALL_RATIO:0.15}
     # M0 行为明细落盘（训练样本的唯一来源；实现见 logging.BehaviorLogSink）
     # ⚠️ 默认 false：落盘是"为了攒数据"的行为，不该在任何人的机器上静默写文件。
     #    需要采集时显式置 true，并自行负责磁盘占用与清理。

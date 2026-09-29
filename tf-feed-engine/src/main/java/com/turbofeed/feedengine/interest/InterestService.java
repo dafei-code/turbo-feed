@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -59,6 +60,13 @@ public class InterestService {
      */
     private static final String NEG_PREFIX = "tf:user:dislike-tags:";
     private static final Duration TTL = Duration.ofDays(30);
+    /**
+     * 兴趣召回参与轮转的标签数上限（取权重最高的若干个）。
+     *
+     * <p>刻意小于排序用的 TopN：召回每多一个标签就多一次 {@code SMEMBERS}，
+     * 且长尾标签（权重极低）召出来的内容与用户兴趣相关性本就弱，性价比低。</p>
+     */
+    private static final int RECALL_TAGS = 10;
 
     /** 行为类型 → 兴趣权重（未知类型按 0 处理，不计画像）。 */
     private static final Map<String, Double> WEIGHTS = Map.of(
@@ -195,6 +203,80 @@ public class InterestService {
         } catch (Exception e) {
             return Map.of();
         }
+    }
+
+    /**
+     * <b>兴趣召回</b>：按用户 TopN 正向标签，经「标签 → 内容」索引取候选
+     * （抖音式多路召回里的"兴趣召回"这一路）。
+     *
+     * <p><b>为什么必须有这一路</b>：画像此前<b>只用于给已召回的内容加权</b>——
+     * 候选来自「流量池 + 入流时刻」，画像只能在"已经捞上来的东西"里调顺序。
+     * 真正的个性化是"因为你有这个兴趣，所以<b>专门去找</b>这类内容"，
+     * 否则用户永远看不到池外/深页的同类好内容。索引（{@link TagIndexService#mediaWithTag}）
+     * 早已建好、此前零调用，本次是把这条通路接上。</p>
+     *
+     * <p><b>为什么用轮转（round-robin）而不是按标签权重填满</b>：
+     * 若按权重从高到低依次取满，权重最高的一个标签会吃光所有槽位，
+     * 结果就是"你点过一次美食，整页全是美食"——这正是信息茧房的成因。
+     * 轮转保证多个兴趣标签各有代表，与后续"同类不连刷"打散层形成互补
+     * （召回层管**覆盖**，重排层管**相邻不重复**）。</p>
+     *
+     * <p>fail-open：任一环节异常返回已收集到的部分（或空列表），
+     * 召回缺失只让个性化变弱，绝不影响可见性。</p>
+     *
+     * @param userId 用户（{@code null} / 无画像 → 空列表，冷启动不做召回）
+     * @param limit  期望条数上限（≤0 返回空）
+     * @return 候选内容的 timelineKey 列表（去重，多标签轮转顺序）
+     */
+    public List<String> recallTimelineKeys(String userId, int limit) {
+        if (userId == null || limit <= 0) {
+            return List.of();
+        }
+        Map<String, Double> tags = weightedTags(userId, RECALL_TAGS);
+        if (tags.isEmpty()) {
+            return List.of();
+        }
+        // 负反馈优先于兴趣：用户点过"不感兴趣"的标签，召回阶段就不再捞——
+        // 只在排序阶段扣分是不够的：只要它仍在候选里，就总有机会被排上来，
+        // 而"别再给我推这类"的语义是**根本不要进候选**。
+        Set<String> negative = negativeTags(userId);
+        // 每个标签各自的候选（保持画像权重降序，轮转时按此顺序取）
+        Map<String, List<String>> perTag = new LinkedHashMap<>();
+        for (String tag : tags.keySet()) {
+            if (negative.contains(tag)) {
+                continue;
+            }
+            Set<String> keys = tagIndexService.mediaWithTag(tag);
+            if (keys == null || keys.isEmpty()) {
+                continue;
+            }
+            perTag.put(tag, new ArrayList<>(keys));
+        }
+        if (perTag.isEmpty()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>(limit);
+        Set<String> seen = new LinkedHashSet<>();
+        // 轮转：第 i 轮从每个标签各取第 i 个（同一内容命中多标签时只算一次）
+        int maxLen = 0;
+        for (List<String> l : perTag.values()) {
+            maxLen = Math.max(maxLen, l.size());
+        }
+        for (int i = 0; i < maxLen && out.size() < limit; i++) {
+            for (List<String> keys : perTag.values()) {
+                if (i >= keys.size()) {
+                    continue;
+                }
+                String k = keys.get(i);
+                if (k != null && seen.add(k)) {
+                    out.add(k);
+                    if (out.size() >= limit) {
+                        break;
+                    }
+                }
+            }
+        }
+        return out;
     }
 
     /** 用户是否有兴趣画像（冷启动判定）。 */

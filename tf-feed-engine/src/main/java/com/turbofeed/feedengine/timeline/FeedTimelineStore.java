@@ -97,6 +97,23 @@ public class FeedTimelineStore {
     private static final Duration BUCKET_TTL = Duration.ofDays(7);
     /** 反查索引值里「桶 key」与「成员串」的分隔符（SOH 不可打印字符，不会出现在 key 与 JSON 中）。 */
     private static final String IDX_SEP = "\u0001";
+    /** 兴趣召回的过量取倍数：过滤掉与热点/流量池重复的后仍要够填满槽位。 */
+    private static final int RECALL_OVERFETCH = 3;
+
+    /**
+     * 兴趣召回位的时间序取值：以<b>内容创建时间</b>作代理。
+     *
+     * <p>时间线 ZSET 的 score 是"入流时刻（过审时刻）"，但兴趣召回的内容来自标签索引，
+     * 不必然落在当前合并窗口的分桶里，因此拿不到它的入流 score。
+     * 创建时间与入流时刻同为 epoch 毫秒、量纲一致，作为代理是安全的——
+     * 且召回的内容受标签索引 7 天 TTL 约束，二者相差有限。</p>
+     */
+    private static double recencyOf(FeedItemView item) {
+        if (item == null || item.createdAt() == null) {
+            return 0d;
+        }
+        return item.createdAt().toEpochMilli();
+    }
 
     /** 推荐流是否按流量池权重分配每页槽位（抖音式曝光分层）。false 退化为"全池合并+全局倒序"。 */
     @Value("${turbofeed.feed.pool-read-weight-enabled:true}")
@@ -110,6 +127,17 @@ public class FeedTimelineStore {
      */
     @Value("${turbofeed.feed.hot-recall-ratio:0.1}")
     private double hotRecallRatio;
+    /**
+     * 兴趣召回占每页槽位的比例（抖音式多路召回里的"兴趣召回"这一路）。
+     * {@code 0} = 关闭，读路径退化为「流量池 + 热点」两路。
+     *
+     * <p>与 {@link #hotRecallRatio} 的关系：两者都是"给某路召回留固定预算"，
+     * 差别在语义——热点是<b>全站探索位</b>（人人相似，用来试探爆款），
+     * 兴趣是<b>个性化位</b>（因人而异，用来兑现画像）。槽位从同一份 {@code limit} 里切，
+     * 各自独立配置，剩余才归流量池，保证单页总量不超 {@code limit}。</p>
+     */
+    @Value("${turbofeed.feed.interest-recall-ratio:0.15}")
+    private double interestRecallRatio;
     /**
      * 打散窗口（抖音式"同类不连刷"）：同一标签的内容在连续的该窗口大小内<b>不重复出现</b>。
      * {@code 0} = 关闭打散，页内严格按重排后的分值顺序输出。
@@ -266,6 +294,44 @@ public class FeedTimelineStore {
             }
         }
 
+        // ==================================================================
+        // 兴趣召回（抖音式多路召回的第三路）：按用户 TopN 兴趣标签经「标签→内容」索引取候选。
+        //
+        // <b>只排除热点槽位，不排除流量池候选</b>——这是刻意的：
+        // 若把流量池全部候选都排除，召回就只剩"3 天合并窗口之外"的老内容可捞，
+        // 而召回真正想捞的恰恰是"在池里但排不进当前页"的同类好内容
+        // （池是按入流时刻切片的，深页内容永远翻不到）。
+        // 重复问题交给下面流量池解析时按 interestKeys 去重解决——谁先占位谁算，
+        // 最终单页不出现重复条目，且个性化位优先。
+        // ==================================================================
+        int interestSlots = (userId != null && interestRecallRatio > 0d && !interest.isEmpty())
+                ? (int) Math.floor(limit * Math.min(interestRecallRatio, 1.0d))
+                : 0;
+        List<ScoredItem> interestPart = new ArrayList<>();
+        Set<String> interestKeys = new LinkedHashSet<>();
+        if (interestSlots > 0) {
+            // 过量取：过滤掉与热点重复的后还能填满槽位
+            List<String> recalled = interestService.recallTimelineKeys(
+                    userId, interestSlots * RECALL_OVERFETCH + 4);
+            for (String tk : recalled) {
+                if (interestPart.size() >= interestSlots) {
+                    break;
+                }
+                if (tk == null || !interestKeys.add(tk) || hotKeys.contains(tk)) {
+                    continue;
+                }
+                FeedItemView it = memberOf(tk);
+                if (it == null) {
+                    continue;
+                }
+                interestPart.add(new ScoredItem(it, recencyOf(it)));
+            }
+            // 个性化位内部仍按精排分排序：召回只保证"这类内容进得来"，
+            // 不保证"质量差的也往前放"——排序权交给 RankingModel。
+            interestPart.sort((a, b) -> Double.compare(scoreOf(b, interest, negative),
+                    scoreOf(a, interest, negative)));
+        }
+
         Map<Integer, List<FeedItemView>> parsed = new LinkedHashMap<>();
         Map<Integer, List<ScoredItem>> scored = new LinkedHashMap<>();
         for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
@@ -276,9 +342,9 @@ public class FeedTimelineStore {
                 if (it == null) {
                     continue;
                 }
-                // 同页去重：已在热点槽位露出的内容不再占流量池槽位——否则同一页会重复出现
-                // 同一条内容，还白白吃掉一个曝光位（低池内容的试水机会被挤掉）。
-                if (!hotKeys.isEmpty() && hotKeys.contains(it.timelineKey())) {
+                // 同页去重：已在热点槽位 / 兴趣召回位露出的内容不再占流量池槽位——
+                // 否则同一页会重复出现同一条内容，还白白吃掉一个曝光位。
+                if (hotKeys.contains(it.timelineKey()) || interestKeys.contains(it.timelineKey())) {
                     continue;
                 }
                 l.add(it);
@@ -288,13 +354,19 @@ public class FeedTimelineStore {
             parsed.put(pool, l);
             scored.put(pool, sl);
         }
-        int remainingSlots = Math.max(limit - hotItems.size(), 0);
+
+        int remainingSlots = Math.max(limit - hotItems.size() - interestPart.size(), 0);
         int[] alloc = allocateSlots(remainingSlots, weights, parsed);
         long pageNum = Math.max(page, 0);
         List<FeedItemView> result = new ArrayList<>(limit);
         // 热点槽位<b>固定钉在最前</b>：它是召回策略刻意给的探索位，不参与后续打散，
         // 否则"热门内容靠前"的策略语义会被重排层抹掉。
         result.addAll(hotItems);
+        // 兴趣召回位紧随热点之后：热点是"全站探索"，兴趣是"个性化兑现"，都先于流量池的通用排序。
+        // 不参与后续打散——召回层已按多标签轮转保证覆盖，再交给打散层重排会抹掉"兴趣优先"的语义。
+        for (ScoredItem s : interestPart) {
+            result.add(s.item());
+        }
         // 流量池部分先全量收集，最后统一走一次"同类不连刷"重排——在<b>整页范围</b>内打散，
         // 而不是每个池各自打散：否则相邻两池的交界处仍会连着刷同一个话题。
         List<ScoredItem> poolPart = new ArrayList<>();
