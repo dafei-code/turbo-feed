@@ -1,6 +1,7 @@
 package com.turbofeed.gateway.service;
 
 import com.turbofeed.gateway.config.MediaProperties;
+import com.turbofeed.shared.caption.CaptionTagParser;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.service.event.MediaEventPublisher;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
@@ -75,9 +76,11 @@ public class MediaUploadFinalizer {
                     reservation.caption(), reservation.captionMark(),
                     reservation.requestId(), reservation.createdAt()));
 
+            // 第 10 个参数 = 内容标签（#话题），与 MediaUploadService 同口径
             MediaItem post = new MediaItem(postId, mediaIds.get(0), urls.get(0), List.copyOf(urls), 0,
                     MediaStatus.PENDING, reservation.createdAt(),
-                    reservation.caption(), reservation.captionMark());
+                    reservation.caption(), reservation.captionMark(),
+                    CaptionTagParser.parse(reservation.caption()));
             idempotency.store(reservation.userId(), reservation.requestId(), post);
 
             log.info("预签名上传收尾完成: postId={}, images={}, userId={}",

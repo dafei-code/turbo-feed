@@ -23,6 +23,7 @@ import com.turbofeed.gateway.service.presign.PresignResponse;
 import com.turbofeed.gateway.service.presign.UploadAccepted;
 import com.turbofeed.gateway.service.presign.UploadReservation;
 import com.turbofeed.gateway.service.presign.UploadReservationStore;
+import com.turbofeed.shared.caption.CaptionTagParser;
 import com.turbofeed.gateway.service.processing.ImageProcessingChain;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
@@ -278,8 +279,11 @@ public class MediaUploadService {
                 postId, List.copyOf(mediaIds), List.copyOf(urls), userId,
                 rawCaption, captionMark.markJson(), requestId, createdAt));
 
+        // 第 10 个参数 = 内容标签（caption 里的 #话题）；受理阶段就要带上，
+        // 否则后续入库/投递的帖视图缺标签，兴趣画像与召回拿不到信号。
         MediaItem post = new MediaItem(postId, mediaIds.get(0), urls.get(0), List.copyOf(urls), 0,
-                MediaStatus.PENDING, createdAt, rawCaption, captionMark.markJson());
+                MediaStatus.PENDING, createdAt, rawCaption, captionMark.markJson(),
+                CaptionTagParser.parse(rawCaption));
         log.info("帖子上传受理: userId={}, postId={}, images={}, requestId={}, captionLen={}",
                 userId, postId, urls.size(), requestId, rawCaption.length());
         idempotency.store(userId, requestId, post);

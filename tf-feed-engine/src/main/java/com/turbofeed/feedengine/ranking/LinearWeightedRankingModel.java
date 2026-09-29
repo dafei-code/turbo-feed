@@ -1,5 +1,7 @@
 package com.turbofeed.feedengine.ranking;
 
+import org.springframework.stereotype.Component;
+
 /**
  * 线性加权多目标精排（{@link RankingModel} 的默认实现）。
  *
@@ -29,7 +31,15 @@ package com.turbofeed.feedengine.ranking;
  * <p>recency 是 epoch 毫秒（~10^12），比率是 {@code [0,1]}。两者不能直接相加，
  * 故把每个比率目标乘一个 {@code recencyWindowMillis}（默认 1 小时），
  * 语义变成"相当于内容<b>新了一个小时</b>"，从而与 recency 同量纲、直观可调。</p>
+ *
+ * <p><b>⚠️ 必须注册为 Spring Bean</b>（{@code @Component}）：{@code FeedTimelineStore}
+ * 通过构造器注入 {@link RankingModel}。0055 引入本类时漏了注解，导致
+ * <b>引擎启动直接失败</b>（{@code No qualifying bean of type RankingModel}），
+ * 而 {@code target/verify} 下的验证脚本是手工 {@code new LinearWeightedRankingModel(...)}，
+ * 绕过了 Spring 容器 —— 于是"脚本全绿、服务起不来"。
+ * <b>教训：绕过容器的单元级验证不能替代一次真实启动。</b></p>
  */
+@Component
 public class LinearWeightedRankingModel implements RankingModel {
 
     private final RankingProperties props;
