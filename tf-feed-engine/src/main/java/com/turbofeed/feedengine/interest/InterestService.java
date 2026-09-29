@@ -51,9 +51,16 @@ import java.util.stream.Collectors;
  *   <li><b>悬崖式失效</b>：只靠整份 TTL，29 天和 31 天的差别是 100% → 0%，中间没有任何过渡；</li>
  *   <li><b>画像被噪声固化</b>：早期大量随机行为的累计分会长期锁住召回位。</li>
  * </ol>
- * 抖音的做法是<b>长期兴趣（慢衰减，半衰期以周计）与短期兴趣（快衰减，以小时/天计）分层</b>；
- * 本期先落<b>单画像 + 可配半衰期</b>（把"长期/短期两层"留作下一步），因为它是后续分层的前提：
- * 没有衰减，短期兴趣层也无法从长期画像里分离出来。</p>
+ * 抖音的做法是<b>长期兴趣（慢衰减，半衰期以周计）与短期兴趣（快衰减，以小时/天计）分层</b>。
+ *
+ * <p><b>本期已落地这个分层（0062）</b>：</p>
+ * <pre>
+ * 长期层 tf:user:interest:&lt;userId&gt;         半衰期 14 天  → "你是个什么样的人"（稳定偏好）
+ * 短期层 tf:user:interest:recent:&lt;userId&gt;  半衰期 12 小时 → "你现在想要什么"（最近 burst）
+ * </pre>
+ * 一次行为同时喂两层（同样权重、不同衰减速度）；读路径由 {@link #recallTags} 归一化后融合，
+ * 用于<b>召回选标签</b>——这样"连着刷 20 条钓鱼视频"能立刻抢到召回位，
+ * 而长期层保证他隔几天回来还有稳定的底子。排序仍用长期层的原始权重（详见该方法的说明）。</p>
  *
  * <p><b>fail-open</b>：Redis 异常只告警不抛，画像缺失最多让个性化失效（回退冷启动），不阻断浏览。</p>
  */
@@ -88,6 +95,54 @@ public class InterestService {
      * <p><b>代价</b>：读路径必须跳过这个哨兵字段——约定以 {@code __} 开头/结尾的字段都不是兴趣标签。</p>
      */
     private static final String TS_FIELD = "__ts__";
+
+    /**
+     * <b>短期兴趣画像</b>的键前缀（长期画像用 {@link #INTEREST_PREFIX}）。
+     *
+     * <p>两层画像结构完全相同（都是「tag → 衰减后权重」的 Hash + {@link #TS_FIELD} 哨兵），
+     * 只是<b>半衰期不同</b>：长期层慢（周/月级）、短期层快（小时/天级）。
+     * 复用同一个 Lua 脚本，只是传不同的 key / 半衰期 / TTL。</p>
+     *
+     * <p><b>为什么是两个 key 而不是在一个 Hash 里加后缀</b>：两层要各自
+     * 用不同的半衰期做整体衰减，同一个 Hash 只能有一个 {@code __ts__}，
+     * 强行塞进去就得把衰减逻辑做成"每 tag 一个时间戳"（存储翻倍），不划算。
+     * 两个 key 各自一次 {@code EVAL}（每次只碰一个 KEY），因此不触发 CROSSSLOT。</p>
+     */
+    private static final String SHORT_PREFIX = "tf:user:interest:recent:";
+
+    /**
+     * 短期画像的整体 TTL。
+     *
+     * <p>刻意远长于短期半衰期（12h）：半衰期只让数值趋近 0，
+     * 而 TTL 才是"用户彻底不来了就把整份短期画像删掉"的兜底，避免留存一堆近零的 Hash。</p>
+     */
+    private static final Duration SHORT_TTL = Duration.ofDays(7);
+
+    /** 短期画像总开关：关闭后退化为 0061 的单层画像。 */
+    @Value("${turbofeed.feed.interest.short-term.enabled:true}")
+    private boolean shortTermEnabled = true;
+
+    /**
+     * 短期画像的半衰期（小时）：默认 12 小时——大致对应"一次刷站会话到半天"的时效，
+     * 半天不碰，这次的突发兴趣就衰减掉一半。
+     */
+    @Value("${turbofeed.feed.interest.short-term.half-life-hours:12}")
+    private double shortHalfLifeHours = 12.0;
+
+    /**
+     * 融合时长期层所占权重。
+     *
+     * <p>与 {@link #shortWeight} 的<b>比值</b>才有意义（见 {@link #recallTags} 的归一化说明）。</p>
+     */
+    @Value("${turbofeed.feed.interest.short-term.long-weight:1.0}")
+    private double longWeight = 1.0;
+
+    /**
+     * 融合时短期层所占权重。默认 2.0 = 同条件下"最近在追"的标签比"长期喜欢"的标签优先一倍。
+     * 调大 → 更像抖音的"实时兴趣"体感（也更飘）；调到 0 → 短期层只影响有无、不影响排序。
+     */
+    @Value("${turbofeed.feed.interest.short-term.short-weight:2.0}")
+    private double shortWeight = 2.0;
 
     /**
      * 兴趣半衰期（天）：距今 halfLifeDays 天的那部分权重，只剩一半。
@@ -263,21 +318,38 @@ public class InterestService {
             return;
         }
         try {
-            String key = INTEREST_PREFIX + event.userId();
-            List<String> argv = new ArrayList<>(6 + tags.size());
-            argv.add(String.valueOf(System.currentTimeMillis()));
-            argv.add(String.valueOf(halfLifeMs()));
-            argv.add(String.valueOf(minScore));
-            argv.add(String.valueOf(TTL.getSeconds()));
-            argv.add(String.valueOf(weight));
-            argv.add(TS_FIELD);
-            argv.addAll(tags);
-            redisTemplate.execute(accumulateScript, List.of(key), argv.toArray(new Object[0]));
+            long now = System.currentTimeMillis();
+            accumulate(INTEREST_PREFIX + event.userId(), tags, weight, now, halfLifeMs(), TTL);
+            // 短期层：同样的行为、同样的权重，只是半衰期短得多。
+            // 两次 EVAL 之间不保证原子，但这没关系——它们改的是两个不同的 key，
+            // 各自内部原子即可；丢一次短期累加的损失远小于让写路径串行等待。
+            if (shortTermEnabled) {
+                accumulate(SHORT_PREFIX + event.userId(), tags, weight, now, shortHalfLifeMs(), SHORT_TTL);
+            }
         } catch (Exception e) {
             org.slf4j.LoggerFactory.getLogger(InterestService.class)
                     .warn("兴趣画像累积失败（不影响主流程）: userId={}, type={}, {}",
                             event.userId(), event.type(), e.getMessage());
         }
+    }
+
+    /** 对指定画像 key 执行一次「先整体衰减 → 再加权重 → 更新时间戳与 TTL」。 */
+    private void accumulate(String key, List<String> tags, double weight,
+                            long now, double hlMs, Duration ttl) {
+        List<String> argv = new ArrayList<>(6 + tags.size());
+        argv.add(String.valueOf(now));
+        argv.add(String.valueOf(hlMs));
+        argv.add(String.valueOf(minScore));
+        argv.add(String.valueOf(ttl.getSeconds()));
+        argv.add(String.valueOf(weight));
+        argv.add(TS_FIELD);
+        argv.addAll(tags);
+        redisTemplate.execute(accumulateScript, List.of(key), argv.toArray(new Object[0]));
+    }
+
+    /** 短期半衰期换算成毫秒（≤0 视为关闭短期层）。 */
+    private double shortHalfLifeMs() {
+        return shortHalfLifeHours <= 0 ? 0.0 : shortHalfLifeHours * 3_600_000.0;
     }
 
     /**
@@ -378,11 +450,30 @@ public class InterestService {
      * @return tag → 当前权重（按权重降序）；无画像/异常返回空 Map
      */
     public Map<String, Double> weightedTags(String userId, int n) {
-        if (userId == null) {
+        return readLayer(userId == null ? null : INTEREST_PREFIX + userId, halfLifeMs(), n);
+    }
+
+    /**
+     * 取用户的<b>短期兴趣</b> TopN（快衰减层，结构与 {@link #weightedTags} 完全一致）。
+     *
+     * <p>语义是"最近这一阵在追什么"：刷了 20 条钓鱼视频之后，这里的"钓鱼"会迅速冲高，
+     * 但半天不碰就掉一半——与长期层互补而不是替代。</p>
+     *
+     * @return tag → 当前权重（降序）；短期层关闭/为空返回空 Map
+     */
+    public Map<String, Double> shortTermTags(String userId, int n) {
+        if (!shortTermEnabled) {
+            return Map.of();
+        }
+        return readLayer(userId == null ? null : SHORT_PREFIX + userId, shortHalfLifeMs(), n);
+    }
+
+    /** 两层画像共用的读实现（按 key + 半衰期读取、衰减、排序、截断）。 */
+    private Map<String, Double> readLayer(String key, double hlMs, int n) {
+        if (key == null) {
             return Map.of();
         }
         try {
-            String key = INTEREST_PREFIX + userId;
             Map<Object, Object> raw = redisTemplate.opsForHash().entries(key);
             if (raw == null || raw.isEmpty()) {
                 return Map.of();
@@ -397,7 +488,7 @@ public class InterestService {
                     lastTs = 0L;
                 }
             }
-            double factor = lastTs > 0 ? decayFactor(System.currentTimeMillis() - lastTs, halfLifeMs()) : 1.0;
+            double factor = lastTs > 0 ? decayFactor(System.currentTimeMillis() - lastTs, hlMs) : 1.0;
             List<Map.Entry<String, Double>> entries = new ArrayList<>();
             for (Map.Entry<Object, Object> e : raw.entrySet()) {
                 String field = String.valueOf(e.getKey());
@@ -429,6 +520,79 @@ public class InterestService {
     }
 
     /**
+     * <b>融合排序</b>：把长期画像与短期画像合成为一份用于<b>召回选标签</b>的 TopN。
+     *
+     * <p><b>为什么必须先各自归一化</b>：两层的<b>量纲完全不同</b>——
+     * 长期层是"按 14 天半衰期累积的稳定偏好"，稳态值可能是几十；
+     * 短期层只累积最近半天，稳态值通常只有个位数。
+     * 直接按 {@code long*k1 + short*k2} 相加，短期层的贡献会被长期层的绝对值淹没，
+     * 权重系数也就失去了可解释性（调 {@code short-weight} 完全不知道调到哪算够）。
+     * 先各自除以本层最大值映射到 [0,1]，融合权重的含义就退化成纯粹的
+     * "相对重视程度"，好调也好解释。</p>
+     *
+     * <p><b>为什么融合结果只用于召回、不用于排序加权</b>：
+     * 召回决定"用户能看到什么"，排序决定"谁排更前"。
+     * 短期兴趣的第一诉求是<b>拿到召回位</b>（否则连出现的机会都没有），至于排第几，
+     * 交给后续按内容质量与长期权重的排序更稳——排序侧继续用 {@link #weightedTags}
+     * 的原始权重（可解释、量纲真实），两套分数各司其职。</p>
+     *
+     * @return 融合分 TopN（降序）；两层都为空返回空 Map
+     */
+    public Map<String, Double> recallTags(String userId, int n) {
+        if (userId == null) {
+            return Map.of();
+        }
+        Map<String, Double> longTerm = weightedTags(userId, 0);
+        Map<String, Double> shortTerm = shortTermTags(userId, 0);
+        if (longTerm.isEmpty() && shortTerm.isEmpty()) {
+            return Map.of();
+        }
+        // 任一层缺失（含短期层被关闭）→ 直接退化为另一层，语义与 0061 的单层画像一致
+        if (shortTerm.isEmpty()) {
+            return topN(longTerm, n);
+        }
+        if (longTerm.isEmpty()) {
+            return topN(shortTerm, n);
+        }
+        double maxLong = longTerm.values().stream().mapToDouble(Double::doubleValue).max().orElse(1.0);
+        double maxShort = shortTerm.values().stream().mapToDouble(Double::doubleValue).max().orElse(1.0);
+        if (maxLong <= 0 || maxShort <= 0) {
+            return topN(longTerm, n);
+        }
+        Set<String> union = new LinkedHashSet<>(longTerm.keySet());
+        union.addAll(shortTerm.keySet());
+        List<Map.Entry<String, Double>> fused = new ArrayList<>(union.size());
+        for (String tag : union) {
+            double relLong = longTerm.getOrDefault(tag, 0.0) / maxLong;
+            double relShort = shortTerm.getOrDefault(tag, 0.0) / maxShort;
+            fused.add(Map.entry(tag, longWeight * relLong + shortWeight * relShort));
+        }
+        fused.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
+        Map<String, Double> result = new LinkedHashMap<>();
+        int limit = n <= 0 ? fused.size() : Math.min(n, fused.size());
+        for (int i = 0; i < limit; i++) {
+            result.put(fused.get(i).getKey(), fused.get(i).getValue());
+        }
+        return result;
+    }
+
+    /** 从已按插入顺序给定的画像里截取前 n 条（{@code n<=0} 返回全部）。 */
+    private static Map<String, Double> topN(Map<String, Double> source, int n) {
+        if (n <= 0 || source.size() <= n) {
+            return source;
+        }
+        Map<String, Double> out = new LinkedHashMap<>();
+        int i = 0;
+        for (Map.Entry<String, Double> e : source.entrySet()) {
+            if (i++ >= n) {
+                break;
+            }
+            out.put(e.getKey(), e.getValue());
+        }
+        return out;
+    }
+
+    /**
      * <b>兴趣召回</b>：按用户 TopN 正向标签，经「标签 → 内容」索引取候选
      * （抖音式多路召回里的"兴趣召回"这一路）。
      *
@@ -455,7 +619,8 @@ public class InterestService {
         if (userId == null || limit <= 0) {
             return List.of();
         }
-        Map<String, Double> tags = weightedTags(userId, RECALL_TAGS);
+        // 用融合后的标签排序：短期 burst 能快速抢到召回位（详见 recallTags 的说明）
+        Map<String, Double> tags = recallTags(userId, RECALL_TAGS);
         if (tags.isEmpty()) {
             return List.of();
         }
@@ -513,6 +678,9 @@ public class InterestService {
      * 时间戳字段 {@link #TS_FIELD}，只剩它一个 = 所有标签都已被遗忘，等同于没有画像。
      * 这里只判"有没有标签"，不判"权重是否为正"——后者由 {@link #weightedTags}
      * 过滤（只有正向权重才进召回），两处职责分开。</p>
+     *
+     * <p><b>短期层也要判</b>：新用户可能只有短期画像（刚开始刷，长期层还没攒起来就被 min-score
+     * 滤掉或尚未达两次写入），这时他已经有可个性化的信号了，不能当冷启动处理。</p>
      */
     public boolean hasInterest(String userId) {
         if (userId == null) {
@@ -520,7 +688,16 @@ public class InterestService {
         }
         try {
             Long size = redisTemplate.opsForHash().size(INTEREST_PREFIX + userId);
-            return size != null && size > 1;
+            if (size != null && size > 1) {
+                return true;
+            }
+            // 走到这儿说明长期层为空：短期层可能还有信号（例如新用户刚开始刷、
+            // 长期层还没攒过遗忘阈值），此时他已经有可个性化的依据了，不该算冷启动
+            if (shortTermEnabled) {
+                Long shortSize = redisTemplate.opsForHash().size(SHORT_PREFIX + userId);
+                return shortSize != null && shortSize > 1;
+            }
+            return false;
         } catch (Exception e) {
             return false;
         }
