@@ -3,6 +3,7 @@ package com.turbofeed.feedengine.interest;
 import com.turbofeed.shared.model.FeedBehaviorEvent;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -28,6 +29,11 @@ import java.util.stream.Collectors;
  * 权重经 {@link TagIndexService#tagsOf} 把"被互动的内容"映射到其标签——埋点只带 timelineKey，
  * 不带标签，故必须反查标签索引。</p>
  *
+ * <p><b>时间衰减（0061）</b>：权重不再是"只增不减的终身累计和"，而是
+ * <b>按半衰期指数衰减</b>——距上次更新 {@code halfLifeDays} 天的那部分权重只剩一半。
+ * 数学上等价于"每个历史贡献各自按自己的年龄衰减"（每次写入把旧总量乘同一个因子即可，
+ * 因为同一半衰期下所有历史贡献经历的衰减量相同）。实现见 {@link #LUA_ACCUMULATE}。</p>
+ *
  * <p><b>「不感兴趣」的专属负反馈通道</b>：{@code NOT_INTERESTED} <b>不进权重表</b>，而是把该内容的
  * 标签并入用户级负向标签集 {@code tf:user:dislike-tags:{userId}}（Redis SET），由读路径
  * （{@code FeedTimelineStore#readPage}）对该用户<b>打压同标签内容</b>——这是抖音式负反馈的核心体感：
@@ -38,9 +44,16 @@ import java.util.stream.Collectors;
  * <p><b>冷启动</b>：画像为空（新用户 / 未登录）时 {@link #weightedTags} 返回空 Map，
  * 推荐流退化为纯「入流时刻 + 完播率」排序（与改造前一致），绝不因缺画像而报错或空结果。</p>
  *
- * <p><b>衰减策略（MVP 简化）</b>：不做逐事件时间衰减，改用整份画像 TTL（{@code 30d}）——
- * 用户停更 30 天画像自动清零，重新活跃后从零累积。精确的"按事件龄指数衰减"留给后续
- * （需在 Hash 里再存时间戳，或引入 ZSET 按 score 衰减），本期不引入以保精简。</p>
+ * <p><b>为什么必须衰减（对齐抖音）</b>：不衰减的累计和有三个致命后果：
+ * <ol>
+ *   <li><b>兴趣不可迁移</b>：用户三年前刷过搞笑、现在只看健身，"搞笑"的累计分永远压过"健身"，
+ *       画像表达的是"历史总量"而不是"现在的偏好"；</li>
+ *   <li><b>悬崖式失效</b>：只靠整份 TTL，29 天和 31 天的差别是 100% → 0%，中间没有任何过渡；</li>
+ *   <li><b>画像被噪声固化</b>：早期大量随机行为的累计分会长期锁住召回位。</li>
+ * </ol>
+ * 抖音的做法是<b>长期兴趣（慢衰减，半衰期以周计）与短期兴趣（快衰减，以小时/天计）分层</b>；
+ * 本期先落<b>单画像 + 可配半衰期</b>（把"长期/短期两层"留作下一步），因为它是后续分层的前提：
+ * 没有衰减，短期兴趣层也无法从长期画像里分离出来。</p>
  *
  * <p><b>fail-open</b>：Redis 异常只告警不抛，画像缺失最多让个性化失效（回退冷启动），不阻断浏览。</p>
  */
@@ -62,6 +75,38 @@ public class InterestService {
      */
     private static final String NEG_PREFIX = "tf:user:dislike-tags:";
     private static final Duration TTL = Duration.ofDays(30);
+
+    /**
+     * 画像 Hash 里的<b>时间戳哨兵字段</b>：记录最后一次写入的 epoch 毫秒，衰减按它与当前时间的差计算。
+     *
+     * <p><b>为什么把它塞进同一个 Hash 而不是另开一个 ts key</b>：Redis 集群下 Lua 脚本的多个 KEY
+     * 必须落在同一个 slot（否则 {@code CROSSSLOT}），要保证这点就得把 userId 改写成 hash tag
+     * （{@code tf:user:interest:{123}}）——那会<b>改变已有键名</b>，让所有已经存在的画像瞬间失联
+     * （且现存清理脚本全都指向旧键名）。放在同一个 Hash 里，脚本只碰 <b>一个</b> KEY，
+     * 天然同 slot，键名一个字都不用改。</p>
+     *
+     * <p><b>代价</b>：读路径必须跳过这个哨兵字段——约定以 {@code __} 开头/结尾的字段都不是兴趣标签。</p>
+     */
+    private static final String TS_FIELD = "__ts__";
+
+    /**
+     * 兴趣半衰期（天）：距今 halfLifeDays 天的那部分权重，只剩一半。
+     *
+     * <p>14 天是"月度级偏好迁移"的量级；调小 → 画像更贴最近行为（更敏感也更抖），
+     * 调大 → 更稳定但迁移慢。这是推荐系统里典型的<b>稳定性 vs 时效性</b>旋钮。</p>
+     */
+    @Value("${turbofeed.feed.interest.half-life-days:14}")
+    private double halfLifeDays = 14.0;
+
+    /**
+     * 衰减后绝对值低于该值的标签直接移出画像（"遗忘"）。
+     *
+     * <p><b>为什么需要</b>：指数衰减只会趋近 0 不会到 0，若不清掉，画像里会永久躺着一批
+     * {@code 1e-9} 级的长尾标签，占内存且污染 TopN 的比较。
+     * 取 0.01 意味着"连一次不完整观看（0.1）的十分之一都不到"，语义上等于已经不在乎了。</p>
+     */
+    @Value("${turbofeed.feed.interest.min-score:0.01}")
+    private double minScore = 0.01;
     // ==================================================================
     // 完播加权的阈值与权重（WATCH / PLAY_COMPLETE）
     //
@@ -105,6 +150,87 @@ public class InterestService {
             "SHARE", 1.5,
             "DISLIKE", -1.5);
 
+    /**
+     * 画像写入（原子：先整体衰减 → 再加本次权重 → 更新时间戳与 TTL）。
+     *
+     * <p><b>为什么必须是 Lua</b>：衰减是"读出全部 → 逐个乘因子 → 写回"的读改写（RMW）。
+     * 放在 Java 里做，同一用户的并发行为事件（前端是 2s 批量上报，
+     * 一次请求里几十条事件并发处理）会互相覆盖，丢掉一部分权重。
+     * Lua 在 Redis 内单线程执行，天然原子。</p>
+     *
+     * <p><b>为什么写入要负责衰减、而读只计算不回写</b>：读路径做同样的公式（见
+     * {@link #decayFactor}）但<b>不写回 Redis</b>。写路径必须衰减是因为要把历史总量"折算"到当前，
+     * 否则数值只增不减；读路径不写回则纯粹是成本考虑——写完时间戳已是最新，
+     * 读时乘一次因子就能得到当前值，没必要为省这点计算去多一次 Redis 写。</p>
+     *
+     * <pre>
+     * KEYS[1] = tf:user:interest:<userId>
+     * ARGV[1] = now(ms)  ARGV[2] = halfLife(ms)  ARGV[3] = minScore
+     * ARGV[4] = ttl(s)   ARGV[5] = delta         ARGV[6] = 哨兵字段名
+     * ARGV[7..] = 本次要加权的 tag 列表
+     * </pre>
+     */
+    private static final String LUA_ACCUMULATE =
+            "local key, tsField = KEYS[1], ARGV[6]\n"
+            + "local now = tonumber(ARGV[1])\n"
+            + "local halfLife = tonumber(ARGV[2])\n"
+            + "local minScore = tonumber(ARGV[3])\n"
+            + "local ttl = tonumber(ARGV[4])\n"
+            + "local delta = tonumber(ARGV[5])\n"
+            + "local raw = redis.call('HGET', key, tsField)\n"
+            + "local last = nil\n"
+            + "if raw then last = tonumber(raw) end\n"
+            + "local factor = 1.0\n"
+            + "if last and now > last and halfLife > 0 then\n"
+            + "  factor = math.pow(0.5, (now - last) / halfLife)\n"
+            + "end\n"
+            + "if factor < 1.0 then\n"
+            + "  local all = redis.call('HGETALL', key)\n"
+            + "  for i = 1, #all, 2 do\n"
+            + "    if all[i] ~= tsField then\n"
+            + "      local w = tonumber(all[i + 1])\n"
+            + "      if w == nil then\n"
+            + "        redis.call('HDEL', key, all[i])\n"
+            + "      else\n"
+            + "        local decayed = w * factor\n"
+            + "        if math.abs(decayed) < minScore then\n"
+            + "          redis.call('HDEL', key, all[i])\n"
+            + "        else\n"
+            + "          redis.call('HSET', key, all[i], tostring(decayed))\n"
+            + "        end\n"
+            + "      end\n"
+            + "    end\n"
+            + "  end\n"
+            + "end\n"
+            + "for i = 7, #ARGV do\n"
+            + "  redis.call('HINCRBYFLOAT', key, ARGV[i], delta)\n"
+            + "end\n"
+            + "redis.call('HSET', key, tsField, tostring(now))\n"
+            + "if ttl > 0 then redis.call('EXPIRE', key, ttl) end\n"
+            + "return redis.call('HLEN', key)\n";
+
+    /** 预编译的脚本对象（避免每次请求重新解析 Lua 源码）。 */
+    private final RedisScript<Long> accumulateScript = RedisScript.of(LUA_ACCUMULATE, Long.class);
+
+    /**
+     * 时间衰减因子：距上次更新 {@code elapsedMs} 毫秒后，历史权重应乘的系数。
+     *
+     * <p>⚠️ <b>与 Lua 里的实现是镜像关系</b>（{@code 0.5^(elapsed/halfLife)}），改一处必须改另一处。
+     * 之所以不复用：Lua 跑在 Redis 里没法调 Java，而为了让"读"也反映当前时间，
+     * 读路径必须能在不落盘的前提下算一次。</p>
+     */
+    static double decayFactor(long elapsedMs, double halfLifeMs) {
+        if (halfLifeMs <= 0 || elapsedMs <= 0) {
+            return 1.0;
+        }
+        return Math.pow(0.5, (double) elapsedMs / halfLifeMs);
+    }
+
+    /** 半衰期换算成毫秒（顺带做非法值兜底：配置填 0 或负数等于关闭衰减）。 */
+    private double halfLifeMs() {
+        return halfLifeDays <= 0 ? 0.0 : halfLifeDays * 86_400_000.0;
+    }
+
     public InterestService(StringRedisTemplate redisTemplate, TagIndexService tagIndexService) {
         this.redisTemplate = redisTemplate;
         this.tagIndexService = tagIndexService;
@@ -138,10 +264,15 @@ public class InterestService {
         }
         try {
             String key = INTEREST_PREFIX + event.userId();
-            for (String tag : tags) {
-                redisTemplate.opsForHash().increment(key, tag, weight);
-            }
-            redisTemplate.expire(key, TTL);
+            List<String> argv = new ArrayList<>(6 + tags.size());
+            argv.add(String.valueOf(System.currentTimeMillis()));
+            argv.add(String.valueOf(halfLifeMs()));
+            argv.add(String.valueOf(minScore));
+            argv.add(String.valueOf(TTL.getSeconds()));
+            argv.add(String.valueOf(weight));
+            argv.add(TS_FIELD);
+            argv.addAll(tags);
+            redisTemplate.execute(accumulateScript, List.of(key), argv.toArray(new Object[0]));
         } catch (Exception e) {
             org.slf4j.LoggerFactory.getLogger(InterestService.class)
                     .warn("兴趣画像累积失败（不影响主流程）: userId={}, type={}, {}",
@@ -239,9 +370,12 @@ public class InterestService {
     /**
      * 取用户兴趣 TopN 标签及其权重（仅正向权重用于召回/加权；负向不进召回）。
      *
+     * <p><b>会做时间衰减</b>：按 {@link #TS_FIELD} 距现在的时长乘衰减因子后返回，
+     * 保证读到的永远是"当前还剩下多少兴趣"，而不是历史累计和。</p>
+     *
      * @param userId 用户（{@code null} → 空 Map，冷启动）
      * @param n      返回条数上限（≤0 视为不限制）
-     * @return tag → 累计权重（按权重降序）；无画像/异常返回空 Map
+     * @return tag → 当前权重（按权重降序）；无画像/异常返回空 Map
      */
     public Map<String, Double> weightedTags(String userId, int n) {
         if (userId == null) {
@@ -253,12 +387,32 @@ public class InterestService {
             if (raw == null || raw.isEmpty()) {
                 return Map.of();
             }
+            long lastTs = 0L;
+            Object tsRaw = raw.get(TS_FIELD);
+            if (tsRaw != null) {
+                try {
+                    lastTs = Long.parseLong(String.valueOf(tsRaw));
+                } catch (NumberFormatException ignore) {
+                    // 脏哨兵值：按"时间未知"处理，不衰减（也好过整份画像失效）
+                    lastTs = 0L;
+                }
+            }
+            double factor = lastTs > 0 ? decayFactor(System.currentTimeMillis() - lastTs, halfLifeMs()) : 1.0;
             List<Map.Entry<String, Double>> entries = new ArrayList<>();
             for (Map.Entry<Object, Object> e : raw.entrySet()) {
-                // StringRedisTemplate 的 Hash 值是 String（如 "2.7"），不能强转 Number（CCE→fail-open 吞掉→画像永远为空）
-                double v = Double.parseDouble(String.valueOf(e.getValue()));
+                String field = String.valueOf(e.getKey());
+                if (TS_FIELD.equals(field) || (field.startsWith("__") && field.endsWith("__"))) {
+                    continue; // 哨兵字段不是兴趣标签
+                }
+                double v;
+                try {
+                    // StringRedisTemplate 的 Hash 值是 String（如 "2.7"），不能强转 Number（CCE→fail-open 吞掉→画像永远为空）
+                    v = Double.parseDouble(String.valueOf(e.getValue())) * factor;
+                } catch (NumberFormatException nfe) {
+                    continue; // 脏数据：跳过该标签，不能让一条坏数据毁掉整份画像
+                }
                 if (v > 0) {
-                    entries.add(Map.entry(String.valueOf(e.getKey()), v));
+                    entries.add(Map.entry(field, v));
                 }
             }
             entries.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
@@ -348,14 +502,25 @@ public class InterestService {
         return out;
     }
 
-    /** 用户是否有兴趣画像（冷启动判定）。 */
+    /**
+     * 用户是否有兴趣画像（冷启动判定）。
+     *
+     * <p><b>刻意用 O(1) 的 {@code HLEN} 而不是复用 {@link #weightedTags}</b>：本方法是
+     * {@code readPage} 每次都走的<b>前置闸门</b>，若它内部再调一次 weightedTags，
+     * 一次读请求就会把画像 Hash 扫两遍。</p>
+     *
+     * <p><b>为什么判据是 {@code size > 1}</b>：加了时间衰减后，画像里除标签还会固定存在哨兵
+     * 时间戳字段 {@link #TS_FIELD}，只剩它一个 = 所有标签都已被遗忘，等同于没有画像。
+     * 这里只判"有没有标签"，不判"权重是否为正"——后者由 {@link #weightedTags}
+     * 过滤（只有正向权重才进召回），两处职责分开。</p>
+     */
     public boolean hasInterest(String userId) {
         if (userId == null) {
             return false;
         }
         try {
             Long size = redisTemplate.opsForHash().size(INTEREST_PREFIX + userId);
-            return size != null && size > 0;
+            return size != null && size > 1;
         } catch (Exception e) {
             return false;
         }
