@@ -101,8 +101,18 @@
                · shardingsphere-infra-data-source-pool-hikari → 缺则无法创建 Hikari 连接池数据源
                · shardingsphere-standalone-mode-repository-memory → 缺则 classpath 配置 standalone 内存仓库加载失败
                · shardingsphere-authority-simple         → 默认权限提供器（缺则 authority rule 构建失败）
+               · shardingsphere-readwrite-splitting-core → 缺则 YAML 解析报 Invalid tag: !READWRITE_SPLITTING
              此处逐一显式声明 5.5.3 以覆盖上游 test scope（直接声明优先于传递依赖 scope）。
-             唯一未声明的是 shardingsphere-test-infra-fixture-database（纯上游测试设施，使用方无需）。 -->
+             唯一未声明的是 shardingsphere-test-infra-fixture-database（纯上游测试设施，使用方无需）。
+
+             ⚠️ 2026-09-29 实测补记：读写分离（!READWRITE_SPLITTING）是后来才加进配置的，
+             当时只补了 !SHARDING 需要的模块，漏了这一个，于是本地启动必炸
+             "Invalid tag: !READWRITE_SPLITTING"。tag 常量来自本模块里的
+             YamlReadwriteSplittingRuleConfigurationSwapper（经 SPI
+             org.apache.shardingsphere.infra.yaml.config.swapper.rule.YamlRuleConfigurationSwapper 注册），
+             jar 不在 classpath 上就等于 tag 未注册。**配置里每新增一种 !XXX 规则，
+             都要确认对应模块已在本清单里。** 这也说明：只做 YAML 语法校验（pyyaml 之类）
+             证明不了配置能被运行时接受，必须真启动一次。 -->
         <dependency>
             <groupId>org.apache.shardingsphere</groupId>
             <artifactId>shardingsphere-sharding-core</artifactId>
@@ -131,6 +141,12 @@
         <dependency>
             <groupId>org.apache.shardingsphere</groupId>
             <artifactId>shardingsphere-authority-simple</artifactId>
+            <version>5.5.3</version>
+        </dependency>
+        <!-- 读写分离（!READWRITE_SPLITTING）：同上，上游声明为 test scope，必须显式补齐。 -->
+        <dependency>
+            <groupId>org.apache.shardingsphere</groupId>
+            <artifactId>shardingsphere-readwrite-splitting-core</artifactId>
             <version>5.5.3</version>
         </dependency>
         <!-- 密码哈希：Spring Security Crypto 的 BCryptPasswordEncoder（仅加密工具类，
