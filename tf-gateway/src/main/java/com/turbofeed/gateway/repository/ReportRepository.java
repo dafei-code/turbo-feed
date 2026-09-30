@@ -30,6 +30,14 @@ public class ReportRepository {
                 mediaId, reporterUserId, reason, Timestamp.from(Instant.now()));
     }
 
+    /** 统计某内容仍待处理的举报数（status=0）。report 按 media_id 分片 → 单分片点查。 */
+    public int countPending(String mediaId) {
+        Integer n = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM report WHERE media_id = ? AND status = 0",
+                Integer.class, mediaId);
+        return n == null ? 0 : n;
+    }
+
     /** 处理完标记（confirmed=true 违规成立 status=1 / false 驳回不成立 status=2）。 */
     public void resolve(String mediaId, boolean confirmed) {
         jdbcTemplate.update(

@@ -172,6 +172,9 @@ rules:
       # 队列表，按 id 顺序消费；不按用户分片，是为了让「待投递行数 / DEAD 行数」这类对账查询
       # 一条 SQL 就能看到全貌（分片后要广播合并才能对账，得不偿失）。
       - ds_0.outbox_event
+      # 复审任务队列（抖音式「举报累计→人工复审」，changelog 0065）：单表落 ds_0。
+      # 管理员视角的聚合队列，按 status 扫描全貌比按 media 点查更重要（仿 outbox_event 的 SINGLE 取舍）。
+      - ds_0.review_task
 
 props:
   # 开发期打印实际落到的物理库/表与 SQL，便于核对路由；生产可关闭

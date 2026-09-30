@@ -2995,6 +2995,27 @@ CREATE TABLE `turbo_feed_1`.`outbox_event` (
   KEY `idx_aggregate` (`aggregate_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='事务发件箱(单表, 杜绝"事务已提交但消息丢失")';
 
+-- ==================== 复审任务队列 review_task（单表，ds_0） ====================
+-- 抖音式「举报累计 → 人工复核」的承接结构（changelog 0065）：同一内容的待处理举报数达阈值，
+-- MediaReviewService#report 自动建一条 PENDING 复审任务，归 REVIEWER 二次研判。
+-- 为什么单表：它是管理员视角的聚合队列，按 status 扫描全貌比按 media 点查更重要
+--   （仿 outbox_event 的 SINGLE 取舍，分片后要广播合并才能看全队列，得不偿失）。
+-- 部署：必须在 shardingsphere-config*.yaml 的 `!SINGLE` 里登记 ds_0.review_task。
+CREATE TABLE `turbo_feed_1`.`review_task` (
+  `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '任务ID(自增, 单表队列)',
+  `media_id`      VARCHAR(255) NOT NULL                COMMENT '被举报内容标识(帖代表媒体ID)',
+  `author_id`     BIGINT       NOT NULL                COMMENT '内容作者 userId',
+  `task_type`     VARCHAR(32)  NOT NULL                COMMENT '触发类型: REPORT_ACCUMULATED',
+  `trigger_count` INT          NOT NULL DEFAULT 0      COMMENT '触发时的待处理举报数',
+  `status`        TINYINT      NOT NULL DEFAULT 0      COMMENT '0=待复审 1=无违规(维持发布) 2=确认违规(已下架)',
+  `created_at`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '建单时间',
+  `resolved_at`   DATETIME     NULL                    COMMENT '处置时间',
+  `resolver`      VARCHAR(64)  NULL                    COMMENT '处置人(REVIEWER/ADMIN 的 userId)',
+  PRIMARY KEY (`id`),
+  KEY `idx_status` (`status`),
+  KEY `idx_media` (`media_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='举报累计复审任务队列(单表 ds_0, 抖音式复审闭环)';
+
 -- ==================== 演示账号种子数据（DB 重建后可直接登录） ====================
 -- 说明：网关登录现走 user 分片表 + BCrypt 校验；旧 application.yml 中 auth.demo-users
 --      配置已废弃。重新执行本脚本后可用以下账号登录：

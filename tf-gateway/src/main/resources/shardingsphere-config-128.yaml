@@ -213,6 +213,8 @@ rules:
       - ds_0.sensitive_whitelist
       - ds_0.user_phone_router
       - ds_0.outbox_event
+      # 复审任务队列（抖音式「举报累计→人工复审」，changelog 0065）：单表落 ds_0（仿 outbox_event）。
+      - ds_0.review_task
 
 props:
   sql-show: true

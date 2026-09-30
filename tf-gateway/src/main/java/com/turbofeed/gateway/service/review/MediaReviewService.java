@@ -5,6 +5,7 @@ import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.repository.MediaTagJdbcRepository;
 import com.turbofeed.gateway.repository.ReportRepository;
+import com.turbofeed.gateway.repository.ReviewTaskRepository;
 import com.turbofeed.gateway.repository.AppealRepository;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
 import com.turbofeed.gateway.service.event.outbox.OutboxEventType;
@@ -74,6 +75,8 @@ public class MediaReviewService {
     private final AccountCreditService accountCreditService;
     private final ReportRepository reportRepository;
     private final AppealRepository appealRepository;
+    /** 复审任务队列（抖音式「举报累计→人工复审」，changelog 0065）。 */
+    private final ReviewTaskRepository reviewTaskRepository;
     /** 发件箱（P0-3）：时间线投递改走「同事务落事件 + 提交后直投 + 中继补偿」。 */
     private final OutboxService outboxService;
     /** 处罚域（penalty 集成缝接线）：违规确认落处罚、申诉翻案解除封禁。 */
@@ -85,9 +88,10 @@ public class MediaReviewService {
                               ContentModerationRouter contentModeration,
                               MediaProperties properties,
                               AccountCreditService accountCreditService,
-                              ReportRepository reportRepository,
-                              AppealRepository appealRepository,
-                              OutboxService outboxService,
+            ReportRepository reportRepository,
+            AppealRepository appealRepository,
+            ReviewTaskRepository reviewTaskRepository,
+            OutboxService outboxService,
                               PenaltyService penaltyService) {
         this.mediaRepository = mediaRepository;
         this.mediaTagRepository = mediaTagRepository;
@@ -97,6 +101,7 @@ public class MediaReviewService {
         this.accountCreditService = accountCreditService;
         this.reportRepository = reportRepository;
         this.appealRepository = appealRepository;
+        this.reviewTaskRepository = reviewTaskRepository;
         this.outboxService = outboxService;
         this.penaltyService = penaltyService;
     }
@@ -284,28 +289,19 @@ public class MediaReviewService {
         }
         reportRepository.insert(mediaId, reporterUserId, reason);
         if (isHighRisk(reason)) {
-            // CAS：同一违规可能被多人同时举报，只有第一条能把帖子从 APPROVED 翻下去，
-            // 其余得到 0 行——否则信用会被重复扣减（onViolationConfirmed 不是幂等操作）。
-            int rows = mediaRepository.updateStatusCas(
-                    mediaId, authorId, MediaStatus.APPROVED, MediaStatus.TAKEN_DOWN);
+            // CAS 保证「真正完成下架的那一次」才扣信用+落处罚；其余并发举报得 0 行幂等返回。
+            int rows = takeDownAndPenalize(mediaId, authorId, ViolationSource.HUMAN_REPORT, "SYSTEM",
+                    "高危举报立即下架停推: " + mediaId, ViolationSeverity.HIGH);
             if (rows == 0) {
                 log.info("高危举报下架 CAS 落空（已被其他路径下架，不重复扣信用）: mediaId={}", mediaId);
-                return;
+            } else {
+                log.warn("高危举报立即下架停推（整帖）: mediaId={}, reporterUserId={}, reason={}",
+                        mediaId, reporterUserId, reason);
             }
-            removeFromTimeline(mediaId, authorId);
-            accountCreditService.onViolationConfirmed(authorId);
-            // penalty 集成缝：高危举报即确认为违规 → 落处罚（与信用扣分同触发点，CAS 保证单次）。
-            penaltyService.recordViolation(authorId,
-                    ViolationCategory.OTHER,
-                    isHighRisk(reason) ? ViolationSeverity.HIGH : ViolationSeverity.MID,
-                    ViolationSource.HUMAN_REPORT,
-                    null,
-                    "SYSTEM",
-                    "高危举报立即下架停推: " + mediaId);
-            log.warn("高危举报立即下架停推（整帖）: mediaId={}, reporterUserId={}, reason={}",
-                    mediaId, reporterUserId, reason);
+            return;
         }
-        // 普通举报：进人工队列，管理员 report-review 处理
+        // 普通举报：累计达阈值 → 自动建复审任务（抖音式「举报累计→人工复核」），归 REVIEWER 二次研判。
+        maybeEscalateToReviewTask(mediaId, authorId);
     }
 
     /** 管理员处理举报：确认违规→整帖 TAKEN_DOWN + 扣信用；驳回→内容保持。 */
@@ -313,27 +309,90 @@ public class MediaReviewService {
     public void handleReport(String mediaId, boolean confirmed) {
         long authorId = parseUserId(mediaId);
         if (confirmed) {
-            // CAS：只有把帖子从 APPROVED 翻下去的那一次才扣信用。若高危举报已先行下架
-            // （状态已是 TAKEN_DOWN）或作者已申诉（APPEALING），这里得 0 行、不再重复扣分。
-            int rows = mediaRepository.updateStatusCas(
-                    mediaId, authorId, MediaStatus.APPROVED, MediaStatus.TAKEN_DOWN);
-            if (rows > 0) {
-                removeFromTimeline(mediaId, authorId);
-                accountCreditService.onViolationConfirmed(authorId);
-                // penalty 集成缝：管理员确认举报违规 → 落处罚（CAS 保证单次，不与高危举报路径重复）。
-                penaltyService.recordViolation(authorId,
-                        ViolationCategory.OTHER,
-                        ViolationSeverity.MID,
-                        ViolationSource.HUMAN_REPORT,
-                        null,
-                        "ADMIN",
-                        "举报确认违规→整帖下架: " + mediaId);
-                log.info("举报确认违规→整帖下架: mediaId={}", mediaId);
-            } else {
+            // CAS 保证单次：把帖子翻下去的那一次才扣信用+落处罚；已被其它路径下架则得 0 行幂等。
+            int rows = takeDownAndPenalize(mediaId, authorId, ViolationSource.HUMAN_REPORT, "ADMIN",
+                    "举报确认违规→整帖下架: " + mediaId, ViolationSeverity.MID);
+            if (rows == 0) {
                 log.info("举报确认违规：内容已不在已发布态，不重复下架/扣信用: mediaId={}", mediaId);
             }
         }
         reportRepository.resolve(mediaId, confirmed);
+    }
+
+    /**
+     * REVIEWER 二次研判复审任务（抖音式「举报累计→人工复核」的承接动作）。
+     *
+     * <p>违规→整帖 TAKEN_DOWN + 扣信用 + 落处罚（与高危举报同处置力度）；无违规→维持发布。
+     * 无论哪种，都一并清理该 media 的全部待处理举报与待复审任务，避免重复处置。</p>
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void decideReviewTask(long taskId, boolean takedown, String resolver) {
+        ReviewTask task = reviewTaskRepository.findById(taskId);
+        if (task == null || task.status() != ReviewTask.STATUS_PENDING) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "复审任务不存在或已处置");
+        }
+        String mediaId = task.mediaId();
+        long authorId = task.authorId();
+        if (takedown) {
+            // CAS 保证「真正完成翻转的那一次」才扣信用+落处罚；已被其它路径下架则幂等不双计。
+            takeDownAndPenalize(mediaId, authorId, ViolationSource.HUMAN_REPORT, resolver,
+                    "复审任务确认违规(举报累计): " + mediaId, ViolationSeverity.MID);
+            reviewTaskRepository.resolveAllForMedia(mediaId, ReviewTask.STATUS_TAKEDOWN, resolver);
+            reportRepository.resolve(mediaId, true);
+            log.info("复审任务确认违规→整帖下架: taskId={}, mediaId={}, resolver={}", taskId, mediaId, resolver);
+        } else {
+            // 维持发布：任务置 RESOLVED，待处理举报标记为不成立。
+            reviewTaskRepository.resolveAllForMedia(mediaId, ReviewTask.STATUS_RESOLVED, resolver);
+            reportRepository.resolve(mediaId, false);
+            log.info("复审任务判定无违规，维持发布: taskId={}, mediaId={}, resolver={}", taskId, mediaId, resolver);
+        }
+    }
+
+    /** REVIEWER 复审队列：按状态列出任务（默认 0=待复审）。 */
+    public List<ReviewTask> listReviewTasks(int status) {
+        return reviewTaskRepository.findByStatus(status);
+    }
+
+    /**
+     * 举报累计达阈值 → 自动建一条复审任务（抖音式「举报累计→人工复核」）。
+     *
+     * <p>仅在该内容仍处于已发布态、且无未决复审任务时建单；REVIEWER 在
+     * {@link #decideReviewTask} 二次研判（违规→下架+处罚 / 无违规→维持发布）。</p>
+     */
+    private void maybeEscalateToReviewTask(String mediaId, long authorId) {
+        MediaStatus cur = mediaRepository.getStatus(mediaId, authorId);
+        if (cur != MediaStatus.APPROVED) {
+            return; // 已不在公域（下架/申诉中），不再建复审任务
+        }
+        int pending = reportRepository.countPending(mediaId);
+        if (pending < properties.getReview().getReportReReviewThreshold()) {
+            return;
+        }
+        if (reviewTaskRepository.existsOpenForMedia(mediaId)) {
+            return; // 已有待复审任务，避免重复建单
+        }
+        reviewTaskRepository.insert(mediaId, authorId, ReviewTask.TYPE_REPORT_ACCUMULATED, pending);
+        log.info("举报累计达阈值，自动建复审任务（REVIEWER 二次研判）: mediaId={}, pendingReports={}, threshold={}",
+                mediaId, pending, properties.getReview().getReportReReviewThreshold());
+    }
+
+    /**
+     * 把整帖从 APPROVED 翻 TAKEN_DOWN + 移出公域 + 扣信用 + 落处罚（高危举报 / 管理员确认 / 复审任务共用）。
+     *
+     * <p>CAS 保证「真正完成翻转的那一次」才扣信用/落处罚（并发或重复处置幂等，不双计）。
+     * 返回受影响行数（0 表示内容已被其它路径下架，本次不重复处置）。</p>
+     */
+    private int takeDownAndPenalize(String mediaId, long authorId, ViolationSource source,
+                                    String operator, String reason, ViolationSeverity severity) {
+        int rows = mediaRepository.updateStatusCas(mediaId, authorId, MediaStatus.APPROVED, MediaStatus.TAKEN_DOWN);
+        if (rows > 0) {
+            removeFromTimeline(mediaId, authorId);
+            accountCreditService.onViolationConfirmed(authorId);
+            // penalty 集成缝：确认违规 → 落处罚（与信用扣分同触发点，CAS 保证单次）。
+            penaltyService.recordViolation(authorId, ViolationCategory.OTHER, severity,
+                    source, null, operator, reason);
+        }
+        return rows;
     }
 
     /**

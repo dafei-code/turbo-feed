@@ -3,9 +3,11 @@ package com.turbofeed.gateway.controller;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
+import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.MediaReviewService;
 import com.turbofeed.gateway.service.review.MediaStatus;
+import com.turbofeed.gateway.service.review.ReviewTask;
 import com.turbofeed.shared.result.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -103,5 +105,33 @@ public class AdminMediaController {
             @RequestParam("upheld") boolean upheld) {
         reviewService.handleAppeal(mediaId, upheld);
         return Result.ok(upheld ? MediaStatus.APPROVED : MediaStatus.TAKEN_DOWN);
+    }
+
+    /**
+     * 复审任务队列：列出某状态任务（默认 0=待复审），归 REVIEWER 二次研判。
+     *
+     * @param status 任务状态（0=待复审 / 1=无违规维持 / 2=确认违规下架）
+     */
+    @GetMapping("/review-task/list")
+    @RequirePermission(Permission.CONTENT_REVIEW)
+    public Result<List<ReviewTask>> reviewTaskList(
+            @RequestParam(value = "status", defaultValue = "0") int status) {
+        return Result.ok(reviewService.listReviewTasks(status));
+    }
+
+    /**
+     * REVIEWER 处置复审任务（抖音式「举报累计→人工复核」的承接动作）。
+     *
+     * @param taskId   任务 ID（取自复审队列列表）
+     * @param takedown true=确认违规（整帖下架+扣分+处罚）/ false=无违规（维持发布）
+     */
+    @PostMapping("/review-task/decide")
+    @RequirePermission(Permission.CONTENT_TAKEDOWN)
+    public Result<Void> decideReviewTask(
+            @RequestParam("taskId") long taskId,
+            @RequestParam("takedown") boolean takedown) {
+        String resolver = UserContextHolder.requireUserId();
+        reviewService.decideReviewTask(taskId, takedown, resolver);
+        return Result.ok();
     }
 }

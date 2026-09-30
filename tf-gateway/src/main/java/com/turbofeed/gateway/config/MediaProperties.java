@@ -442,6 +442,16 @@ public class MediaProperties {
          */
         private boolean criticalAutoPermBan = false;
 
+        /**
+         * 举报累计复审阈值（抖音式「举报累计 → 人工复核」，changelog 0065）：
+         * 同一内容（media_id）的<b>待处理</b>举报数达到该值，且内容仍处于已发布态，
+         * 自动建一条 PENDING 复审任务归 REVIEWER 二次研判。默认 3。
+         *
+         * <p>设计取舍：单条举报不立即拉人工（避免误举报刷爆审核台），累计达阈值才升级，
+         * 与抖音「举报量触发人工复核」一致；阈值外部化，调参不发黑。</p>
+         */
+        private int reportReReviewThreshold = 3;
+
         public int getNewUserApproveThreshold() {
             return newUserApproveThreshold;
         }
@@ -504,6 +514,14 @@ public class MediaProperties {
 
         public void setCriticalAutoPermBan(boolean criticalAutoPermBan) {
             this.criticalAutoPermBan = criticalAutoPermBan;
+        }
+
+        public int getReportReReviewThreshold() {
+            return reportReReviewThreshold;
+        }
+
+        public void setReportReReviewThreshold(int reportReReviewThreshold) {
+            this.reportReReviewThreshold = reportReReviewThreshold;
         }
 
         public boolean isAutoPass() {
