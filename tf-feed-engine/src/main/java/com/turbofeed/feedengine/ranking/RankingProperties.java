@@ -22,6 +22,18 @@ public class RankingProperties {
     private double interestWeight = 1.0d;
 
     /**
+     * 短期兴趣匹配目标权重（抖音式"当下在追什么"对排序的影响强度）。
+     *
+     * <p>长期层定"你是什么样的人"、短期层定"你现在想要什么"。{@link #interestWeight}
+     * 作用于长期匹配分，本项作用于短期匹配分，二者独立可调：调大本项 = 更看重最近行为、
+     * 推荐更"跟手"；调小 = 更稳、不被一次性突发兴趣带偏。</p>
+     */
+    private double shortTermWeight = 1.0d;
+
+    /** 短期兴趣累加分上限（与 {@link #interestScoreCap} 同口径，单独封顶防止某次刷屏把短期权重推到离谱）。 */
+    private double shortTermScoreCap = 3.0d;
+
+    /**
      * 完播率的先验：相当于先给每条内容虚拟 {@code completionPriorCount} 次曝光，
      * 其中 {@code completionPriorRate} 比例完播。样本越少，结果越贴近这个先验。
      */
@@ -63,6 +75,22 @@ public class RankingProperties {
 
     public void setInterestWeight(double interestWeight) {
         this.interestWeight = interestWeight;
+    }
+
+    public double getShortTermWeight() {
+        return shortTermWeight;
+    }
+
+    public void setShortTermWeight(double shortTermWeight) {
+        this.shortTermWeight = shortTermWeight;
+    }
+
+    public double getShortTermScoreCap() {
+        return shortTermScoreCap;
+    }
+
+    public void setShortTermScoreCap(double shortTermScoreCap) {
+        this.shortTermScoreCap = shortTermScoreCap;
     }
 
     public double getCompletionPriorCount() {

@@ -20,7 +20,11 @@ package com.turbofeed.feedengine.ranking;
  * @param comments       评论数
  * @param shares         分享数
  * @param dislikes       负向数（踩 / 不感兴趣，此处只作记录，真正的用户级打压在 {@code negativeHit}）
- * @param interestMatch  该内容标签与用户兴趣画像的匹配分（已累加，未封顶）
+ * @param interestMatch  该内容标签与用户<b>长期</b>兴趣画像的匹配分（已累加，未封顶）
+ * @param shortTermMatch 该内容标签与用户<b>短期</b>兴趣画像的匹配分（最近半天的突发兴趣；
+ *                       短期层关闭时恒为 0）。与 {@code interestMatch} 同源标签、各自独立累加，
+ *                       二者叠加即"长期偏好 + 当下追更"的双重信号——这是抖音式"你刚刷了一堆钓鱼，
+ *                       现在就多给你钓鱼"的精排落地处（召回只解决"看不看得见"，精排才决定"排多前"）。
  * @param negativeHit    是否命中该用户的负向标签（"不感兴趣"打压相似内容）
  */
 public record RankingFeatures(double recencyMillis,
@@ -31,5 +35,6 @@ public record RankingFeatures(double recencyMillis,
                               long shares,
                               long dislikes,
                               double interestMatch,
+                              double shortTermMatch,
                               boolean negativeHit) {
 }

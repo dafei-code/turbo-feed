@@ -223,8 +223,12 @@ public class FeedTimelineStore {
     public List<FeedItemView> readPage(String userId, int page, int size) {
         int limit = size <= 0 ? 20 : size;
         // 一次性取用户兴趣画像（TopN 正向标签→权重）；无画像/匿名→空 Map，走冷启动排序。
+        // 长期层（定"你是什么样的人"）用于 interestMatch；短期层（定"你现在想要什么"）
+        // 单独取出用于 shortTermMatch，二者在 RankingModel 里叠加——这是短期兴趣"排最前"的落点。
         Map<String, Double> interest = (userId == null || !interestService.hasInterest(userId))
                 ? Map.of() : interestService.weightedTags(userId, INTEREST_TOP_N);
+        Map<String, Double> shortInterest = (userId == null || !interestService.hasInterest(userId))
+                ? Map.of() : interestService.shortTermTags(userId, INTEREST_TOP_N);
         // 负向标签（抖音式「不感兴趣 → 对该用户打压同标签内容」）。匿名 / 无负反馈为空集，
         // 与画像解耦：即使该用户画像为空（冷启动）也照样生效——负反馈不需要先有正反馈。
         Set<String> negative = interestService.negativeTags(userId);
@@ -328,8 +332,8 @@ public class FeedTimelineStore {
             }
             // 个性化位内部仍按精排分排序：召回只保证"这类内容进得来"，
             // 不保证"质量差的也往前放"——排序权交给 RankingModel。
-            interestPart.sort((a, b) -> Double.compare(scoreOf(b, interest, negative),
-                    scoreOf(a, interest, negative)));
+            interestPart.sort((a, b) -> Double.compare(scoreOf(b, interest, shortInterest, negative),
+                    scoreOf(a, interest, shortInterest, negative)));
         }
 
         Map<Integer, List<FeedItemView>> parsed = new LinkedHashMap<>();
@@ -391,8 +395,8 @@ public class FeedTimelineStore {
             // 精排：统一交给 RankingModel。原先这里有一个"各加权项全为 0 就跳过排序"的开关，
             // 现在权重默认非 0 且排序对象是页级切片（≤ 页大小），成本可忽略，故恒重排——
             // 少一个分支就少一处"权重配置错了却以为在排序"的静默分歧。
-            slice.sort((a, b) -> Double.compare(scoreOf(b, interest, negative),
-                    scoreOf(a, interest, negative)));
+            slice.sort((a, b) -> Double.compare(scoreOf(b, interest, shortInterest, negative),
+                    scoreOf(a, interest, shortInterest, negative)));
             poolPart.addAll(slice);
         }
         if (diversityWindow > 0) {
@@ -447,7 +451,8 @@ public class FeedTimelineStore {
      * <p>fail-open：统计读不到时按零计数处理——平滑后自然回落到先验水平，
      * 而不是朴素比率的 0 分，新内容不至于被一次性地压到队尾。</p>
      */
-    private double scoreOf(ScoredItem s, Map<String, Double> interest, Set<String> negative) {
+    private double scoreOf(ScoredItem s, Map<String, Double> interest,
+                            Map<String, Double> shortInterest, Set<String> negative) {
         PostStatService.PostStat stat = new PostStatService.PostStat(0, 0, 0, 0, 0, 0);
         try {
             stat = postStatService.snapshot(s.item().timelineKey());
@@ -455,27 +460,31 @@ public class FeedTimelineStore {
             // 统计不可用：按零计数处理——平滑后自然回落到先验水平，而不是朴素比率的 0
         }
         double interestScore = 0d;
+        double shortTermScore = 0d;
         if (!interest.isEmpty()) {
             List<String> tags = s.item().tags();
             if (tags != null) {
-                double sum = 0d;
                 for (String tag : tags) {
                     Double w = interest.get(tag);
                     if (w != null) {
-                        sum += w;
+                        interestScore += w;
+                    }
+                    Double sw = shortInterest.get(tag);   // 同源标签：长期命中即看短期层有没有"当下追更"
+                    if (sw != null) {
+                        shortTermScore += sw;
                     }
                 }
-                interestScore = sum;          // 封顶交给模型（RankingProperties#interestScoreCap）
             }
         }
-        // 关键：传<b>原始计数</b>而不是预先算好的比率。比率一旦算出就把样本量信息丢了，
-        // 而"1 次曝光的 100%"与"万次曝光的 98%"必须能被区分——置信度平滑只有拿到原始
-        // 计数才做得了（见 LinearWeightedRankingModel）。
+        // 封顶交给模型（RankingProperties#interestScoreCap / #shortTermScoreCap）。
+        // 关键：传<b>原始计数</b>而不是预先算好的比率——置信度平滑只有拿到原始计数才做得了
+        // （见 LinearWeightedRankingModel）。短期层关闭时 shortInterest 恒为空 → shortTermScore=0。
         return rankingModel.score(new RankingFeatures(
                 s.recency(),
                 stat.impressions(), stat.playCompletes(), stat.likes(),
                 stat.comments(), stat.shares(), stat.dislikes(),
                 interestScore,
+                shortTermScore,
                 matchesNegative(s.item(), negative)));
     }
 

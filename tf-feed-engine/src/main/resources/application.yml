@@ -92,6 +92,20 @@ turbofeed:
         half-life-hours: 12        # 短期半衰期：半天不碰，这次突发兴趣衰减一半
         long-weight: 1.0           # 融合排序时长期层的相对权重
         short-weight: 2.0          # 融合排序时短期层的相对权重（>long 表示更看重最近）
+    # 精排打分（RankingModel）权重；全部带默认值，不强制改
+    rank:
+      completion-weight: 0.15        # 完播率目标权重
+      interaction-weight: 0.20       # 互动率目标权重（点赞/评论/分享，抖音式"互动即优质"）
+      interest-weight: 1.0          # 长期兴趣匹配权重
+      short-term-weight: 1.0        # 短期兴趣匹配权重（调大=更跟手、更看重最近行为）
+      interest-score-cap: 3.0       # 长期兴趣累加分上限
+      short-term-score-cap: 3.0     # 短期兴趣累加分上限
+      completion-prior-count: 20     # 完播率贝叶斯平滑：虚拟曝光数
+      completion-prior-rate: 0.20    # 完播率先验水平
+      interaction-prior-count: 20
+      interaction-prior-rate: 0.05
+      negative-penalty-millis: 2592000000   # 命中负向标签惩罚（30 天毫秒，远大于窗口）
+      recency-window-millis: 3600000  # 比率目标折算成等效入流时刻的窗口（1 小时）
     # M0 行为明细落盘（训练样本的唯一来源；实现见 logging.BehaviorLogSink）
     # ⚠️ 默认 false：落盘是"为了攒数据"的行为，不该在任何人的机器上静默写文件。
     #    需要采集时显式置 true，并自行负责磁盘占用与清理。
