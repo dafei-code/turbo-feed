@@ -34,6 +34,18 @@ public class RankingProperties {
     private double shortTermScoreCap = 3.0d;
 
     /**
+     * session 序列匹配目标权重（抖音式"刚看过的再多给"的跟手强度）。
+     *
+     * <p>与 {@link #shortTermWeight} 互补：短期层是"聚合后的突发偏好"，session 是"未聚合的局部强时效"。
+     * 调大本项 = 更强的即时跟随（刚连看 5 条钓鱼，下一条钓鱼立刻顶上来）；调小 = 更稳。
+     * session 关闭时该信号恒为 0，不影响其它目标。</p>
+     */
+    private double sessionWeight = 0.5d;
+
+    /** session 序列匹配分上限（与 {@link #interestScoreCap} 同口径）。 */
+    private double sessionScoreCap = 3.0d;
+
+    /**
      * 完播率的先验：相当于先给每条内容虚拟 {@code completionPriorCount} 次曝光，
      * 其中 {@code completionPriorRate} 比例完播。样本越少，结果越贴近这个先验。
      */
@@ -91,6 +103,22 @@ public class RankingProperties {
 
     public void setShortTermScoreCap(double shortTermScoreCap) {
         this.shortTermScoreCap = shortTermScoreCap;
+    }
+
+    public double getSessionWeight() {
+        return sessionWeight;
+    }
+
+    public void setSessionWeight(double sessionWeight) {
+        this.sessionWeight = sessionWeight;
+    }
+
+    public double getSessionScoreCap() {
+        return sessionScoreCap;
+    }
+
+    public void setSessionScoreCap(double sessionScoreCap) {
+        this.sessionScoreCap = sessionScoreCap;
     }
 
     public double getCompletionPriorCount() {

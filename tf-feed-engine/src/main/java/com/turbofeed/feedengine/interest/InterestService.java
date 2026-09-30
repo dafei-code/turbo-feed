@@ -374,6 +374,24 @@ public class InterestService {
     }
 
     /**
+     * 行为事件对应的画像权重（对外复用：session 序列据此决定"记不记、记多重"）。
+     *
+     * <p>语义与 {@link #accumulateFromEvent} 一致：负反馈（{@code NOT_INTERESTED}）、曝光、
+     * 划走等不计权的事件返回 0；正向外互动（看完/点赞/评论/分享）返回其权重。
+     * session 只收正向外互动，故调用方拿到 0 即跳过。</p>
+     */
+    public double eventWeight(FeedBehaviorEvent event) {
+        if (event == null || event.type() == null) {
+            return 0.0;
+        }
+        String type = event.type().toUpperCase();
+        if (NEGATIVE_TYPE.equals(type)) {
+            return 0.0;
+        }
+        return weightOf(type, event);
+    }
+
+    /**
      * 按观看进度折算权重：划走不计 / 看一半弱信号 / 看完强信号。
      *
      * <p><b>缺时长字段时按"看一半"处理</b>（弱信号）：宁可保守也不把未知当"看完"，

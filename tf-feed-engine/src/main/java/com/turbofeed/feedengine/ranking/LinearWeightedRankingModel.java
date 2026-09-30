@@ -55,11 +55,13 @@ public class LinearWeightedRankingModel implements RankingModel {
         long interactions = f.likes() + f.comments() + f.shares();
         double interaction = smooth(interactions, f.impressions(),
                 props.getInteractionPriorCount(), props.getInteractionPriorRate());
-        // 长期 + 短期双重兴趣信号：各自先封顶（防止单标签刷屏把权重推到离谱），再叠加。
-        // 短期层关闭 → shortTermMatch 恒为 0 → 退化为纯长期，与改造前语义一致。
+        // 长期 + 短期 + session 三重兴趣信号：各自先封顶（防止单标签刷屏把权重推到离谱），再叠加。
+        // 短期层 / session 关闭 → 对应分恒为 0 → 退化为纯长期，与改造前语义一致。
         double longInterest = Math.min(f.interestMatch(), props.getInterestScoreCap());
         double shortInterest = Math.min(f.shortTermMatch(), props.getShortTermScoreCap());
-        double interest = longInterest + props.getShortTermWeight() * shortInterest;
+        double sessionInterest = Math.min(f.sessionMatch(), props.getSessionScoreCap());
+        double interest = longInterest + props.getShortTermWeight() * shortInterest
+                + props.getSessionWeight() * sessionInterest;
         double window = props.getRecencyWindowMillis();
         return f.recencyMillis()
                 + window * (props.getCompletionWeight() * completion

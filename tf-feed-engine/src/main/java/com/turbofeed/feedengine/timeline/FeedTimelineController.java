@@ -4,6 +4,7 @@ import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.result.Result;
 import com.turbofeed.feedengine.interest.InterestService;
+import com.turbofeed.feedengine.interest.SessionSequenceService;
 import com.turbofeed.feedengine.logging.BehaviorLogSink;
 import com.turbofeed.feedengine.interest.TagIndexService;
 import lombok.RequiredArgsConstructor;
@@ -48,6 +49,7 @@ public class FeedTimelineController {
     private final PostStatService postStatService;
     private final TagIndexService tagIndexService;
     private final InterestService interestService;
+    private final SessionSequenceService sessionSequenceService;
     private final BehaviorLogSink behaviorLogSink;
 
     /**
@@ -125,6 +127,9 @@ public class FeedTimelineController {
                 // 同一时刻累积兴趣画像（fail-open）：埋点带 timelineKey 不带标签，
                 // InterestService 内部经 TagIndexService 反查该内容的标签再累加。
                 interestService.accumulateFromEvent(e);
+                // 同步记录 session 级最近互动序列（fail-open）：与画像共用同一权重口径，
+                // 供精排的"跟手"信号使用；负向/曝光等不计权事件（权重=0）自动不记。
+                sessionSequenceService.record(e.userId(), e.timelineKey(), interestService.eventWeight(e));
                 // M0：原始明细落盘（训练样本的唯一来源）。放在统计/画像之后——
                 // 前两者是线上效果依赖，落盘是离线优化依赖，绝不能反向拖住它们。
                 behaviorLogSink.log(e);

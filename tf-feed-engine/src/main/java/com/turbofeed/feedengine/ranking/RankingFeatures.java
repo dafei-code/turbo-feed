@@ -25,6 +25,10 @@ package com.turbofeed.feedengine.ranking;
  *                       短期层关闭时恒为 0）。与 {@code interestMatch} 同源标签、各自独立累加，
  *                       二者叠加即"长期偏好 + 当下追更"的双重信号——这是抖音式"你刚刷了一堆钓鱼，
  *                       现在就多给你钓鱼"的精排落地处（召回只解决"看不看得见"，精排才决定"排多前"）。
+ * @param sessionMatch   该内容标签与用户<b>最近互动序列</b>的匹配分（session 级 target-attention 最简形态：
+ *                       候选标签与你"刚看过/点过"的内容重合度 × 那些互动的时效权重之和）。
+ *                       session 关闭 / 冷 session 时为 0。它捕捉长期+短期画像都丢掉的<b>局部强时效</b>信号——
+ *                       "刚连着看了 5 条钓鱼"此刻就该多给钓鱼，即使长期画像里钓鱼权重不高。
  * @param negativeHit    是否命中该用户的负向标签（"不感兴趣"打压相似内容）
  */
 public record RankingFeatures(double recencyMillis,
@@ -36,5 +40,6 @@ public record RankingFeatures(double recencyMillis,
                               long dislikes,
                               double interestMatch,
                               double shortTermMatch,
+                              double sessionMatch,
                               boolean negativeHit) {
 }

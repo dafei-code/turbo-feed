@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.feedengine.interest.InterestService;
+import com.turbofeed.feedengine.interest.SessionSequenceService;
 import com.turbofeed.feedengine.ranking.RankingFeatures;
 import com.turbofeed.feedengine.ranking.RankingModel;
 import lombok.RequiredArgsConstructor;
@@ -76,8 +77,12 @@ public class FeedTimelineStore {
     private final ObjectMapper objectMapper;
     /** 参与排序的兴趣标签取 TopN（控制 HGETALL 后排序成本，且避免长尾标签噪声）。 */
     private static final int INTEREST_TOP_N = 30;
+    /** 参与排序的 session 序列取最近 N 条（窗口大小；与画像 TopN 解耦）。 */
+    private static final int SESSION_TOP_N = 20;
     private final PostStatService postStatService;
     private final InterestService interestService;
+    /** session 级行为序列（最近互动），用于精排的"跟手"信号（见 {@link SessionSequenceService}）。 */
+    private final SessionSequenceService sessionSequenceService;
     /**
      * 精排打分器（可插拔）。打分从本类抽到 {@link RankingModel}：读路径只负责"取候选 + 组装特征"，
      * 怎么打分由模型决定——将来换双塔 / 精排模型或接远程推理，都不必再动这段最热的读代码。
@@ -229,6 +234,9 @@ public class FeedTimelineStore {
                 ? Map.of() : interestService.weightedTags(userId, INTEREST_TOP_N);
         Map<String, Double> shortInterest = (userId == null || !interestService.hasInterest(userId))
                 ? Map.of() : interestService.shortTermTags(userId, INTEREST_TOP_N);
+        // session 级最近互动序列（一次取出，scoreOf 内逐候选复用，避免每个候选各查一次 Redis）。
+        List<SessionSequenceService.SessionItem> session = (userId == null)
+                ? List.of() : sessionSequenceService.recent(userId, SESSION_TOP_N);
         // 负向标签（抖音式「不感兴趣 → 对该用户打压同标签内容」）。匿名 / 无负反馈为空集，
         // 与画像解耦：即使该用户画像为空（冷启动）也照样生效——负反馈不需要先有正反馈。
         Set<String> negative = interestService.negativeTags(userId);
@@ -332,8 +340,8 @@ public class FeedTimelineStore {
             }
             // 个性化位内部仍按精排分排序：召回只保证"这类内容进得来"，
             // 不保证"质量差的也往前放"——排序权交给 RankingModel。
-            interestPart.sort((a, b) -> Double.compare(scoreOf(b, interest, shortInterest, negative),
-                    scoreOf(a, interest, shortInterest, negative)));
+            interestPart.sort((a, b) -> Double.compare(scoreOf(b, interest, shortInterest, session, negative),
+                    scoreOf(a, interest, shortInterest, session, negative)));
         }
 
         Map<Integer, List<FeedItemView>> parsed = new LinkedHashMap<>();
@@ -395,8 +403,8 @@ public class FeedTimelineStore {
             // 精排：统一交给 RankingModel。原先这里有一个"各加权项全为 0 就跳过排序"的开关，
             // 现在权重默认非 0 且排序对象是页级切片（≤ 页大小），成本可忽略，故恒重排——
             // 少一个分支就少一处"权重配置错了却以为在排序"的静默分歧。
-            slice.sort((a, b) -> Double.compare(scoreOf(b, interest, shortInterest, negative),
-                    scoreOf(a, interest, shortInterest, negative)));
+            slice.sort((a, b) -> Double.compare(scoreOf(b, interest, shortInterest, session, negative),
+                    scoreOf(a, interest, shortInterest, session, negative)));
             poolPart.addAll(slice);
         }
         if (diversityWindow > 0) {
@@ -452,7 +460,8 @@ public class FeedTimelineStore {
      * 而不是朴素比率的 0 分，新内容不至于被一次性地压到队尾。</p>
      */
     private double scoreOf(ScoredItem s, Map<String, Double> interest,
-                            Map<String, Double> shortInterest, Set<String> negative) {
+                            Map<String, Double> shortInterest,
+                            List<SessionSequenceService.SessionItem> session, Set<String> negative) {
         PostStatService.PostStat stat = new PostStatService.PostStat(0, 0, 0, 0, 0, 0);
         try {
             stat = postStatService.snapshot(s.item().timelineKey());
@@ -476,15 +485,37 @@ public class FeedTimelineStore {
                 }
             }
         }
-        // 封顶交给模型（RankingProperties#interestScoreCap / #shortTermScoreCap）。
+        // session 级 attention：候选标签与"最近互动过的内容"重合度 × 那些互动的时效权重之和。
+        // 每条 session 互动按 (重合标签数 / 候选标签数) 归一化到 [0,1]，再乘其 recency 权重，
+        // 多条约 Recent 互动累加——这正是 target-attention 的最简形态（无 embedding、纯标签重叠）。
+        double sessionMatch = 0d;
+        List<String> ctags = s.item().tags();
+        if (ctags != null && !ctags.isEmpty() && !session.isEmpty()) {
+            for (SessionSequenceService.SessionItem it : session) {
+                if (it.tags() == null || it.tags().isEmpty()) {
+                    continue;
+                }
+                int hit = 0;
+                for (String t : ctags) {
+                    if (it.tags().contains(t)) {
+                        hit++;
+                    }
+                }
+                if (hit > 0) {
+                    sessionMatch += it.recencyWeight() * ((double) hit / ctags.size());
+                }
+            }
+        }
+        // 封顶交给模型（RankingProperties#interestScoreCap / #shortTermScoreCap / #sessionScoreCap）。
         // 关键：传<b>原始计数</b>而不是预先算好的比率——置信度平滑只有拿到原始计数才做得了
-        // （见 LinearWeightedRankingModel）。短期层关闭时 shortInterest 恒为空 → shortTermScore=0。
+        // （见 LinearWeightedRankingModel）。短期层/session 关闭时对应分恒为 0。
         return rankingModel.score(new RankingFeatures(
                 s.recency(),
                 stat.impressions(), stat.playCompletes(), stat.likes(),
                 stat.comments(), stat.shares(), stat.dislikes(),
                 interestScore,
                 shortTermScore,
+                sessionMatch,
                 matchesNegative(s.item(), negative)));
     }
 

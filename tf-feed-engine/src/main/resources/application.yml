@@ -92,14 +92,22 @@ turbofeed:
         half-life-hours: 12        # 短期半衰期：半天不碰，这次突发兴趣衰减一半
         long-weight: 1.0           # 融合排序时长期层的相对权重
         short-weight: 2.0          # 融合排序时短期层的相对权重（>long 表示更看重最近）
+    # session 级行为序列（抖音式"刚看过的再多给"的精排信号源）
+    session:
+      enabled: true                # 关闭后退化无 session 信号，精排回到纯画像+统计
+      max: 30                       # 序列窗口保留的最大互动条数
+      ttl-minutes: 120             # 整份序列 TTL（用户停手这么久即清掉）
+      half-life-minutes: 30        # 序列内单条互动的 recency 半衰期（越久影响越小）
     # 精排打分（RankingModel）权重；全部带默认值，不强制改
     rank:
       completion-weight: 0.15        # 完播率目标权重
       interaction-weight: 0.20       # 互动率目标权重（点赞/评论/分享，抖音式"互动即优质"）
       interest-weight: 1.0          # 长期兴趣匹配权重
       short-term-weight: 1.0        # 短期兴趣匹配权重（调大=更跟手、更看重最近行为）
+      session-weight: 0.5           # session 序列匹配权重（调大=更强的即时跟随）
       interest-score-cap: 3.0       # 长期兴趣累加分上限
       short-term-score-cap: 3.0     # 短期兴趣累加分上限
+      session-score-cap: 3.0        # session 序列匹配分上限
       completion-prior-count: 20     # 完播率贝叶斯平滑：虚拟曝光数
       completion-prior-rate: 0.20    # 完播率先验水平
       interaction-prior-count: 20
