@@ -432,18 +432,19 @@ public class MediaJdbcRepository {
             return null;
         }
         List<PostRepresentative> rows = jdbcTemplate.query(
-                "SELECT media_id, user_id, status FROM media WHERE post_id = ? AND " + REPRESENTATIVE_CONDITION
+                "SELECT media_id, user_id, status, url FROM media WHERE post_id = ? AND " + REPRESENTATIVE_CONDITION
                         + " LIMIT 1",
                 (rs, rn) -> new PostRepresentative(
                         rs.getString("media_id"),
                         rs.getLong("user_id"),
-                        toStatus(rs.getInt("status"))),
+                        toStatus(rs.getInt("status")),
+                        rs.getString("url")),
                 postId);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    /** 帖代表行解析结果（postId → 代表 media_id + 归属 user_id + 当前状态）。 */
-    public record PostRepresentative(String mediaId, long authorId, MediaStatus status) {
+    /** 帖代表行解析结果（postId → 代表 media_id + 归属 user_id + 当前状态 + 封面 url）。 */
+    public record PostRepresentative(String mediaId, long authorId, MediaStatus status, String url) {
     }
 
     /**

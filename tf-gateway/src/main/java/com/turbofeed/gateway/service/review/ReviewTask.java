@@ -15,6 +15,12 @@ import java.time.Instant;
  * {@link #TYPE_REPORT_ACCUMULATED}（举报累计）之外新增 {@link #TYPE_HEAT_ACCUMULATED}
  * （正向互动累计达阈值）。两者共用同一条队列与 {@code decideReviewTask} 二次研判流程，
  * REVIEWER 在队列里按 {@code taskType} 区分来源。</p>
+ *
+ * <p><b>第 3 档（changelog 0067，抖音式「流量池分级 / 越火审得越严」）</b>：内容晋级到更高
+ * 流量池时，引擎回调网关新增 {@link #TYPE_POOL_PROMOTED}（池级晋级加严）。同样复用同一条队列
+ * 与 {@code decideReviewTask} 二次研判：机审复扫命中直接下架（见 {@code MediaReviewService#onPoolPromoted}），
+ * 每次晋级再建一条 POOL_PROMOTED 任务交 REVIEWER 人工复核，并把该帖热度复审阈值按池级收紧
+ * （L1=1000/L2=500/L3=200），使更高池更快触发 HEAT_ACCUMULATED。</p>
  */
 public record ReviewTask(
         long id,
@@ -37,4 +43,7 @@ public record ReviewTask(
 
     /** 触发类型：正向互动（点赞+评论+转发）累计达到热度阈值（抖音式「越火审得越严」）。 */
     public static final String TYPE_HEAT_ACCUMULATED = "HEAT_ACCUMULATED";
+
+    /** 触发类型：内容晋级到更高流量池时的加严复审（抖音式「流量池分级 / 越火审得越严」，changelog 0067）。 */
+    public static final String TYPE_POOL_PROMOTED = "POOL_PROMOTED";
 }

@@ -462,6 +462,17 @@ public class MediaProperties {
          */
         private int heatReReviewThreshold = 1000;
 
+        /**
+         * 流量池分级热度复审阈值（抖音式「流量池分级」第3档，changelog 0067）：
+         * 内容晋级到更高池后，其热度复审阈值按池级<b>收紧</b>——池越高、阈值越低（越火审得越严）。
+         * 默认 L1=1000 / L2=500 / L3=200（与全局热度阈值 {@link #heatReReviewThreshold} 同量级、随池递减）。
+         * 写入每帖覆盖键 {@code tf:media:heat-threshold:{postId}}，{@code MediaReviewService#onInteraction}
+         * 累计热度时优先读该覆盖值，使更高池更快触发 {@code HEAT_ACCUMULATED} 复审。
+         */
+        private int poolHeatThresholdL1 = 1000;
+        private int poolHeatThresholdL2 = 500;
+        private int poolHeatThresholdL3 = 200;
+
         public int getNewUserApproveThreshold() {
             return newUserApproveThreshold;
         }
@@ -540,6 +551,30 @@ public class MediaProperties {
 
         public void setHeatReReviewThreshold(int heatReReviewThreshold) {
             this.heatReReviewThreshold = heatReReviewThreshold;
+        }
+
+        public int getPoolHeatThresholdL1() {
+            return poolHeatThresholdL1;
+        }
+
+        public void setPoolHeatThresholdL1(int poolHeatThresholdL1) {
+            this.poolHeatThresholdL1 = poolHeatThresholdL1;
+        }
+
+        public int getPoolHeatThresholdL2() {
+            return poolHeatThresholdL2;
+        }
+
+        public void setPoolHeatThresholdL2(int poolHeatThresholdL2) {
+            this.poolHeatThresholdL2 = poolHeatThresholdL2;
+        }
+
+        public int getPoolHeatThresholdL3() {
+            return poolHeatThresholdL3;
+        }
+
+        public void setPoolHeatThresholdL3(int poolHeatThresholdL3) {
+            this.poolHeatThresholdL3 = poolHeatThresholdL3;
         }
 
         public boolean isAutoPass() {

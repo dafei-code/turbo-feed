@@ -6,6 +6,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import com.turbofeed.feedengine.client.GatewayReviewClient;
+
 import java.util.Set;
 
 /**
@@ -43,17 +45,21 @@ public class FeedPoolPromoter {
     private final RecommendedFeedService recommendedFeedService;
     private final StringRedisTemplate redisTemplate;
     private final FeedPoolPromoterProperties props;
+    /** 流量池分级加严回调客户端（Tier3，changelog 0067）：晋级时通知网关三件套加严。fail-open。 */
+    private final GatewayReviewClient gatewayClient;
 
     public FeedPoolPromoter(PostStatService statService,
                             FeedTimelineStore timelineStore,
                             RecommendedFeedService recommendedFeedService,
                             StringRedisTemplate redisTemplate,
-                            FeedPoolPromoterProperties props) {
+                            FeedPoolPromoterProperties props,
+                            GatewayReviewClient gatewayClient) {
         this.statService = statService;
         this.timelineStore = timelineStore;
         this.recommendedFeedService = recommendedFeedService;
         this.redisTemplate = redisTemplate;
         this.props = props;
+        this.gatewayClient = gatewayClient;
     }
 
     /** 周期性扫描待评估集合，按互动率晋级（默认 30s，可配 {@code turbofeed.feed.promoter-interval-ms}）。 */
@@ -95,6 +101,15 @@ public class FeedPoolPromoter {
                     recommendedFeedService.invalidate();
                     log.info("流量池晋级: timelineKey={}, {}→{} (impressions={}, rate={})",
                             timelineKey, cur, target, stat.impressions(), interactionRate(stat));
+                    // 抖音式「流量池分级」(Tier3, changelog 0067)：晋级回调网关加严复审
+                    // （机审复扫 + 建 POOL_PROMOTED 复审任务 + 按池级收紧热度阈值）。
+                    // 客户端 fail-open，绝不阻断晋级主流程；晋级已在引擎侧完成。
+                    try {
+                        gatewayClient.notifyPoolPromoted(timelineKey, cur, target);
+                    } catch (Exception e) {
+                        log.warn("晋级回调网关失败（不影响晋级主流程）: timelineKey={}, {}→{}: {}",
+                                timelineKey, cur, target, e.getMessage());
+                    }
                 }
                 if (target >= FeedTimelineStore.MAX_POOL_LEVELS) {
                     redisTemplate.opsForSet().remove(PostStatService.TRACKED_KEY, timelineKey);

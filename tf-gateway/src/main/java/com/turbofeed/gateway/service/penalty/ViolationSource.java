@@ -12,7 +12,9 @@ public enum ViolationSource {
     /** 人工审核。 */
     HUMAN_REVIEW(3),
     /** 申诉翻案（用于回滚/修正，不应再升级）。 */
-    APPEAL_OVERTURN(4);
+    APPEAL_OVERTURN(4),
+    /** 流量池晋级加严复扫命中（已发布走红内容被机审复扫拦下，changelog 0067）。 */
+    POOL_PROMOTED(5);
 
     private final int code;
 

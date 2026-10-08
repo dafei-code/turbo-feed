@@ -124,3 +124,10 @@ turbofeed:
       # 异步队列容量：满了直接丢弃并计数（埋点丢得起，请求卡不起）
       queue-capacity: 10000
       flush-interval-millis: 1000
+  # 网关地址（引擎晋级回调「流量池分级」加严复审用，changelog 0067）。默认直连本地 8080。
+  # 引入 Nacos 服务发现 + LoadBalancer 后，此项退化兜底/调试用（与 turbofeed.feed.engine 同构）。
+  gateway:
+    base-url: ${TURBOFEED_GATEWAY_BASE_URL:http://localhost:8080}
+    # 同步调用必须设超时（毫秒）：网关故障时若无限等待，扫描线程会被慢调用拖垮（雪崩入口）
+    connect-timeout-ms: 500
+    read-timeout-ms: 2000
