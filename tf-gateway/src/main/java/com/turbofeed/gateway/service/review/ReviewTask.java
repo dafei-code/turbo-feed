@@ -10,6 +10,11 @@ import java.time.Instant;
  *
  * <p>单表（ds_0，{@code review_task}），不按 media_id 分片——它是管理员视角的聚合队列，
  * 按 status 扫描全貌比按 media 点查更重要（仿 outbox_event 的 SINGLE 取舍）。</p>
+ *
+ * <p><b>第 2 档（changelog 0066，抖音式「热度阈值复审 / 越火审得越严」）</b>：在
+ * {@link #TYPE_REPORT_ACCUMULATED}（举报累计）之外新增 {@link #TYPE_HEAT_ACCUMULATED}
+ * （正向互动累计达阈值）。两者共用同一条队列与 {@code decideReviewTask} 二次研判流程，
+ * REVIEWER 在队列里按 {@code taskType} 区分来源。</p>
  */
 public record ReviewTask(
         long id,
@@ -29,4 +34,7 @@ public record ReviewTask(
 
     /** 触发类型：举报累计达到阈值。 */
     public static final String TYPE_REPORT_ACCUMULATED = "REPORT_ACCUMULATED";
+
+    /** 触发类型：正向互动（点赞+评论+转发）累计达到热度阈值（抖音式「越火审得越严」）。 */
+    public static final String TYPE_HEAT_ACCUMULATED = "HEAT_ACCUMULATED";
 }

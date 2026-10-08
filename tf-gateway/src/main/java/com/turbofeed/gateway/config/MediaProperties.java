@@ -452,6 +452,16 @@ public class MediaProperties {
          */
         private int reportReReviewThreshold = 3;
 
+        /**
+         * 热度阈值复审阈值（抖音式「越火审得越严」，changelog 0066）：
+         * 同一内容的正向互动（点赞+评论+转发）经 Redis 累计达到该值，且内容仍处于已发布态，
+         * 自动建一条 PENDING 复审任务（{@code HEAT_ACCUMULATED}）归 REVIEWER 二次研判。默认 1000。
+         *
+         * <p>设计取舍：与「举报累计」同构——单个赞/评论不立即拉人工，累计达阈值才升级，
+         * 与抖音「越火的内容审得越严」一致；阈值外部化（{@code turbofeed.media.review.heat-re-review-threshold}），调参不发黑。</p>
+         */
+        private int heatReReviewThreshold = 1000;
+
         public int getNewUserApproveThreshold() {
             return newUserApproveThreshold;
         }
@@ -522,6 +532,14 @@ public class MediaProperties {
 
         public void setReportReReviewThreshold(int reportReReviewThreshold) {
             this.reportReReviewThreshold = reportReReviewThreshold;
+        }
+
+        public int getHeatReReviewThreshold() {
+            return heatReReviewThreshold;
+        }
+
+        public void setHeatReReviewThreshold(int heatReReviewThreshold) {
+            this.heatReReviewThreshold = heatReReviewThreshold;
         }
 
         public boolean isAutoPass() {

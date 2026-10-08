@@ -5,6 +5,7 @@ import com.turbofeed.gateway.security.RequirePermission;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.feed.BehaviorEventPublisher;
 import com.turbofeed.gateway.service.feed.BehaviorReport;
+import com.turbofeed.gateway.service.review.MediaReviewService;
 import com.turbofeed.shared.result.Result;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -22,15 +23,22 @@ import java.util.List;
  *
  * <p><b>权限</b>：{@link Permission#FEED_INTERACT}，授予所有登录用户（{@code USER} 角色即具备）。
  * 失败 fail-open，绝不阻断浏览/互动主流程。</p>
+ *
+ * <p><b>热度复审旁路（changelog 0066 抖音式「越火审得越严」）</b>：对批内<b>正向互动</b>
+ * （{@code LIKE/COMMENT/SHARE}）逐条触发 {@link MediaReviewService#onInteraction}，由审核服务
+ * 在 Redis 累计热度、达阈值时自动建 {@code HEAT_ACCUMULATED} 复审任务。该调用内部 fail-open，
+ * 任何异常都不影响本接口的发布主流程。</p>
  */
 @RestController
 @RequestMapping("/api/feed")
 public class FeedBehaviorController {
 
     private final BehaviorEventPublisher publisher;
+    private final MediaReviewService reviewService;
 
-    public FeedBehaviorController(BehaviorEventPublisher publisher) {
+    public FeedBehaviorController(BehaviorEventPublisher publisher, MediaReviewService reviewService) {
         this.publisher = publisher;
+        this.reviewService = reviewService;
     }
 
     /**
@@ -45,6 +53,12 @@ public class FeedBehaviorController {
     @RequirePermission(Permission.FEED_INTERACT)
     public Result<Void> report(@RequestBody List<BehaviorReport> reports) {
         publisher.report(reports, UserContextHolder.requireUserId());
+        // 热度复审旁路：逐条正向互动计入热度（fail-open，异常不阻断发布主流程）。
+        if (reports != null) {
+            for (BehaviorReport r : reports) {
+                reviewService.onInteraction(r.postId(), r.type());
+            }
+        }
         return Result.ok();
     }
 }

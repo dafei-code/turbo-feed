@@ -415,6 +415,38 @@ public class MediaJdbcRepository {
     }
 
     /**
+     * 帖代表行解析（postId → 代表 media_id + 归属 user_id + 当前状态）。
+     *
+     * <p><b>用途</b>：行为上报链路只携带 {@code postId}（帖身份），而审核/复审任务以
+     * 代表行 {@code media_id} 为对象（整帖一审语义）。本方法把 postId 解析回代表行，
+     * 供「热度阈值复审」（changelog 0066）建任务时使用。</p>
+     *
+     * <p><b>分片路由</b>：{@code post_id} 不是分片键，本查询会广播到全部分片；但 {@code post_id}
+     * 由上传时生成的雪花 UUID 保证全局唯一，结果至多一行，属「高基数列点查」而非范围扫，
+     * 演示/小数据量下开销可控（生产公域路径应由异构索引承载，与此同源）。</p>
+     *
+     * @return 代表行解析结果；postId 不存在时返回 {@code null}
+     */
+    public PostRepresentative findRepresentativeByPostId(String postId) {
+        if (postId == null || postId.isBlank()) {
+            return null;
+        }
+        List<PostRepresentative> rows = jdbcTemplate.query(
+                "SELECT media_id, user_id, status FROM media WHERE post_id = ? AND " + REPRESENTATIVE_CONDITION
+                        + " LIMIT 1",
+                (rs, rn) -> new PostRepresentative(
+                        rs.getString("media_id"),
+                        rs.getLong("user_id"),
+                        toStatus(rs.getInt("status"))),
+                postId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /** 帖代表行解析结果（postId → 代表 media_id + 归属 user_id + 当前状态）。 */
+    public record PostRepresentative(String mediaId, long authorId, MediaStatus status) {
+    }
+
+    /**
      * 查询单条内容状态。带 user_id 分片键精准路由；未查到返回 {@code null}
      * （调用方按 PENDING 处理，对应「已受理但审核事件未到」的中间态）。
      *

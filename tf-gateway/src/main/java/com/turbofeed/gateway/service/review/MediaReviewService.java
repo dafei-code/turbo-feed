@@ -30,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -66,6 +67,12 @@ public class MediaReviewService {
     private static final Logger log = LoggerFactory.getLogger(MediaReviewService.class);
 
     private static final String STATUS_KEY_PREFIX = "tf:media:status:";
+
+    /** 热度累计计数键前缀（抖音式「越火审得越严」，changelog 0066）。键为 postId（帖身份）。 */
+    private static final String HEAT_KEY_PREFIX = "tf:media:heat:";
+
+    /** 正向互动类型（行为上报 type 取值）：点赞/评论/转发，计作热度。 */
+    private static final Set<String> POSITIVE_INTERACTIONS = Set.of("LIKE", "COMMENT", "SHARE");
 
     private final MediaJdbcRepository mediaRepository;
     private final MediaTagJdbcRepository mediaTagRepository;
@@ -374,6 +381,63 @@ public class MediaReviewService {
         reviewTaskRepository.insert(mediaId, authorId, ReviewTask.TYPE_REPORT_ACCUMULATED, pending);
         log.info("举报累计达阈值，自动建复审任务（REVIEWER 二次研判）: mediaId={}, pendingReports={}, threshold={}",
                 mediaId, pending, properties.getReview().getReportReReviewThreshold());
+    }
+
+    /**
+     * 行为上报侧的热度累计与复审触发（抖音式「越火审得越严」，changelog 0066）。
+     *
+     * <p>对正向互动（{@code LIKE/COMMENT/SHARE}）累加 Redis 计数 {@code tf:media:heat:{postId}}；
+     * 当计数<b>恰好跨过</b>阈值、且内容仍 {@code APPROVED}、且无未决复审任务时，
+     * 自动建一条 {@code HEAT_ACCUMULATED} 复审任务归 REVIEWER 二次研判（复用第 1 档队列与
+     * {@link #decideReviewTask}）。</p>
+     *
+     * <p><b>fail-open</b>：本方法绝不阻断用户的互动/浏览主流程——任何异常（Redis 抖动、DB 解析失败）
+     * 都仅记日志并返回，不影响 {@code BehaviorEventPublisher} 的事件发布。</p>
+     *
+     * <p><b>为什么只在「恰好跨过阈值」时触发</b>：用 {@code INCR} 返回值与阈值<b>相等</b>才建单，
+     * 保证一次病毒式走红只触发一次复审（并发 INCR 也至多一个请求命中阈值，其余得 {@code >} 阈值），
+     * 避免重复建单；任务维持发布后计数已 {@code >} 阈值，后续互动不再触发（除非内容被下架后又恢复、
+     * 计数重新逼近阈值），契合「一次走红、一次加严复审」语义，无需额外状态。</p>
+     */
+    public void onInteraction(String postId, String type) {
+        if (postId == null || postId.isBlank() || type == null) {
+            return;
+        }
+        if (!POSITIVE_INTERACTIONS.contains(type.toUpperCase(Locale.ROOT))) {
+            return; // 仅正向互动计入热度（曝光/完播/不感兴趣等不触发）
+        }
+        try {
+            String key = HEAT_KEY_PREFIX + postId;
+            Long count = redisTemplate.opsForValue().increment(key);
+            if (count == null) {
+                return;
+            }
+            if (count == properties.getReview().getHeatReReviewThreshold()) {
+                maybeEscalateToReviewTaskByHeat(postId, count.intValue());
+            }
+        } catch (Exception e) {
+            log.warn("热度累计/复审触发失败（不影响互动主流程）: postId={}, type={}, {}", postId, type, e.getMessage());
+        }
+    }
+
+    /**
+     * 热度达阈值 → 自动建一条 {@code HEAT_ACCUMULATED} 复审任务（抖音式「越火审得越严」）。
+     *
+     * <p>行为上报只携带 {@code postId}（帖身份），本方法先把它解析回代表行
+     * {@code media_id} + 归属 {@code authorId}（{@link MediaJdbcRepository#findRepresentativeByPostId}），
+     * 再仅在内容仍已发布、且无未决任务时建单；REVIEWER 在 {@link #decideReviewTask} 二次研判。</p>
+     */
+    private void maybeEscalateToReviewTaskByHeat(String postId, int heat) {
+        MediaJdbcRepository.PostRepresentative rep = mediaRepository.findRepresentativeByPostId(postId);
+        if (rep == null || rep.status() != MediaStatus.APPROVED) {
+            return; // 帖不存在或已不在公域（下架/申诉中），不再建复审任务
+        }
+        if (reviewTaskRepository.existsOpenForMedia(rep.mediaId())) {
+            return; // 已有待复审任务，避免重复建单
+        }
+        reviewTaskRepository.insert(rep.mediaId(), rep.authorId(), ReviewTask.TYPE_HEAT_ACCUMULATED, heat);
+        log.info("热度累计达阈值，自动建复审任务(HEAT_ACCUMULATED，REVIEWER 二次研判): postId={}, mediaId={}, heat={}, threshold={}",
+                postId, rep.mediaId(), heat, properties.getReview().getHeatReReviewThreshold());
     }
 
     /**
