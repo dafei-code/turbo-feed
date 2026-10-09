@@ -46,4 +46,7 @@ public record ReviewTask(
 
     /** 触发类型：内容晋级到更高流量池时的加严复审（抖音式「流量池分级 / 越火审得越严」，changelog 0067）。 */
     public static final String TYPE_POOL_PROMOTED = "POOL_PROMOTED";
+
+    /** 触发类型：评论区速率/聚集异常（#133 评论区风控）：评论区爆发或单账号刷评时进 REVIEWER 巡查队列，仅标记巡查、不下架内容。 */
+    public static final String TYPE_COMMENT_ANOMALY = "COMMENT_ANOMALY";
 }

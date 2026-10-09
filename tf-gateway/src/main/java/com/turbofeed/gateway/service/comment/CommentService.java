@@ -4,8 +4,13 @@ import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.service.moderation.ContentScene;
 import com.turbofeed.gateway.service.moderation.ContentSecurityService;
 import com.turbofeed.gateway.util.SnowflakeIdGenerator;
+import com.turbofeed.gateway.config.MediaProperties;
+import com.turbofeed.gateway.repository.ReviewTaskRepository;
+import com.turbofeed.gateway.service.review.ReviewTask;
 import com.turbofeed.shared.result.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -35,10 +40,18 @@ import java.util.List;
 @RequiredArgsConstructor
 public class CommentService {
 
+    private static final Logger log = LoggerFactory.getLogger(CommentService.class);
+
     private final CommentJdbcRepository commentRepository;
     private final ContentSecurityService contentSecurityService;
     /** 雪花 ID 生成器由 {@code SnowflakeConfig} 装配（workerId/datacenterId 必须逐实例区分）。 */
     private final SnowflakeIdGenerator snowflakeIdGenerator;
+    /** 评论区异常感知（P1 #133）：速率/聚集异常检测，fail-open。 */
+    private final CommentRiskService commentRiskService;
+    /** 复审任务仓储（进 COMMENT_ANOMALY 巡查队列，复用 review_task 单表）。 */
+    private final ReviewTaskRepository reviewTaskRepository;
+    /** 评论区风控配置（turbofeed.media.comment-risk.*）。 */
+    private final MediaProperties properties;
 
     /**
      * 发布评论（顶层或回复）。
@@ -60,6 +73,12 @@ public class CommentService {
         // 长度上限 + 敏感词（含归一化抗绕过与白名单豁免）
         contentSecurityService.requireClean(ContentScene.COMMENT, content, userId);
 
+        // #133 评论区异常感知（速率/聚集）：先过风险检测再落库
+        CommentRiskService.Assessment risk = commentRiskService.assess(mediaId, userId);
+        if (risk.level() == CommentRiskService.RiskLevel.USER_THROTTLED) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "评论过于频繁，请稍后再试");
+        }
+
         long rootId;
         if (parentId == 0) {
             rootId = 0; // 顶层
@@ -71,10 +90,20 @@ public class CommentService {
         }
 
         long commentId = snowflakeIdGenerator.nextId();
+        // #133：速率异常且开启折叠 → 该评论 FOLDED（前端默认不展示），否则 APPROVED
+        boolean spikeFold = risk.level() == CommentRiskService.RiskLevel.CONTENT_SPIKE
+                && properties.getCommentRisk().isFoldOnSpike();
+        CommentStatus status = spikeFold ? CommentStatus.FOLDED : CommentStatus.APPROVED;
         Comment c = new Comment(
                 commentId, mediaId, userId, rootId, parentId, content,
-                CommentStatus.APPROVED, 0, Instant.now());
+                status, 0, Instant.now());
         commentRepository.insert(c);
+        // #133：评论区速率异常 → 进 REVIEWER 巡查队列（仅巡查，不下架内容），防重复建单
+        if (spikeFold && !reviewTaskRepository.existsOpenForMedia(mediaId)) {
+            reviewTaskRepository.insert(mediaId, userId, ReviewTask.TYPE_COMMENT_ANOMALY,
+                    (int) Math.min(risk.rateCount(), Integer.MAX_VALUE));
+            log.info("评论区速率异常→建巡查任务(COMMENT_ANOMALY，REVIEWER 二次研判): mediaId={}, rateCount={}", mediaId, risk.rateCount());
+        }
         return c;
     }
 

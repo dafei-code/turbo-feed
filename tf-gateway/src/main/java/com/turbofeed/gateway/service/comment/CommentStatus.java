@@ -17,7 +17,9 @@ public enum CommentStatus {
     PENDING(0),
     APPROVED(1),
     REJECTED(2),
-    DELETED(3);
+    DELETED(3),
+    /** 异常感知自动折叠（#133 评论区风控）：评论区速率/聚集异常时落此态，前端默认不展示，运营可在巡查任务展开/解折叠。 */
+    FOLDED(4);
 
     private final int code;
 
@@ -34,6 +36,7 @@ public enum CommentStatus {
             case 1 -> APPROVED;
             case 2 -> REJECTED;
             case 3 -> DELETED;
+            case 4 -> FOLDED;
             default -> PENDING;
         };
     }

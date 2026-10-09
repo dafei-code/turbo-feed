@@ -18,6 +18,7 @@ import com.turbofeed.gateway.service.idempotency.UploadIdempotency;
 import com.turbofeed.gateway.service.moderation.ContentScene;
 import com.turbofeed.gateway.service.moderation.ContentSecurityService;
 import com.turbofeed.gateway.service.penalty.PenaltyService;
+import com.turbofeed.gateway.service.health.AccountHealthService;
 import com.turbofeed.gateway.service.presign.PresignRequest;
 import com.turbofeed.gateway.service.presign.PresignResponse;
 import com.turbofeed.gateway.service.presign.UploadAccepted;
@@ -105,6 +106,8 @@ public class MediaUploadService {
     private final UploadReservationStore reservationStore;
     private final MediaUploadFinalizer uploadFinalizer;
     private final PenaltyService penaltyService;
+    /** 账号健康分（P0-b）：写路径闸门叠加健康分阶梯（限投稿/封禁）。 */
+    private final AccountHealthService accountHealthService;
 
     /**
      * 构造器注入（原为 {@code @RequiredArgsConstructor}）。
@@ -128,7 +131,8 @@ public class MediaUploadService {
                               UploadReservationStore reservationStore,
                               MediaUploadFinalizer uploadFinalizer,
                               PenaltyService penaltyService,
-                              OutboxService outboxService) {
+                              OutboxService outboxService,
+                              AccountHealthService accountHealthService) {
         this.properties = properties;
         this.storageClient = storageClient;
         this.eventPublisher = eventPublisher;
@@ -144,6 +148,7 @@ public class MediaUploadService {
         this.uploadFinalizer = uploadFinalizer;
         this.penaltyService = penaltyService;
         this.outboxService = outboxService;
+        this.accountHealthService = accountHealthService;
     }
 
     /** 单条状态缓存前缀（与 MediaReviewService 一致，删除时精确失效） */
@@ -208,6 +213,13 @@ public class MediaUploadService {
     private void requireWritable(long userId) {
         if (!penaltyService.canWrite(userId)) {
             throw new BizException(ErrorCode.FORBIDDEN, "账号已被封禁，暂不能发布内容");
+        }
+        // P0-b 健康分阶梯：归零即硬封；< 60 限投稿（对齐抖音「先流量隔离，后硬性封禁」）。
+        if (accountHealthService.isBanned(userId)) {
+            throw new BizException(ErrorCode.FORBIDDEN, "账号健康分归零，已被封禁");
+        }
+        if (!accountHealthService.canSubmit(userId)) {
+            throw new BizException(ErrorCode.FORBIDDEN, "账号健康分不足，暂不能发布内容");
         }
     }
 

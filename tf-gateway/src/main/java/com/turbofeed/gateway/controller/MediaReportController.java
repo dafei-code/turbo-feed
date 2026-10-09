@@ -1,6 +1,7 @@
 package com.turbofeed.gateway.controller;
 
 import com.turbofeed.gateway.security.UserContextHolder;
+import com.turbofeed.gateway.service.penalty.ViolationCategory;
 import com.turbofeed.gateway.service.review.MediaReviewService;
 import com.turbofeed.shared.result.Result;
 import lombok.RequiredArgsConstructor;
@@ -25,15 +26,24 @@ public class MediaReportController {
     private final MediaReviewService reviewService;
 
     /**
-     * 举报已发布内容（reason：涉黄/低俗/暴力/广告/侵权/其他 等）。
+     * 举报已发布内容（reason：自由文本；category：举报类目编码，见 ViolationCategory，可选）。
+     * P1-1：category 驱动「同类举报累计」升级与类目级高危立即下架；缺省/非法→OTHER 兜底。
      * 高危类目由服务侧立即下架；普通举报进人工队列。
      */
     @PostMapping("/report")
     public Result<Void> report(
             @RequestParam("mediaId") String mediaId,
-            @RequestParam("reason") String reason) {
+            @RequestParam("reason") String reason,
+            @RequestParam(value = "category", required = false) Integer categoryCode) {
         long reporterUserId = Long.parseLong(UserContextHolder.requireUserId());
-        reviewService.report(mediaId, reporterUserId, reason);
+        // P1-1：举报类目（前端可选；缺省/非法→OTHER 兜底，避免为落库错分类）
+        ViolationCategory category;
+        try {
+            category = categoryCode == null ? ViolationCategory.OTHER : ViolationCategory.fromCode(categoryCode);
+        } catch (IllegalArgumentException e) {
+            category = ViolationCategory.OTHER;
+        }
+        reviewService.report(mediaId, reporterUserId, reason, category);
         return Result.ok();
     }
 

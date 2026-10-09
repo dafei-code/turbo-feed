@@ -175,6 +175,8 @@ rules:
       # 复审任务队列（抖音式「举报累计→人工复审」，changelog 0065）：单表落 ds_0。
       # 管理员视角的聚合队列，按 status 扫描全貌比按 media 点查更重要（仿 outbox_event 的 SINGLE 取舍）。
       - ds_0.review_task
+      - ds_0.account_health
+      - ds_0.reporter_credit
 
 props:
   # 开发期打印实际落到的物理库/表与 SQL，便于核对路由；生产可关闭

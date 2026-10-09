@@ -215,6 +215,8 @@ rules:
       - ds_0.outbox_event
       # 复审任务队列（抖音式「举报累计→人工复审」，changelog 0065）：单表落 ds_0（仿 outbox_event）。
       - ds_0.review_task
+      - ds_0.account_health
+      - ds_0.reporter_credit
 
 props:
   sql-show: true

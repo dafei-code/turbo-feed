@@ -8,6 +8,7 @@ import org.springframework.util.unit.DataSize;
 import com.turbofeed.gateway.service.review.ModerationMode;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 媒体上传配置（turbofeed.media.*）。
@@ -65,6 +66,9 @@ public class MediaProperties {
 
     /** 审核配置（turbofeed.media.review.*）：auto-pass 为演示占位自动放行，关闭后走人工审核闸。 */
     private Review review = new Review();
+
+    /** 评论区异常感知配置（turbofeed.media.comment-risk.*，P1 #133）。 */
+    private CommentRisk commentRisk = new CommentRisk();
 
     /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
      *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
@@ -385,6 +389,14 @@ public class MediaProperties {
         return review;
     }
 
+    public CommentRisk getCommentRisk() {
+        return commentRisk;
+    }
+
+    public void setCommentRisk(CommentRisk commentRisk) {
+        this.commentRisk = commentRisk;
+    }
+
     /**
      * 审核配置（turbofeed.media.review.*）。
      *
@@ -472,6 +484,77 @@ public class MediaProperties {
         private int poolHeatThresholdL1 = 1000;
         private int poolHeatThresholdL2 = 500;
         private int poolHeatThresholdL3 = 200;
+
+        /**
+         * 梯度处置矩阵（抖音式「梯度处置」，changelog 待补）：按 "来源:严重度" → 处置名
+         * (INTERCEPT/MONITOR/REVIEW/PASS) 覆盖默认处置。缺省按内置默认
+         * （HIGH/CRITICAL/MID→INTERCEPT，LOW→MONITOR）。
+         * 例：{@code POOL_PROMOTED:HIGH=MONITOR} 把流量池晋级复扫命中改软处置（限公域而非下架）。
+         */
+        private Map<String, String> dispositionMatrix = new java.util.LinkedHashMap<>();
+
+        /**
+         * 账号健康分扣分点（P0-b）：确认一次违规按严重度扣的分。默认值对齐抖音式「先流量隔离」梯度。
+         * 一处 CRITICAL(30) 即掉到降权区；两次 HIGH(20) 触限投稿；等。clamp 0~100。
+         */
+        private int healthDeductLow = 5;
+        private int healthDeductMid = 10;
+        private int healthDeductHigh = 20;
+        private int healthDeductCritical = 30;
+
+        /**
+         * 举报人信用下限（P1 #131）：信用低于此值的举报人，其举报<b>不计入</b>复审升级
+         * （即无法单独刷起人工复审台）。无信用记录的举报人按满分 100（无罪推定）处理。默认 50。
+         */
+        private int reporterCredibilityFloor = 50;
+
+        /** 每举报人每小时最大举报数（P1 #131 恶意举报防御②：窗口频控，Redis 固定窗口 fail-open）。默认 30 */
+        private int reporterRateLimitPerHour = 30;
+
+        /** 举报频控窗口（秒，P1 #131）。默认 3600（1 小时）。 */
+        private int reporterRateLimitWindowSeconds = 3600;
+
+        /** 累计被驳回达此值后，每再被驳回一次额外扣健康分（P1 #131 恶意举报惩罚，复用 P0-b 健康分通道）。默认 5 */
+        private int reporterAbuseRejectedThreshold = 5;
+
+        /** 举报被确认成立时信用加分步长（P1 #131，clamp 0~100）。默认 5 */
+        private int reporterCredibilityUpStep = 5;
+
+        /** 举报被驳回时信用扣分步长（P1 #131，clamp 0~100）。默认 10 */
+        private int reporterCredibilityDownStep = 10;
+
+        /**
+         * 举报水位窗口（秒，P1 #132 动态阈值）：近窗口举报总量计数键的过期时长。默认 3600（1 小时）。
+         * 窗口内持续有举报则键续期，无举报后自然清零（水位回落）。
+         */
+        private int waterLevelWindowSeconds = 3600;
+
+        /**
+         * 举报水位「平静」上界（P1 #132）：近窗口举报总量 ≤ 此值视为平静 → 阈值放宽（乘数 1.5）。默认 50。
+         */
+        private int waterLevelCalm = 50;
+
+        /**
+         * 举报水位「繁忙」上界（P1 #132）：calm &lt; 总量 ≤ 此值视为正常（乘数 1.0）；
+         * 再高至 surge 视为繁忙（收紧 0.7）。默认 200。
+         */
+        private int waterLevelBusy = 200;
+
+        /**
+         * 举报水位「峰涌」上界（P1 #132）：busy &lt; 总量 ≤ 此值视为繁忙（乘数 0.7）；
+         * 再高视为峰涌（大幅收紧 0.4）。默认 500。
+         */
+        private int waterLevelSurge = 500;
+
+        /**
+         * 动态复审升级阈值下限（P1 #132）：clamp 下界，防水位峰涌时阈值压到 1 导致单举报即爆审核台。默认 2。
+         */
+        private int reportThresholdMin = 2;
+
+        /**
+         * 动态复审升级阈值上限（P1 #132）：clamp 上界，防水位长期平静时阈值无限放宽。默认 10。
+         */
+        private int reportThresholdMax = 10;
 
         public int getNewUserApproveThreshold() {
             return newUserApproveThreshold;
@@ -577,6 +660,142 @@ public class MediaProperties {
             this.poolHeatThresholdL3 = poolHeatThresholdL3;
         }
 
+        public Map<String, String> getDispositionMatrix() {
+            return dispositionMatrix;
+        }
+
+        public void setDispositionMatrix(Map<String, String> dispositionMatrix) {
+            this.dispositionMatrix = dispositionMatrix;
+        }
+
+        public int getHealthDeductLow() {
+            return healthDeductLow;
+        }
+
+        public void setHealthDeductLow(int healthDeductLow) {
+            this.healthDeductLow = healthDeductLow;
+        }
+
+        public int getHealthDeductMid() {
+            return healthDeductMid;
+        }
+
+        public void setHealthDeductMid(int healthDeductMid) {
+            this.healthDeductMid = healthDeductMid;
+        }
+
+        public int getHealthDeductHigh() {
+            return healthDeductHigh;
+        }
+
+        public void setHealthDeductHigh(int healthDeductHigh) {
+            this.healthDeductHigh = healthDeductHigh;
+        }
+
+        public int getHealthDeductCritical() {
+            return healthDeductCritical;
+        }
+
+        public void setHealthDeductCritical(int healthDeductCritical) {
+            this.healthDeductCritical = healthDeductCritical;
+        }
+
+        public int getReporterCredibilityFloor() {
+            return reporterCredibilityFloor;
+        }
+
+        public void setReporterCredibilityFloor(int reporterCredibilityFloor) {
+            this.reporterCredibilityFloor = reporterCredibilityFloor;
+        }
+
+        public int getReporterRateLimitPerHour() {
+            return reporterRateLimitPerHour;
+        }
+
+        public void setReporterRateLimitPerHour(int reporterRateLimitPerHour) {
+            this.reporterRateLimitPerHour = reporterRateLimitPerHour;
+        }
+
+        public int getReporterRateLimitWindowSeconds() {
+            return reporterRateLimitWindowSeconds;
+        }
+
+        public void setReporterRateLimitWindowSeconds(int reporterRateLimitWindowSeconds) {
+            this.reporterRateLimitWindowSeconds = reporterRateLimitWindowSeconds;
+        }
+
+        public int getReporterAbuseRejectedThreshold() {
+            return reporterAbuseRejectedThreshold;
+        }
+
+        public void setReporterAbuseRejectedThreshold(int reporterAbuseRejectedThreshold) {
+            this.reporterAbuseRejectedThreshold = reporterAbuseRejectedThreshold;
+        }
+
+        public int getReporterCredibilityUpStep() {
+            return reporterCredibilityUpStep;
+        }
+
+        public void setReporterCredibilityUpStep(int reporterCredibilityUpStep) {
+            this.reporterCredibilityUpStep = reporterCredibilityUpStep;
+        }
+
+        public int getReporterCredibilityDownStep() {
+            return reporterCredibilityDownStep;
+        }
+
+        public void setReporterCredibilityDownStep(int reporterCredibilityDownStep) {
+            this.reporterCredibilityDownStep = reporterCredibilityDownStep;
+        }
+
+        public int getWaterLevelWindowSeconds() {
+            return waterLevelWindowSeconds;
+        }
+
+        public void setWaterLevelWindowSeconds(int waterLevelWindowSeconds) {
+            this.waterLevelWindowSeconds = waterLevelWindowSeconds;
+        }
+
+        public int getWaterLevelCalm() {
+            return waterLevelCalm;
+        }
+
+        public void setWaterLevelCalm(int waterLevelCalm) {
+            this.waterLevelCalm = waterLevelCalm;
+        }
+
+        public int getWaterLevelBusy() {
+            return waterLevelBusy;
+        }
+
+        public void setWaterLevelBusy(int waterLevelBusy) {
+            this.waterLevelBusy = waterLevelBusy;
+        }
+
+        public int getWaterLevelSurge() {
+            return waterLevelSurge;
+        }
+
+        public void setWaterLevelSurge(int waterLevelSurge) {
+            this.waterLevelSurge = waterLevelSurge;
+        }
+
+        public int getReportThresholdMin() {
+            return reportThresholdMin;
+        }
+
+        public void setReportThresholdMin(int reportThresholdMin) {
+            this.reportThresholdMin = reportThresholdMin;
+        }
+
+        public int getReportThresholdMax() {
+            return reportThresholdMax;
+        }
+
+        public void setReportThresholdMax(int reportThresholdMax) {
+            this.reportThresholdMax = reportThresholdMax;
+        }
+
         public boolean isAutoPass() {
             return autoPass;
         }
@@ -599,6 +818,68 @@ public class MediaProperties {
 
         public void setBannedKeywords(List<String> bannedKeywords) {
             this.bannedKeywords = bannedKeywords;
+        }
+    }
+
+    /**
+     * 评论区异常感知配置（turbofeed.media.comment-risk.*，P1 #133）。
+     *
+     * <p>不依赖评论内容深度解析，仅做速率/聚集异常感知：单账号刷评限流、评论区爆发折叠+进巡查队列。</p>
+     */
+    public static class CommentRisk {
+        /** 内容评论速率窗口（秒）：近窗口内某内容评论数达阈值即视为评论区爆发。默认 60 */
+        private int windowSeconds = 60;
+
+        /** 内容评论速率阈值：近 windowSeconds 内某内容评论数超此值 → 评论区爆发（折叠+进复审）。默认 50 */
+        private int rateThreshold = 50;
+
+        /** 单账号对单内容评论频控窗口（秒）。默认 60 */
+        private int userWindowSeconds = 60;
+
+        /** 单账号对单内容评论频次上限：超此值 → 限流该账号（拒评）。默认 10 */
+        private int userLimit = 10;
+
+        /** 速率异常时是否自动折叠（FOLDED，默认不展示）+ 进复审。默认 true */
+        private boolean foldOnSpike = true;
+
+        public int getWindowSeconds() {
+            return windowSeconds;
+        }
+
+        public void setWindowSeconds(int windowSeconds) {
+            this.windowSeconds = windowSeconds;
+        }
+
+        public int getRateThreshold() {
+            return rateThreshold;
+        }
+
+        public void setRateThreshold(int rateThreshold) {
+            this.rateThreshold = rateThreshold;
+        }
+
+        public int getUserWindowSeconds() {
+            return userWindowSeconds;
+        }
+
+        public void setUserWindowSeconds(int userWindowSeconds) {
+            this.userWindowSeconds = userWindowSeconds;
+        }
+
+        public int getUserLimit() {
+            return userLimit;
+        }
+
+        public void setUserLimit(int userLimit) {
+            this.userLimit = userLimit;
+        }
+
+        public boolean isFoldOnSpike() {
+            return foldOnSpike;
+        }
+
+        public void setFoldOnSpike(boolean foldOnSpike) {
+            this.foldOnSpike = foldOnSpike;
         }
     }
 }

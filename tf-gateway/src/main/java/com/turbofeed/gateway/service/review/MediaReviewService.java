@@ -19,6 +19,8 @@ import com.turbofeed.gateway.service.penalty.PenaltyService;
 import com.turbofeed.gateway.service.penalty.ViolationCategory;
 import com.turbofeed.gateway.service.penalty.ViolationSeverity;
 import com.turbofeed.gateway.service.penalty.ViolationSource;
+import com.turbofeed.gateway.service.health.AccountHealthService;
+import com.turbofeed.gateway.service.review.credit.ReporterCreditService;
 import com.turbofeed.shared.caption.CaptionTagParser;
 import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
@@ -29,9 +31,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.time.Duration;
 
 /**
  * 媒体审核服务：维护内容审核状态机，并执行「机审初筛 + 账号信用分级（先发/先审）+ 多池发布 + 举报/申诉闭环」。
@@ -74,6 +79,9 @@ public class MediaReviewService {
     /** 流量池分级热度阈值覆盖键前缀（Tier3，changelog 0067）：按池级收紧该帖热度复审阈值。键为 postId。 */
     private static final String HEAT_THRESHOLD_OVERRIDE_PREFIX = "tf:media:heat-threshold:";
 
+    /** 梯度处置标记键前缀（P0-a）：MONITOR 软处置写入 {@code tf:media:disposition:{postId}=MONITOR}，限公域。键为 postId。 */
+    private static final String DISPOSITION_KEY_PREFIX = "tf:media:disposition:";
+
     /** 正向互动类型（行为上报 type 取值）：点赞/评论/转发，计作热度。 */
     private static final Set<String> POSITIVE_INTERACTIONS = Set.of("LIKE", "COMMENT", "SHARE");
 
@@ -91,6 +99,14 @@ public class MediaReviewService {
     private final OutboxService outboxService;
     /** 处罚域（penalty 集成缝接线）：违规确认落处罚、申诉翻案解除封禁。 */
     private final PenaltyService penaltyService;
+    /** 梯度处置策略（P0-a）：(来源,严重度) → 处置动作，可配置矩阵覆盖默认。 */
+    private final DispositionPolicy dispositionPolicy;
+    /** 账号健康分（P0-b）：确认违规 → 扣分，与处罚/信用三通道解耦。 */
+    private final AccountHealthService accountHealthService;
+    /** 举报人信用（P1 #131）：举报处置后回写成立/驳回，恶意举报惩罚复用健康分通道。 */
+    private final ReporterCreditService reporterCreditService;
+    /** 全局举报水位（P1 #132 动态阈值因子）：近窗举报总量 → 复审升级阈值浮动。 */
+    private final ReviewWaterLevelService reviewWaterLevelService;
 
     public MediaReviewService(MediaJdbcRepository mediaRepository,
                               MediaTagJdbcRepository mediaTagRepository,
@@ -102,7 +118,11 @@ public class MediaReviewService {
             AppealRepository appealRepository,
             ReviewTaskRepository reviewTaskRepository,
             OutboxService outboxService,
-                              PenaltyService penaltyService) {
+                              PenaltyService penaltyService,
+                              DispositionPolicy dispositionPolicy,
+            AccountHealthService accountHealthService,
+            ReporterCreditService reporterCreditService,
+            ReviewWaterLevelService reviewWaterLevelService) {
         this.mediaRepository = mediaRepository;
         this.mediaTagRepository = mediaTagRepository;
         this.redisTemplate = redisTemplate;
@@ -114,6 +134,10 @@ public class MediaReviewService {
         this.reviewTaskRepository = reviewTaskRepository;
         this.outboxService = outboxService;
         this.penaltyService = penaltyService;
+        this.dispositionPolicy = dispositionPolicy;
+        this.accountHealthService = accountHealthService;
+        this.reporterCreditService = reporterCreditService;
+        this.reviewWaterLevelService = reviewWaterLevelService;
     }
 
     /**
@@ -291,16 +315,26 @@ public class MediaReviewService {
      * 其余 8 张继续可见」的绕过路径。</p>
      */
     @Transactional(rollbackFor = Exception.class)
-    public void report(String mediaId, long reporterUserId, String reason) {
+    public void report(String mediaId, long reporterUserId, String reason, ViolationCategory category) {
         long authorId = parseUserId(mediaId);
         MediaStatus cur = mediaRepository.getStatus(mediaId, authorId);
         if (cur == null || cur != MediaStatus.APPROVED) {
             throw new BizException(ErrorCode.PARAM_ERROR, "仅已发布内容可被举报");
         }
-        reportRepository.insert(mediaId, reporterUserId, reason);
-        if (isHighRisk(reason)) {
+        // 恶意举报防御①：同举报人对同一内容重复举报只计一次（防狂点刷起复审台）
+        if (reportRepository.existsPending(mediaId, reporterUserId)) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "您已举报过该内容，请勿重复举报");
+        }
+        // 恶意举报防御②：每举报人窗口限速（fail-open，不影响主流程）
+        checkReporterRateLimit(reporterUserId);
+        reportRepository.insert(mediaId, reporterUserId, reason, category.code());
+        // 举报行为计数（信用统计，落库后）
+        reporterCreditService.recordReport(reporterUserId);
+        // 全局举报水位计数（#132 动态阈值因子）：每举报 +1，近窗爆量时收紧升级阈值
+        reviewWaterLevelService.recordReport();
+        if (isHighRisk(reason) || isHighRiskCategory(category)) {
             // CAS 保证「真正完成下架的那一次」才扣信用+落处罚；其余并发举报得 0 行幂等返回。
-            int rows = takeDownAndPenalize(mediaId, authorId, ViolationSource.HUMAN_REPORT, "SYSTEM",
+            int rows = applyDisposition(mediaId, authorId, ViolationSource.HUMAN_REPORT, "SYSTEM",
                     "高危举报立即下架停推: " + mediaId, ViolationSeverity.HIGH);
             if (rows == 0) {
                 log.info("高危举报下架 CAS 落空（已被其他路径下架，不重复扣信用）: mediaId={}", mediaId);
@@ -318,15 +352,25 @@ public class MediaReviewService {
     @Transactional(rollbackFor = Exception.class)
     public void handleReport(String mediaId, boolean confirmed) {
         long authorId = parseUserId(mediaId);
+        // P1 #131：先取出本内容的待处理举报人，处置后回写其信用
+        List<Long> reporters = reportRepository.findReporterUserIds(mediaId);
         if (confirmed) {
             // CAS 保证单次：把帖子翻下去的那一次才扣信用+落处罚；已被其它路径下架则得 0 行幂等。
-            int rows = takeDownAndPenalize(mediaId, authorId, ViolationSource.HUMAN_REPORT, "ADMIN",
+            int rows = applyDisposition(mediaId, authorId, ViolationSource.HUMAN_REPORT, "ADMIN",
                     "举报确认违规→整帖下架: " + mediaId, ViolationSeverity.MID);
             if (rows == 0) {
                 log.info("举报确认违规：内容已不在已发布态，不重复下架/扣信用: mediaId={}", mediaId);
             }
         }
         reportRepository.resolve(mediaId, confirmed);
+        // P1 #131：举报处置后回写举报人信用（成立加分 / 驳回扣分；恶意举报惩罚复用健康分通道）
+        for (long uid : reporters) {
+            if (confirmed) {
+                reporterCreditService.onReportUpheld(uid);
+            } else {
+                reporterCreditService.onReportRejected(uid);
+            }
+        }
     }
 
     /**
@@ -343,9 +387,17 @@ public class MediaReviewService {
         }
         String mediaId = task.mediaId();
         long authorId = task.authorId();
+        // #133 评论区异常巡查任务：仅标记已巡查、不下架内容、不回写举报人信用、不清理 report
+        if (task.taskType().equals(ReviewTask.TYPE_COMMENT_ANOMALY)) {
+            reviewTaskRepository.resolve(taskId, ReviewTask.STATUS_RESOLVED, resolver);
+            log.info("评论区异常巡查任务处置（仅标记已巡查，不下架内容）: taskId={}, mediaId={}, resolver={}", taskId, mediaId, resolver);
+            return;
+        }
+        // P1 #131：先取出本内容的待处理举报人，处置后回写其信用（须在 resolve 改 status 前取）
+        List<Long> reporters = reportRepository.findReporterUserIds(mediaId);
         if (takedown) {
             // CAS 保证「真正完成翻转的那一次」才扣信用+落处罚；已被其它路径下架则幂等不双计。
-            takeDownAndPenalize(mediaId, authorId, ViolationSource.HUMAN_REPORT, resolver,
+            applyDisposition(mediaId, authorId, ViolationSource.HUMAN_REPORT, resolver,
                     "复审任务确认违规(举报累计): " + mediaId, ViolationSeverity.MID);
             reviewTaskRepository.resolveAllForMedia(mediaId, ReviewTask.STATUS_TAKEDOWN, resolver);
             reportRepository.resolve(mediaId, true);
@@ -355,6 +407,14 @@ public class MediaReviewService {
             reviewTaskRepository.resolveAllForMedia(mediaId, ReviewTask.STATUS_RESOLVED, resolver);
             reportRepository.resolve(mediaId, false);
             log.info("复审任务判定无违规，维持发布: taskId={}, mediaId={}, resolver={}", taskId, mediaId, resolver);
+        }
+        // P1 #131：复审处置后回写举报人信用（成立加分 / 驳回扣分；恶意举报惩罚复用健康分通道）
+        for (long uid : reporters) {
+            if (takedown) {
+                reporterCreditService.onReportUpheld(uid);
+            } else {
+                reporterCreditService.onReportRejected(uid);
+            }
         }
     }
 
@@ -369,21 +429,45 @@ public class MediaReviewService {
      * <p>仅在该内容仍处于已发布态、且无未决复审任务时建单；REVIEWER 在
      * {@link #decideReviewTask} 二次研判（违规→下架+处罚 / 无违规→维持发布）。</p>
      */
+    /**
+     * 同类举报累计达阈值 → 自动建一条复审任务（抖音式「举报分类 → 同类累计才升级」，P1-1）。
+     *
+     * <p>仅在该内容仍处于已发布态、且无未决复审任务时建单。阈值判定改为<b>按类目</b>：
+     * 取各类目待处理举报数的最大值，仅当<b>某一类目</b>累计达到阈值才升级——
+     * 避免「1 色情 + 1 广告 + 1 辱骂」这类无关举报混加误爆审核台（抖音式「同类举报才可信」）。</p>
+     */
     private void maybeEscalateToReviewTask(String mediaId, long authorId) {
         MediaStatus cur = mediaRepository.getStatus(mediaId, authorId);
         if (cur != MediaStatus.APPROVED) {
             return; // 已不在公域（下架/申诉中），不再建复审任务
         }
-        int pending = reportRepository.countPending(mediaId);
-        if (pending < properties.getReview().getReportReReviewThreshold()) {
+        // #132 全局举报水位因子：阈值随近窗举报总量浮动（爆量收紧/平稳放宽），与 #131 信用过滤互补
+        int threshold = reviewWaterLevelService.currentReportThreshold();
+        // P1 #131：取全部待处理举报的 (举报人,类目)，仅统计信用达标举报人（低信用举报不计入升级）
+        Map<Integer, Integer> byCategory = new HashMap<>();
+        for (ReportRepository.PendingReport p : reportRepository.pendingByMedia(mediaId)) {
+            if (!reporterCreditService.isCredible(p.reporterUserId())) {
+                continue; // 低信用举报：不计入复审升级（防恶意刷台）
+            }
+            byCategory.merge(p.category(), 1, Integer::sum);
+        }
+        int maxCount = 0;
+        int topCategory = 0;
+        for (Map.Entry<Integer, Integer> e : byCategory.entrySet()) {
+            if (e.getValue() > maxCount) {
+                maxCount = e.getValue();
+                topCategory = e.getKey();
+            }
+        }
+        if (maxCount < threshold) {
             return;
         }
         if (reviewTaskRepository.existsOpenForMedia(mediaId)) {
             return; // 已有待复审任务，避免重复建单
         }
-        reviewTaskRepository.insert(mediaId, authorId, ReviewTask.TYPE_REPORT_ACCUMULATED, pending);
-        log.info("举报累计达阈值，自动建复审任务（REVIEWER 二次研判）: mediaId={}, pendingReports={}, threshold={}",
-                mediaId, pending, properties.getReview().getReportReReviewThreshold());
+        reviewTaskRepository.insert(mediaId, authorId, ReviewTask.TYPE_REPORT_ACCUMULATED, maxCount);
+        log.info("同类举报累计达阈值，自动建复审任务（仅信用达标举报人，REVIEWER 二次研判）: mediaId={}, category={}, count={}, threshold={}",
+                mediaId, topCategory, maxCount, threshold);
     }
 
     /**
@@ -495,7 +579,7 @@ public class MediaReviewService {
             // ① 机审复扫（fail-open）：已发布走红内容必须再核一遍
             MediaStatus machine = contentModeration.moderate(rep.mediaId(), rep.authorId(), rep.url());
             if (machine == MediaStatus.REJECTED) {
-                int rows = takeDownAndPenalize(rep.mediaId(), rep.authorId(), ViolationSource.POOL_PROMOTED, "SYSTEM",
+                int rows = applyDisposition(rep.mediaId(), rep.authorId(), ViolationSource.POOL_PROMOTED, "SYSTEM",
                         "流量池晋级机审复扫命中违规(已发布走红内容): " + postId, ViolationSeverity.HIGH);
                 if (rows == 0) {
                     log.info("流量池晋级复扫下架 CAS 落空（已被其它路径下架，不重复处置）: postId={}", postId);
@@ -547,6 +631,57 @@ public class MediaReviewService {
             case 3 -> r.getPoolHeatThresholdL3();
             default -> r.getHeatReReviewThreshold();
         };
+    }
+
+    /**
+     * 梯度处置统一入口（P0-a）：按 {@link DispositionPolicy} 把 (来源,严重度) 解析成处置动作后分发。
+     *
+     * <p>现有所有违规路径（高危举报/管理员确认/复审任务/流量池晋级复扫）都是 MID/HIGH，默认矩阵
+     * 解析为 {@link Disposition#INTERCEPT}（=原下架行为），故本次改造<b>零行为回归</b>；
+     * 仅有 LOW 命中或运维在 {@code disposition-matrix} 显式配置的来源:严重度会被降级为
+     * {@link Disposition#MONITOR}（限公域/仅自己可见，不下架不扣分）。</p>
+     *
+     * @return 受影响行数（MONITOR 软处置恒返回 1；INTERCEPT 的语义见 {@link #takeDownAndPenalize}）
+     */
+    private int applyDisposition(String mediaId, long authorId, ViolationSource source,
+                                 String operator, String reason, ViolationSeverity severity) {
+        // P0-b：确认违规 → 扣健康分（MONITOR/INTERCEPT 都走这里，二者都是已确认违规）。
+        // 与信用扣分、落处罚同触发点；三通道解耦，互不影响。
+        accountHealthService.recordViolation(authorId, severity);
+
+        Disposition d = dispositionPolicy.resolve(source, severity);
+        if (d == Disposition.MONITOR) {
+            return softLimit(mediaId, authorId, source, reason);
+        }
+        // INTERCEPT（默认）：原有「下架+扣信用+落处罚」，行为不变。
+        return takeDownAndPenalize(mediaId, authorId, source, operator, reason, severity);
+    }
+
+    /**
+     * 软处置（MONITOR，网关独做）：限公域 / 仅自己可见。
+     *
+     * <p>对齐抖音「先是流量隔离，而非删除」——内容<b>移出推荐公域</b>（{@code removeFromTimeline} 走
+     * outbox 摘除），作者仍可在 {@code media/mine} 自见（该视图按作者查，不经公域时间线）；
+     * 帖子状态保持 {@code APPROVED}，<b>不扣信用、不落处罚</b>。写入 {@code tf:media:disposition:{postId}}
+     * 标记，供运营/后续 backfill 识别。</p>
+     *
+     * <p><b>已知边界（v1 网关独做，不改 feed-engine）</b>：backfill 是引擎侧批量重投，当前不读该标记，
+     * 理论上 admin 手动全量 backfill 可能把 MONITOR 内容重新灌回公域。常见路径（审核通过/互动）不会触发，
+     * 属低频边界；引擎侧在 backfill 时读 {@code tf:media:disposition:{postId}} 跳过即可彻底闭环
+     * （低成本，留待确需时补）。</p>
+     */
+    private int softLimit(String mediaId, long authorId, ViolationSource source, String reason) {
+        String postId = mediaRepository.findPostId(mediaId, authorId);
+        String key = (postId == null || postId.isBlank()) ? mediaId : postId;
+        try {
+            redisTemplate.opsForValue().set(DISPOSITION_KEY_PREFIX + key, Disposition.MONITOR.name());
+        } catch (Exception e) {
+            log.warn("写入处置标记失败（不影响主流程）: mediaId={}, {}", mediaId, e.getMessage());
+        }
+        removeFromTimeline(mediaId, authorId); // 移出公域（outbox TIMELINE_REMOVE），作者仍自见
+        log.warn("梯度处置 MONITOR（限公域/仅自己可见，不下架不扣分）: mediaId={}, source={}, reason={}",
+                mediaId, source, reason);
+        return 1;
     }
 
     /**
@@ -705,6 +840,36 @@ public class MediaReviewService {
         if (reason == null) return false;
         return reason.contains("涉政") || reason.contains("暴恐")
                 || reason.contains("儿童") || reason.contains("未成年") || reason.contains("色情儿童");
+    }
+
+    /** P1-1：类目级高危——涉政/色情类举报即立即下架停推（与 reason 文本高危词同力度）。 */
+    private static boolean isHighRiskCategory(ViolationCategory category) {
+        return category == ViolationCategory.CONTENT_POLITICS
+                || category == ViolationCategory.CONTENT_PORN;
+    }
+
+    /**
+     * 恶意举报防御②：每举报人窗口限速（Redis 固定窗口，fail-open）。
+     *
+     * <p>对举报人维度设「每小时最多 N 次」上限，超限直接拒 {@link BizException}（参数错误），
+     * 防止单用户批量举报刷爆审核台；Redis 抖动仅记日志放行，绝不阻断举报主流程。</p>
+     */
+    private void checkReporterRateLimit(long reporterUserId) {
+        try {
+            String key = "tf:report:ratelimit:" + reporterUserId;
+            Long n = redisTemplate.opsForValue().increment(key);
+            if (n != null && n == 1) {
+                redisTemplate.expire(key, Duration.ofSeconds(
+                        properties.getReview().getReporterRateLimitWindowSeconds()));
+            }
+            if (n != null && n > properties.getReview().getReporterRateLimitPerHour()) {
+                throw new BizException(ErrorCode.PARAM_ERROR, "举报过于频繁，请稍后再试");
+            }
+        } catch (BizException be) {
+            throw be;
+        } catch (Exception e) {
+            log.warn("举报频控检查失败（fail-open，不影响主流程）: reporterUserId={}, {}", reporterUserId, e.getMessage());
+        }
     }
 
     /** 从 mediaId（media/{userId}/{uuid}.{ext}）解析归属 userId，用于审核接口分片路由。 */
