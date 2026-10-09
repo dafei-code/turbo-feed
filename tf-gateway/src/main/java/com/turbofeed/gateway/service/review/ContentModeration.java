@@ -21,4 +21,17 @@ public interface ContentModeration {
     }
 
     MediaStatus moderate(String mediaId, long userId, String url);
+
+    /**
+     * 带置信度梯度的机审裁定（feature-match M1，moderation-design §P0-1）。
+     *
+     * <p>默认实现委托 {@link ModerationVerdict#of} 把 {@link #moderate()} 的二值结论包成
+     * 「确定通过/驳回」（置信度 1.0、不强制人审），因此未覆盖本方法的既有实现<b>零改动</b>
+     * 即获得等价行为；新能力（如云内容安全 API）可覆盖本方法返回真实置信度/标签/人审标记。</p>
+     *
+     * @see ModerationVerdict
+     */
+    default ModerationVerdict verdict(String mediaId, long userId, String url) {
+        return ModerationVerdict.of(moderate(mediaId, userId, url));
+    }
 }

@@ -188,11 +188,20 @@ public class MediaReviewService {
         }
 
         // —— 机审初筛（整帖一次；以首图 url 作为判定输入）——
-        MediaStatus machine = contentModeration.moderate(representativeId, userId, urls.get(0));
+        // 升级为带置信度梯度的 verdict：中等把握（置信度不足或显式要求人审）→ 强制送人审；
+        // 机审异常 → fail-closed 不可静默放公域，强制转人审（先审后放）。
+        ModerationVerdict verdict;
+        try {
+            verdict = contentModeration.verdict(representativeId, userId, urls.get(0));
+        } catch (Exception e) {
+            log.warn("机审初筛异常（fail-closed 强制人审）: postId={}, userId={}: {}",
+                    event.postId(), userId, e.getMessage());
+            verdict = new ModerationVerdict(MediaStatus.APPROVED, 0.0, List.of(), true);
+        }
 
         if (properties.getReview().isAutoPass()) {
             // 演示占位：机审结果直接放行（仅供本地联调）
-            ReviewOutcome outcome = review(representativeId, userId, machine == MediaStatus.APPROVED);
+            ReviewOutcome outcome = review(representativeId, userId, verdict.decision() == MediaStatus.APPROVED);
             if (outcome.transitioned() && outcome.status() == MediaStatus.APPROVED) {
                 CreditLevel level = accountCreditService.ensure(userId);
                 publishAppend(representativeId, userId, toTimelinePost(event), level.poolLevel());
@@ -200,7 +209,7 @@ public class MediaReviewService {
             return;
         }
 
-        if (machine == MediaStatus.REJECTED) {
+        if (verdict.decision() == MediaStatus.REJECTED) {
             // 机审驳回即拦：整帖翻 REJECTED，不进人工队列
             review(representativeId, userId, false);
             log.info("机审驳回即拦：整帖判定 REJECTED（不进人审队列）: postId={}, images={}, userId={}",
@@ -208,7 +217,14 @@ public class MediaReviewService {
             return;
         }
 
-        // 机审通过/降级：按账号信用分级分流
+        // 梯度分流：中等把握（置信度不足或显式要求人审）→ 强制送人审（先审后放），不论账号信用等级
+        if (verdict.needHumanScan() || verdict.confidence() < properties.getReview().getConfidenceThreshold()) {
+            log.info("机审中等把握（confidence={}, needHumanScan={}）→ 强制人审队列（先审后放）: postId={}, userId={}",
+                    verdict.confidence(), verdict.needHumanScan(), event.postId(), userId);
+            return;
+        }
+
+        // 高置信度通过：按账号信用分级分流
         CreditLevel level = accountCreditService.ensure(userId);
         if (level == CreditLevel.L0) {
             // 先审后放：机审通过仍进 PENDING，等人审终裁（不自动进公域）
@@ -589,8 +605,8 @@ public class MediaReviewService {
                 return;
             }
             // ① 机审复扫（fail-open）：已发布走红内容必须再核一遍
-            MediaStatus machine = contentModeration.moderate(rep.mediaId(), rep.authorId(), rep.url());
-            if (machine == MediaStatus.REJECTED) {
+            ModerationVerdict verdict = contentModeration.verdict(rep.mediaId(), rep.authorId(), rep.url());
+            if (verdict.decision() == MediaStatus.REJECTED) {
                 int rows = applyDisposition(rep.mediaId(), rep.authorId(), ViolationSource.POOL_PROMOTED, "SYSTEM",
                         "流量池晋级机审复扫命中违规(已发布走红内容): " + postId, ViolationSeverity.HIGH);
                 if (rows == 0) {

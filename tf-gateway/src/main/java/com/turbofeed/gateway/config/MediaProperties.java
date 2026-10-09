@@ -443,6 +443,13 @@ public class MediaProperties {
         private List<String> bannedKeywords = List.of();
 
         /**
+         * 机审置信度阈值（feature-match M1，moderation-design §P0-1）：机审裁定置信度低于该值，
+         * 或显式要求人审（{@code needHumanScan}），则<b>强制送人审</b>（先审后放），不论账号信用等级。
+         * 二值实现返回 {@code confidence=1.0} 不受影响；仅启用真实梯度机审（如云内容安全 API）后才生效。默认 0.9。
+         */
+        private double confidenceThreshold = 0.9;
+
+        /**
          * 新人观察期解除阈值（{@code turbofeed.media.review.new-user-approve-threshold}）：
          * 新注册账号初始处于「先审后放」观察期，累计<b>人工审核通过</b>达到该帖数后自动转正常分级。
          * 只统计人工通过——先发后审的自动通过不计入，否则新号第一帖就会自己转正。
@@ -840,6 +847,14 @@ public class MediaProperties {
 
         public void setBannedKeywords(List<String> bannedKeywords) {
             this.bannedKeywords = bannedKeywords;
+        }
+
+        public double getConfidenceThreshold() {
+            return confidenceThreshold;
+        }
+
+        public void setConfidenceThreshold(double confidenceThreshold) {
+            this.confidenceThreshold = confidenceThreshold;
         }
     }
 

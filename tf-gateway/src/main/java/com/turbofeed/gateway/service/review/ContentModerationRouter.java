@@ -46,4 +46,15 @@ public class ContentModerationRouter {
     public MediaStatus moderate(String mediaId, long userId, String url) {
         return delegate.moderate(mediaId, userId, url);
     }
+
+    /**
+     * 转发带置信度梯度的机审裁定到当前激活的实现（feature-match M1）。
+     *
+     * <p>委托给 {@code delegate.verdict()}：若实现覆盖了 {@link ContentModeration#verdict}
+     * （如未来云内容安全 API 返回真实置信度/标签/人审标记）则走其实现；否则走接口默认方法
+     * {@link ModerationVerdict#of}（包成自信度 1.0 的二值等价），既有实现零改动。</p>
+     */
+    public ModerationVerdict verdict(String mediaId, long userId, String url) {
+        return delegate.verdict(mediaId, userId, url);
+    }
 }
