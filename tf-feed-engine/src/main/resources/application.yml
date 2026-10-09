@@ -79,6 +79,12 @@ turbofeed:
     interest-recall-ratio: ${TURBOFEED_FEED_INTEREST_RECALL_RATIO:0.15}
     # 关注流召回占每页槽位比例（抖音式「关注流 / 社交分发」G6）：关注作者近期已审内容混入发现流
     follow-recall-ratio: ${TURBOFEED_FEED_FOLLOW_RECALL_RATIO:0.1}
+    # 生态调控层（G9 抖音式「生态调控」）：对流量池主内容源施加整页全局占比配额，
+    # 防止单一话题/作者垄断整页（与 G8 滑窗重排互补：G8=局部窗、G9=整页全局）
+    ecosystem:
+      enabled: ${TURBOFEED_FEED_ECOSYSTEM_ENABLED:true}
+      max-tag-share: ${TURBOFEED_FEED_ECOSYSTEM_MAX_TAG_SHARE:0.35}
+      max-author-share: ${TURBOFEED_FEED_ECOSYSTEM_MAX_AUTHOR_SHARE:3}
     # 兴趣画像的完播加权（观看进度是连续信号，不该压成固定权重）
     interest:
       watch-skip-ratio: 0.3        # 低于该观看比例 = 划走，不计画像（划走不表达兴趣）

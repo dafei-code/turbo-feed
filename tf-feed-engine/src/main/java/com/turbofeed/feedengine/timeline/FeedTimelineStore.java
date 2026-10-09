@@ -202,6 +202,8 @@ public class FeedTimelineStore {
     private final ColdStartService coldStartService;
     /** 关注关系读取（G6：抖音式「关注流 / 社交分发」推荐消费侧，读 tf:follow:{userId} 社交图）。 */
     private final FollowService followService;
+    /** 生态调控层（G9：抖音式「生态调控」整页全局占比配额，与 G8 滑窗重排互补）。 */
+    private final EcosystemRegulationService ecosystemRegulationService;
 
     /**
      * 审核通过：按信用池写时间线（denormalized {@link FeedItemView} JSON），fail-open。
@@ -594,6 +596,7 @@ public class FeedTimelineStore {
         }
 
         // 流量池部分：统一走一次上下文感知重排（G8：在整页范围内强化作者去重 + 标签多样性），再入流。
+        // G9 生态调控改到整页组装完成后做全局封顶（见下方 return 前），与「整页全局占比配额」语义一致。
         poolPart = diversityRerankService.rerank(poolPart);
 
         // ===== 冷启动探索池（G7：EE 探索利用）=====
@@ -657,6 +660,9 @@ public class FeedTimelineStore {
                 result.add(it);
             }
         }
+        // 生态调控层（G9：抖音式「整页全局占比配额」，与 G8 滑窗重排互补）：对整页内容做全局作者/标签封顶，
+        // 防单一作者/话题垄断整页；保序裁低位超额尾部，fail-open 回退原序（整页范围生效，含冷启动注入位）。
+        result = ecosystemRegulationService.regulate(result, limit);
         return result;
     }
 
