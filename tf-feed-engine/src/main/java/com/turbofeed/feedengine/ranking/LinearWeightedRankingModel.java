@@ -62,12 +62,20 @@ public class LinearWeightedRankingModel implements RankingModel {
         double sessionInterest = Math.min(f.sessionMatch(), props.getSessionScoreCap());
         double interest = longInterest + props.getShortTermWeight() * shortInterest
                 + props.getSessionWeight() * sessionInterest;
+        // 实时特征匹配（抖音式「实时特征流」）：session 级最近互动 + 短期 burst 聚合的页面级实时画像，
+        // 与本内容标签的亲和度之和。封顶交给 realtimeScoreCap 防单标签刷屏推到离谱。
+        double realtime = Math.min(f.realtimeMatch(), props.getRealtimeScoreCap());
         double window = props.getRecencyWindowMillis();
-        return f.recencyMillis()
+        double base = f.recencyMillis()
                 + window * (props.getCompletionWeight() * completion
                           + props.getInteractionWeight() * interaction
-                          + props.getInterestWeight() * interest)
+                          + props.getInterestWeight() * interest
+                          + props.getRealtimeWeight() * realtime)
                 - (f.negativeHit() ? props.getNegativePenaltyMillis() : 0.0d);
+        // 作者健康分排序系数（抖音式「审核与推荐解耦」接入点）：乘以 authorHealthScale。
+        // DEMOTE 档(健康分[60,80)）= demoteScale(默认0.5) → 等效「推荐降权0.5」；
+        // 其余档 / 缺失 / 读失败 = 1.0（fail-open 不降权）。BANNED/<60 作者已在召回层剔除。
+        return base * f.authorHealthScale();
     }
 
     /**

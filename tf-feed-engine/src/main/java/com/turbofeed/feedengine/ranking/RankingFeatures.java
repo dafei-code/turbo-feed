@@ -30,6 +30,13 @@ package com.turbofeed.feedengine.ranking;
  *                       session 关闭 / 冷 session 时为 0。它捕捉长期+短期画像都丢掉的<b>局部强时效</b>信号——
  *                       "刚连着看了 5 条钓鱼"此刻就该多给钓鱼，即使长期画像里钓鱼权重不高。
  * @param negativeHit    是否命中该用户的负向标签（"不感兴趣"打压相似内容）
+ * @param realtimeMatch  实时特征匹配分（抖音式「实时特征流」接入点）：由 {@code RealtimeFeatureService}
+ *                        聚合 session 级最近互动 + 短期兴趣 burst 成的页面级实时画像，与本内容标签的亲和度之和。
+ *                        缺失 / 冷启动 / 读失败 = 0.0（fail-open 不增强也不打压）。
+ * @param authorHealthScale 作者健康分排序系数（抖音式「审核与推荐解耦」接入点）：DEMOTE 档(健康分[60,80))
+ *                       由 {@code ReviewSignalClient} 赋 {@code demoteScale}(默认 0.5，与 P0-b「推荐降权 0.5」对齐)，
+ *                       其余档 / 缺失 / 读失败均 = 1.0（fail-open 不降权）。BANNED 与 &lt;60 作者已被召回层剔除，
+ *                       不会流入此处。模型末尾以 {@code result * authorHealthScale} 施加——系数越小越靠后。
  */
 public record RankingFeatures(double recencyMillis,
                               long impressions,
@@ -41,5 +48,7 @@ public record RankingFeatures(double recencyMillis,
                               double interestMatch,
                               double shortTermMatch,
                               double sessionMatch,
-                              boolean negativeHit) {
+                              boolean negativeHit,
+                              double authorHealthScale,
+                              double realtimeMatch) {
 }

@@ -3,10 +3,18 @@ package com.turbofeed.feedengine.timeline;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.shared.model.FeedItemView;
+import com.turbofeed.feedengine.client.ReviewSignalClient;
 import com.turbofeed.feedengine.interest.InterestService;
 import com.turbofeed.feedengine.interest.SessionSequenceService;
+import com.turbofeed.feedengine.ranking.FeedModerationProperties;
 import com.turbofeed.feedengine.ranking.RankingFeatures;
 import com.turbofeed.feedengine.ranking.RankingModel;
+import com.turbofeed.feedengine.ranking.PreRankCandidate;
+import com.turbofeed.feedengine.ranking.PreRankContext;
+import com.turbofeed.feedengine.ranking.PreRankFilter;
+import com.turbofeed.feedengine.ranking.RealtimeFeatureService;
+import com.turbofeed.feedengine.ranking.UserRealtimeProfile;
+import com.turbofeed.feedengine.recall.VectorRecallChannel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -88,6 +96,26 @@ public class FeedTimelineStore {
      * 怎么打分由模型决定——将来换双塔 / 精排模型或接远程推理，都不必再动这段最热的读代码。
      */
     private final RankingModel rankingModel;
+    /**
+     * 审核信号读取客户端（抖音式「审核与推荐解耦」：推荐侧直读 {@code tf:mod:} KV）。
+     * 召回层用它过滤 INTERCEPT/MONITOR 内容与低健康分作者；排序层经 {@link #scoreOf} 懒读作者健康分降权。
+     */
+    private final ReviewSignalClient reviewSignalClient;
+    /** 推荐侧消费审核信号的开关与阈值（namespace / 召回过滤 / 降权系数 / 剔除阈值）。 */
+    private final FeedModerationProperties moderationProperties;
+    /**
+     * 向量召回通道（抖音式多路召回第四路）：用户向量 × 内容向量余弦相似度 TopN。
+     * 与热点/兴趣/流量池三路并列，捞"语义相近但未必同标签"的隐式兴趣内容。
+     */
+    private final VectorRecallChannel vectorRecallChannel;
+    /** 实时特征聚合（抖音式「实时特征流」）：每页算一次，喂给排序模型。 */
+    private final RealtimeFeatureService realtimeFeatureService;
+    /**
+     * 粗排截断过滤器（抖音式「召回 → 粗排 → 精排 → 重排」里的粗排层，G1）。
+     * 对流量池全量候选用廉价特征快速打分、只保留 Top-N 进精排，省算力、防长尾淹没。
+     * 默认关闭（{@code preRankKeepRatio=0}），开启后对池候选做截断。
+     */
+    private final PreRankFilter preRankFilter;
 
     private static final String TL_PREFIX = "tf:feed:tl:";
     /** 反查索引前缀：帖身份（postId，历史数据回退 mediaId）-&gt; 所在桶 key + 成员串（用于精确 ZREM）。 */
@@ -143,6 +171,12 @@ public class FeedTimelineStore {
      */
     @Value("${turbofeed.feed.interest-recall-ratio:0.15}")
     private double interestRecallRatio;
+    /**
+     * 向量召回占每页槽位的比例（抖音式多路召回里的"向量/双塔召回"这一路）。
+     * {@code 0} = 关闭，读路径退化为「热点 + 兴趣 + 流量池」三路。
+     */
+    @Value("${turbofeed.feed.vector-recall-ratio:0.1}")
+    private double vectorRecallRatio;
     /**
      * 打散窗口（抖音式"同类不连刷"）：同一标签的内容在连续的该窗口大小内<b>不重复出现</b>。
      * {@code 0} = 关闭打散，页内严格按重排后的分值顺序输出。
@@ -240,6 +274,10 @@ public class FeedTimelineStore {
         // 负向标签（抖音式「不感兴趣 → 对该用户打压同标签内容」）。匿名 / 无负反馈为空集，
         // 与画像解耦：即使该用户画像为空（冷启动）也照样生效——负反馈不需要先有正反馈。
         Set<String> negative = interestService.negativeTags(userId);
+        // 实时特征画像（抖音式「实时特征流」）：每页只算一次，喂排序模型（见 RealtimeFeatureService）。
+        UserRealtimeProfile realtimeProfile = realtimeFeatureService.profileOf(userId);
+        // 作者健康分排序系数懒加载缓存（抖音式「审核与推荐解耦」：scoreOf 内按 authorId 读 tf:mod:account 并缓存本页）。
+        Map<String, Double> authorHealthCache = new LinkedHashMap<>();
         // 先按池收集近 N 天、每池最新的候选（保留 ZSET score 以便回退路径按入流时刻排序）
         Map<Integer, List<ZSetOperations.TypedTuple<String>>> byPool = new LinkedHashMap<>();
         for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
@@ -339,13 +377,17 @@ public class FeedTimelineStore {
                 interestPart.add(new ScoredItem(it, recencyOf(it)));
             }
             // 个性化位内部仍按精排分排序：召回只保证"这类内容进得来"，
-            // 不保证"质量差的也往前放"——排序权交给 RankingModel。
-            interestPart.sort((a, b) -> Double.compare(scoreOf(b, interest, shortInterest, session, negative),
-                    scoreOf(a, interest, shortInterest, session, negative)));
+            // 不保证"质量差的也往前放"——排序权交给 RankingModel（含作者健康分降权）。
+            interestPart.sort((a, b) -> Double.compare(scoreOf(b, interest, shortInterest, session, negative, authorHealthCache, realtimeProfile),
+                    scoreOf(a, interest, shortInterest, session, negative, authorHealthCache, realtimeProfile)));
         }
 
         Map<Integer, List<FeedItemView>> parsed = new LinkedHashMap<>();
         Map<Integer, List<ScoredItem>> scored = new LinkedHashMap<>();
+        // 向量召回位去重集（声明在池解析之前以固定作用域；池解析阶段引用它为 null-safe 空集，
+        // 实际去重在向量召回计算之后、流量池切片构造之前才生效）。
+        List<ScoredItem> vectorPart = new ArrayList<>();
+        Set<String> vectorKeys = new LinkedHashSet<>();
         for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
             List<FeedItemView> l = new ArrayList<>();
             List<ScoredItem> sl = new ArrayList<>();
@@ -356,7 +398,8 @@ public class FeedTimelineStore {
                 }
                 // 同页去重：已在热点槽位 / 兴趣召回位露出的内容不再占流量池槽位——
                 // 否则同一页会重复出现同一条内容，还白白吃掉一个曝光位。
-                if (hotKeys.contains(it.timelineKey()) || interestKeys.contains(it.timelineKey())) {
+                if (hotKeys.contains(it.timelineKey()) || interestKeys.contains(it.timelineKey())
+                        || vectorKeys.contains(it.timelineKey())) {
                     continue;
                 }
                 l.add(it);
@@ -367,18 +410,71 @@ public class FeedTimelineStore {
             scored.put(pool, sl);
         }
 
-        int remainingSlots = Math.max(limit - hotItems.size() - interestPart.size(), 0);
+        // ==================================================================
+        // 粗排截断（抖音式「召回 → 粗排 → 精排 → 重排」里的粗排层，G1）。
+        // 对流量池全量候选用廉价特征（兴趣/短期/session/实时 + 新鲜度，不查 DB 统计、不查健康分）
+        // 快速打分，只保留 Top-N 进精排——把「海量候选 × 贵精排」压成「少量候选 × 精排」。
+        // 默认关闭（preRankKeepRatio=0 → preRank 返回空集 = 不裁剪，行为与改造前一致）。
+        // ==================================================================
+        final Set<String> preRankKeep;
+        if (preRankFilter.isEnabled()) {
+            List<PreRankCandidate> poolCands = new ArrayList<>();
+            for (List<ScoredItem> sl : scored.values()) {
+                for (ScoredItem s : sl) {
+                    poolCands.add(new PreRankCandidate(s.item(), s.recency()));
+                }
+            }
+            int keep = Math.max(1, preRankFilter.keepCount(limit));
+            preRankKeep = preRankFilter.preRank(poolCands,
+                    new PreRankContext(interest, shortInterest, session, realtimeProfile), keep);
+        } else {
+            preRankKeep = Set.of();
+        }
+
+        // ==================================================================
+        // 向量召回（抖音式多路召回的第四路）：用户向量 × 内容向量余弦相似度 TopN。
+        // 与兴趣召回互补——后者是"显式同标签"，本路是"语义相近但未必同标签"的隐式兴趣。
+        // 候选来自流量池全量（排除已占热点/兴趣槽位者），过量取后由通道内部按相似度截断。
+        // ==================================================================
+        int vectorSlots = (userId != null && vectorRecallRatio > 0d && !interest.isEmpty())
+                ? (int) Math.floor(limit * Math.min(vectorRecallRatio, 1.0d))
+                : 0;
+        if (vectorSlots > 0) {
+            List<FeedItemView> candidates = new ArrayList<>();
+            for (List<FeedItemView> l : parsed.values()) {
+                for (FeedItemView it : l) {
+                    String tk = it == null ? null : it.timelineKey();
+                    if (tk != null && !hotKeys.contains(tk) && !interestKeys.contains(tk)) {
+                        candidates.add(it);
+                    }
+                }
+            }
+            List<FeedItemView> recalled = vectorRecallChannel.recall(userId,
+                    candidates, vectorSlots * RECALL_OVERFETCH + 4);
+            for (FeedItemView it : recalled) {
+                if (vectorPart.size() >= vectorSlots) {
+                    break;
+                }
+                if (it == null) {
+                    continue;
+                }
+                String tk = it.timelineKey();
+                if (tk == null || !vectorKeys.add(tk) || hotKeys.contains(tk) || interestKeys.contains(tk)) {
+                    continue;
+                }
+                vectorPart.add(new ScoredItem(it, recencyOf(it)));
+            }
+            // 同个性化位，内部仍按精排分排序（召回只保证"进得来"，排序权交给 RankingModel）。
+            vectorPart.sort((a, b) -> Double.compare(
+                    scoreOf(b, interest, shortInterest, session, negative, authorHealthCache, realtimeProfile),
+                    scoreOf(a, interest, shortInterest, session, negative, authorHealthCache, realtimeProfile)));
+        }
+
+        int remainingSlots = Math.max(limit - hotItems.size() - interestPart.size() - vectorPart.size(), 0);
         int[] alloc = allocateSlots(remainingSlots, weights, parsed);
         long pageNum = Math.max(page, 0);
         List<FeedItemView> result = new ArrayList<>(limit);
-        // 热点槽位<b>固定钉在最前</b>：它是召回策略刻意给的探索位，不参与后续打散，
-        // 否则"热门内容靠前"的策略语义会被重排层抹掉。
-        result.addAll(hotItems);
-        // 兴趣召回位紧随热点之后：热点是"全站探索"，兴趣是"个性化兑现"，都先于流量池的通用排序。
-        // 不参与后续打散——召回层已按多标签轮转保证覆盖，再交给打散层重排会抹掉"兴趣优先"的语义。
-        for (ScoredItem s : interestPart) {
-            result.add(s.item());
-        }
+
         // 流量池部分先全量收集，最后统一走一次"同类不连刷"重排——在<b>整页范围</b>内打散，
         // 而不是每个池各自打散：否则相邻两池的交界处仍会连着刷同一个话题。
         List<ScoredItem> poolPart = new ArrayList<>();
@@ -400,18 +496,70 @@ public class FeedTimelineStore {
             // 池内按"入流时刻 + 完播率加权"重排：完播率高的内容在同类 cohort 里往前排（抖音式"看完即加权"）。
             // 仅对当页切片重排，Redis 读次数有界（≤ 本池页大小），不扫全量候选。
             List<ScoredItem> slice = new ArrayList<>(items.subList(start, end));
-            // 精排：统一交给 RankingModel。原先这里有一个"各加权项全为 0 就跳过排序"的开关，
+            // 粗排截断：仅保留被粗排选中的候选（preRankKeep 非空时才生效；空 = 不裁剪）。
+            if (!preRankKeep.isEmpty()) {
+                slice.removeIf(s -> !preRankKeep.contains(s.item().timelineKey()));
+            }
+            // 精排：统一交给 RankingModel（含作者健康分降权）。原先这里有一个"各加权项全为 0 就跳过排序"的开关，
             // 现在权重默认非 0 且排序对象是页级切片（≤ 页大小），成本可忽略，故恒重排——
             // 少一个分支就少一处"权重配置错了却以为在排序"的静默分歧。
-            slice.sort((a, b) -> Double.compare(scoreOf(b, interest, shortInterest, session, negative),
-                    scoreOf(a, interest, shortInterest, session, negative)));
+            slice.sort((a, b) -> Double.compare(scoreOf(b, interest, shortInterest, session, negative, authorHealthCache, realtimeProfile),
+                    scoreOf(a, interest, shortInterest, session, negative, authorHealthCache, realtimeProfile)));
             poolPart.addAll(slice);
         }
+
+        // ===== 审核信号接入（抖音式「审核与推荐解耦」：推荐侧直读 tf:mod: KV）=====
+        // 与 P2-1 生产者对称：KV 是给推荐主流程的加速副本，读失败/缺失按 fail-open 放行，绝不阻断浏览。
+        // 召回层：内容处置 INTERCEPT/MONITOR、低健康分/封禁作者 → 剔除公域发现流。
+        Set<String> candidatePosts = new LinkedHashSet<>();
+        Set<String> candidateAuthors = new LinkedHashSet<>();
+        for (FeedItemView it : hotItems) {
+            collectModerationKeys(it, candidatePosts, candidateAuthors);
+        }
+        for (ScoredItem s : interestPart) {
+            collectModerationKeys(s.item(), candidatePosts, candidateAuthors);
+        }
+        for (ScoredItem s : poolPart) {
+            collectModerationKeys(s.item(), candidatePosts, candidateAuthors);
+        }
+
+        Set<String> blockedPosts = Set.of();
+        Set<String> blockedAuthors = Set.of();
+        if (moderationProperties.isEnableRecallFilter()) {
+            blockedPosts = reviewSignalClient.blockedContentKeys(candidatePosts);
+            blockedAuthors = reviewSignalClient.blockedAuthorIds(candidateAuthors);
+        }
+
+        // 流量池部分：统一走一次"同类不连刷"重排（在<b>整页范围</b>内打散），再入流。
         if (diversityWindow > 0) {
             poolPart = diversify(poolPart, diversityWindow);
         }
+
+        // 热点槽位<b>固定钉在最前</b>（先过召回过滤）：它是召回策略刻意给的探索位，不参与后续打散，
+        // 否则"热门内容靠前"的策略语义会被重排层抹掉。
+        for (FeedItemView it : hotItems) {
+            if (!isModerationBlocked(it, blockedPosts, blockedAuthors)) {
+                result.add(it);
+            }
+        }
+        // 兴趣召回位紧随热点之后：热点是"全站探索"，兴趣是"个性化兑现"，都先于流量池的通用排序。
+        // 不参与后续打散——召回层已按多标签轮转保证覆盖，再交给打散层重排会抹掉"兴趣优先"的语义。
+        for (ScoredItem s : interestPart) {
+            if (!isModerationBlocked(s.item(), blockedPosts, blockedAuthors)) {
+                result.add(s.item());
+            }
+        }
+        // 向量召回位紧随兴趣之后（同为个性化位）：热点=全站探索、兴趣/向量=个性化兑现，都先于流量池。
+        for (ScoredItem s : vectorPart) {
+            if (!isModerationBlocked(s.item(), blockedPosts, blockedAuthors)) {
+                result.add(s.item());
+            }
+        }
+        // 流量池部分（已打散）入流。
         for (ScoredItem s : poolPart) {
-            result.add(s.item());
+            if (!isModerationBlocked(s.item(), blockedPosts, blockedAuthors)) {
+                result.add(s.item());
+            }
         }
         return result;
     }
@@ -443,6 +591,51 @@ public class FeedTimelineStore {
         return false;
     }
 
+    // ===== 审核信号接入辅助（抖音式「审核与推荐解耦」：推荐侧直读 tf:mod: KV）=====
+
+    /** 单条候选的键收集：postId(=timelineKey) 入 posts，authorId(从 postId 解析) 入 authors。 */
+    private static void collectModerationKeys(FeedItemView it, Set<String> posts, Set<String> authors) {
+        if (it == null) {
+            return;
+        }
+        String tk = it.timelineKey();
+        if (tk != null) {
+            posts.add(tk);
+        }
+        String aid = authorIdOf(it);
+        if (aid != null) {
+            authors.add(aid);
+        }
+    }
+
+    /** 该候选是否应被召回层剔除（内容处置 INTERCEPT/MONITOR，或作者健康分低于阈值/封禁）。 */
+    private static boolean isModerationBlocked(FeedItemView it, Set<String> blockedPosts, Set<String> blockedAuthors) {
+        String tk = it.timelineKey();
+        if (tk != null && blockedPosts.contains(tk)) {
+            return true;
+        }
+        String aid = authorIdOf(it);
+        return aid != null && blockedAuthors.contains(aid);
+    }
+
+    /**
+     * 从条目身份解析作者 userId：postId 形如 {@code post/{userId}/{uuid}}（历史单图回退 mediaId
+     * {@code media/{userId}/{uuid}.ext}），取首段斜杠后的 userId。与网关写入 {@code tf:mod:account:{userId}}
+     * 的键约定对齐；解析失败返回 {@code null}（fail-open：不剔除、不降权）。
+     */
+    private static String authorIdOf(FeedItemView item) {
+        String pk = item == null ? null : item.timelineKey();
+        if (pk == null || pk.isEmpty()) {
+            return null;
+        }
+        int first = pk.indexOf('/');
+        if (first < 0) {
+            return null;
+        }
+        int second = pk.indexOf('/', first + 1);
+        return second > 0 ? pk.substring(first + 1, second) : null;
+    }
+
     /**
      * 组装一条候选的排序特征并交给 {@link RankingModel} 打分（<b>本类不再内含打分公式</b>）。
      *
@@ -461,7 +654,8 @@ public class FeedTimelineStore {
      */
     private double scoreOf(ScoredItem s, Map<String, Double> interest,
                             Map<String, Double> shortInterest,
-                            List<SessionSequenceService.SessionItem> session, Set<String> negative) {
+                            List<SessionSequenceService.SessionItem> session, Set<String> negative,
+                            Map<String, Double> authorHealthCache, UserRealtimeProfile realtimeProfile) {
         PostStatService.PostStat stat = new PostStatService.PostStat(0, 0, 0, 0, 0, 0);
         try {
             stat = postStatService.snapshot(s.item().timelineKey());
@@ -509,6 +703,35 @@ public class FeedTimelineStore {
         // 封顶交给模型（RankingProperties#interestScoreCap / #shortTermScoreCap / #sessionScoreCap）。
         // 关键：传<b>原始计数</b>而不是预先算好的比率——置信度平滑只有拿到原始计数才做得了
         // （见 LinearWeightedRankingModel）。短期层/session 关闭时对应分恒为 0。
+        // 作者健康分排序系数（抖音式「审核与推荐解耦」接入点）：懒读 tf:mod:account 并按本页缓存，
+        // DEMOTE 档(健康分[60,80)）= demoteScale(默认0.5，与 P0-b「推荐降权0.5」对齐)，其余/缺失/读失败=1.0。
+        double healthScale = 1.0d;
+        if (moderationProperties.isEnableHealthDemotion()) {
+            String aid = authorIdOf(s.item());
+            if (aid != null) {
+                Double cached = authorHealthCache.get(aid);
+                if (cached == null) {
+                    cached = reviewSignalClient.healthScaleOf(aid);
+                    authorHealthCache.put(aid, cached);
+                }
+                healthScale = cached;
+            }
+        }
+        // 实时特征匹配（抖音式「实时特征流」）：本内容标签与页面级实时画像的亲和度之和。
+        // 缺失 / 冷启动 / 读失败 = 0.0（fail-open 不增强也不打压）。
+        double realtimeMatch = 0d;
+        if (realtimeProfile != null && !realtimeProfile.isEmpty()) {
+            List<String> rtags = s.item().tags();
+            if (rtags != null) {
+                Map<String, Double> aff = realtimeProfile.tagAffinity();
+                for (String tag : rtags) {
+                    Double a = aff.get(tag);
+                    if (a != null) {
+                        realtimeMatch += a;
+                    }
+                }
+            }
+        }
         return rankingModel.score(new RankingFeatures(
                 s.recency(),
                 stat.impressions(), stat.playCompletes(), stat.likes(),
@@ -516,7 +739,9 @@ public class FeedTimelineStore {
                 interestScore,
                 shortTermScore,
                 sessionMatch,
-                matchesNegative(s.item(), negative)));
+                matchesNegative(s.item(), negative),
+                healthScale,
+                realtimeMatch));
     }
 
     /**
