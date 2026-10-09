@@ -88,6 +88,21 @@
 
     <build>
         <plugins>
+            <!-- 显式把 Lombok 放到注解处理器路径：clean 编译时 javac 才能发现 @Slf4j/@RequiredArgsConstructor 处理器。
+                 根 pom 的 maven-compiler-plugin 未配 annotationProcessorPaths，仅靠 classpath 发现在本沙箱不生效，
+                 导致 @Slf4j 的 log 字段在 clean 编译下缺失。与根 pom 的 <release> 配置合并生效。 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
