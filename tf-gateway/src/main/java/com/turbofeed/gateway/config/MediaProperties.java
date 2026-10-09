@@ -1,11 +1,14 @@
 package com.turbofeed.gateway.config;
 
 import com.turbofeed.gateway.service.review.ContentModeration;
+import com.turbofeed.gateway.service.review.ModerationMode;
+import com.turbofeed.gateway.service.review.ModerationScenario;
+import com.turbofeed.gateway.service.review.ModerationStrictness;
+import com.turbofeed.gateway.service.review.StrictnessProfile;
+import com.turbofeed.gateway.service.penalty.ViolationCategory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.util.unit.DataSize;
-
-import com.turbofeed.gateway.service.review.ModerationMode;
 
 import java.util.List;
 import java.util.Map;
@@ -855,6 +858,157 @@ public class MediaProperties {
 
         public void setConfidenceThreshold(double confidenceThreshold) {
             this.confidenceThreshold = confidenceThreshold;
+        }
+
+        /** 云内容安全 API 配置（feature-match M2，moderation-mode=cloud）。凭据经环境变量注入本地配置，不进仓库。 */
+        private Cloud cloud = new Cloud();
+
+        public Cloud getCloud() {
+            return cloud;
+        }
+
+        public void setCloud(Cloud cloud) {
+            this.cloud = cloud;
+        }
+
+        /** 双严格度策略配置（feature-match M3）：按来源/场景/类目查表得到阈值档案。默认空 → 回落 STANDARD(=confidence-threshold)。 */
+        private ModerationPolicyConfig moderationPolicy = new ModerationPolicyConfig();
+
+        public ModerationPolicyConfig getModerationPolicy() {
+            return moderationPolicy;
+        }
+
+        public void setModerationPolicy(ModerationPolicyConfig moderationPolicy) {
+            this.moderationPolicy = moderationPolicy;
+        }
+
+        /**
+         * 云内容安全 API（视觉语义初审）配置（feature-match M2，通用适配层）。
+         *
+         * <p>不绑定具体厂商：端点/密钥经环境变量在本地配置（application-local.yml）注入，
+         * 仓库默认空串；未配置且非 simulate 时 {@code CloudContentModeration} fail-closed 转人审。
+         * 厂商特化响应解析留 TODO（实现 {@code CloudResponseParser}）。</p>
+         */
+        public static class Cloud {
+            /** 模拟模式：不调真实 API，用内置样例响应跑通「响应→ModerationVerdict」映射，用于无 key 环境验证。默认 false。 */
+            private boolean simulate = false;
+            /** 云内容安全 API 端点（如 https://green-api.aliyun.com/.../image/scan）。默认空。 */
+            private String endpoint = "";
+            /** 访问 Key（环境变量注入，不进仓库）。默认空。 */
+            private String accessKey = "";
+            /** 访问 Secret（环境变量注入，不进仓库）。默认空。 */
+            private String accessSecret = "";
+            /** 请求超时（毫秒）。默认 5000。 */
+            private int timeoutMs = 5000;
+
+            public boolean isSimulate() {
+                return simulate;
+            }
+
+            public void setSimulate(boolean simulate) {
+                this.simulate = simulate;
+            }
+
+            public String getEndpoint() {
+                return endpoint;
+            }
+
+            public void setEndpoint(String endpoint) {
+                this.endpoint = endpoint;
+            }
+
+            public String getAccessKey() {
+                return accessKey;
+            }
+
+            public void setAccessKey(String accessKey) {
+                this.accessKey = accessKey;
+            }
+
+            public String getAccessSecret() {
+                return accessSecret;
+            }
+
+            public void setAccessSecret(String accessSecret) {
+                this.accessSecret = accessSecret;
+            }
+
+            public int getTimeoutMs() {
+                return timeoutMs;
+            }
+
+            public void setTimeoutMs(int timeoutMs) {
+                this.timeoutMs = timeoutMs;
+            }
+        }
+
+        /**
+         * 双严格度策略配置（feature-match M3）。
+         *
+         * <p>查表优先级：类目(byCategory) &gt; 场景(byScenario) &gt; 来源(bySource) &gt; defaultStrictness。
+         * 解析出的严格度 → {@code profiles} 取阈值档案；未配置 profiles 时回落 STANDARD
+         * （passThreshold=全局 {@code confidence-threshold}）。</p>
+         *
+         * <p>示例（不进仓库，本地配置）：
+         * <pre>
+         * turbofeed.media.review.moderation-policy:
+         *   default-strictness: STANDARD
+         *   by-source:   { RULE: RELAXED, AI: STANDARD, CLOUD: STRICT }
+         *   by-scenario: { PUBLIC_FEED: STRICT, PRIVATE: RELAXED }
+         *   by-category: { CONTENT_POLITICS: STRICT, CONTENT_PORN: STRICT }
+         *   profiles:
+         *     STRICT:   { pass-threshold: 0.95 }
+         *     STANDARD: { pass-threshold: 0.90 }
+         *     RELAXED:  { pass-threshold: 0.70 }
+         * </pre>
+         * </p>
+         */
+        public static class ModerationPolicyConfig {
+            private ModerationStrictness defaultStrictness = ModerationStrictness.STANDARD;
+            private Map<ModerationMode, ModerationStrictness> bySource = new java.util.HashMap<>();
+            private Map<ModerationScenario, ModerationStrictness> byScenario = new java.util.HashMap<>();
+            private Map<ViolationCategory, ModerationStrictness> byCategory = new java.util.HashMap<>();
+            private Map<ModerationStrictness, StrictnessProfile> profiles = new java.util.HashMap<>();
+
+            public ModerationStrictness getDefaultStrictness() {
+                return defaultStrictness;
+            }
+
+            public void setDefaultStrictness(ModerationStrictness defaultStrictness) {
+                this.defaultStrictness = defaultStrictness;
+            }
+
+            public Map<ModerationMode, ModerationStrictness> getBySource() {
+                return bySource;
+            }
+
+            public void setBySource(Map<ModerationMode, ModerationStrictness> bySource) {
+                this.bySource = bySource;
+            }
+
+            public Map<ModerationScenario, ModerationStrictness> getByScenario() {
+                return byScenario;
+            }
+
+            public void setByScenario(Map<ModerationScenario, ModerationStrictness> byScenario) {
+                this.byScenario = byScenario;
+            }
+
+            public Map<ViolationCategory, ModerationStrictness> getByCategory() {
+                return byCategory;
+            }
+
+            public void setByCategory(Map<ViolationCategory, ModerationStrictness> byCategory) {
+                this.byCategory = byCategory;
+            }
+
+            public Map<ModerationStrictness, StrictnessProfile> getProfiles() {
+                return profiles;
+            }
+
+            public void setProfiles(Map<ModerationStrictness, StrictnessProfile> profiles) {
+                this.profiles = profiles;
+            }
         }
     }
 

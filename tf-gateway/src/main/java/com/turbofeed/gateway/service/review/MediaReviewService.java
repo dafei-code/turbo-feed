@@ -21,6 +21,9 @@ import com.turbofeed.gateway.service.penalty.ViolationSeverity;
 import com.turbofeed.gateway.service.penalty.ViolationSource;
 import com.turbofeed.gateway.service.health.AccountHealthService;
 import com.turbofeed.gateway.service.review.credit.ReporterCreditService;
+import com.turbofeed.gateway.service.review.ModerationPolicy;
+import com.turbofeed.gateway.service.review.ModerationScenario;
+import com.turbofeed.gateway.service.review.StrictnessProfile;
 import com.turbofeed.gateway.service.signal.ModerationSignalService;
 import com.turbofeed.gateway.service.behavior.BehaviorLogService;
 import com.turbofeed.shared.caption.CaptionTagParser;
@@ -113,6 +116,8 @@ public class MediaReviewService {
     private final ModerationSignalService moderationSignalService;
     /** 异常行为日志（P2-2）：举报/处置行为持久化，供 P2-1 信号闭环来源。 */
     private final BehaviorLogService behaviorLogService;
+    /** 双严格度策略（feature-match M3）：按 (来源, 场景, 类目) 查表得阈值档案，替换 M1 单一全局阈值。 */
+    private final ModerationPolicy moderationPolicy;
 
     public MediaReviewService(MediaJdbcRepository mediaRepository,
                               MediaTagJdbcRepository mediaTagRepository,
@@ -130,7 +135,8 @@ public class MediaReviewService {
             ReporterCreditService reporterCreditService,
             ReviewWaterLevelService reviewWaterLevelService,
             ModerationSignalService moderationSignalService,
-            BehaviorLogService behaviorLogService) {
+            BehaviorLogService behaviorLogService,
+            ModerationPolicy moderationPolicy) {
         this.mediaRepository = mediaRepository;
         this.mediaTagRepository = mediaTagRepository;
         this.redisTemplate = redisTemplate;
@@ -148,6 +154,7 @@ public class MediaReviewService {
         this.reviewWaterLevelService = reviewWaterLevelService;
         this.moderationSignalService = moderationSignalService;
         this.behaviorLogService = behaviorLogService;
+        this.moderationPolicy = moderationPolicy;
     }
 
     /**
@@ -217,10 +224,14 @@ public class MediaReviewService {
             return;
         }
 
-        // 梯度分流：中等把握（置信度不足或显式要求人审）→ 强制送人审（先审后放），不论账号信用等级
-        if (verdict.needHumanScan() || verdict.confidence() < properties.getReview().getConfidenceThreshold()) {
-            log.info("机审中等把握（confidence={}, needHumanScan={}）→ 强制人审队列（先审后放）: postId={}, userId={}",
-                    verdict.confidence(), verdict.needHumanScan(), event.postId(), userId);
+        // 梯度分流（M1 单阈值 → M3 双严格度矩阵）：按 (来源, 场景, 类目) 取阈值档案，
+        // 中等把握（置信度不足或显式要求人审）→ 强制送人审（先审后放），不论账号信用等级。
+        StrictnessProfile profile = moderationPolicy.resolve(
+                contentModeration.getActiveMode(), ModerationScenario.PUBLIC_FEED, null);
+        if (verdict.needHumanScan() || verdict.confidence() < profile.getPassThreshold()) {
+            log.info("机审中等把握（confidence={}, needHumanScan={}, strictness={}, passThreshold={}）→ 强制人审队列（先审后放）: postId={}, userId={}",
+                    verdict.confidence(), verdict.needHumanScan(),
+                    contentModeration.getActiveMode(), profile.getPassThreshold(), event.postId(), userId);
             return;
         }
 

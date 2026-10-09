@@ -47,6 +47,11 @@ public class ContentModerationRouter {
         return delegate.moderate(mediaId, userId, url);
     }
 
+    /** 当前激活机审实现的来源（feature-match M3：双严格度按来源查表用）。 */
+    public ModerationMode getActiveMode() {
+        return delegate.mode();
+    }
+
     /**
      * 转发带置信度梯度的机审裁定到当前激活的实现（feature-match M1）。
      *
