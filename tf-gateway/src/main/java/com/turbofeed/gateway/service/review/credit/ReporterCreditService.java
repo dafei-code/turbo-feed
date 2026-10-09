@@ -4,6 +4,7 @@ import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.repository.ReporterCreditRepository;
 import com.turbofeed.gateway.service.health.AccountHealthService;
 import com.turbofeed.gateway.service.penalty.ViolationSeverity;
+import com.turbofeed.gateway.service.signal.ModerationSignalService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -34,12 +35,16 @@ public class ReporterCreditService {
     private final ReporterCreditRepository repository;
     private final MediaProperties mediaProperties;
     private final AccountHealthService accountHealthService;
+    /** 审核信号外供 KV（P2-1）：举报人信用写成 Redis，供上游推荐系统消费。 */
+    private final ModerationSignalService moderationSignalService;
 
     public ReporterCreditService(ReporterCreditRepository repository, MediaProperties mediaProperties,
-                                 AccountHealthService accountHealthService) {
+                                 AccountHealthService accountHealthService,
+                                 ModerationSignalService moderationSignalService) {
         this.repository = repository;
         this.mediaProperties = mediaProperties;
         this.accountHealthService = accountHealthService;
+        this.moderationSignalService = moderationSignalService;
     }
 
     /** 每次举报提交成功（落库后）调用：累计总举报数 + 刷新最后举报时间。 */
@@ -56,6 +61,8 @@ public class ReporterCreditService {
         repository.apply(userId, cur.totalReports(), cur.upheld() + 1, cur.rejected(),
                 next, cur.lastReportAt());
         log.info("举报人信用加分（举报成立）: userId={}, credibility={}->{}", userId, cur.credibility(), next);
+        // P2-1：把「举报人信用」写成外供 KV（刷新式）。
+        moderationSignalService.publishReporterCredit(userId, next, accountHealthService.isBanned(userId));
     }
 
     /**
@@ -70,6 +77,8 @@ public class ReporterCreditService {
         int rejected = cur.rejected() + 1;
         repository.apply(userId, cur.totalReports(), cur.upheld(), rejected, next, cur.lastReportAt());
         log.info("举报人信用扣分（举报被驳回）: userId={}, credibility={}->{}", userId, cur.credibility(), next);
+        // P2-1：把「举报人信用」写成外供 KV（刷新式）。
+        moderationSignalService.publishReporterCredit(userId, next, accountHealthService.isBanned(userId));
         if (rejected >= mediaProperties.getReview().getReporterAbuseRejectedThreshold()) {
             // 恶意举报惩罚：复用账号健康分通道（扣 LOW），与内容违规三通道解耦。
             accountHealthService.recordViolation(userId, ViolationSeverity.LOW);

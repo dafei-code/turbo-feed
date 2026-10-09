@@ -21,6 +21,7 @@ import com.turbofeed.gateway.service.penalty.ViolationSeverity;
 import com.turbofeed.gateway.service.penalty.ViolationSource;
 import com.turbofeed.gateway.service.health.AccountHealthService;
 import com.turbofeed.gateway.service.review.credit.ReporterCreditService;
+import com.turbofeed.gateway.service.signal.ModerationSignalService;
 import com.turbofeed.shared.caption.CaptionTagParser;
 import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
@@ -107,6 +108,8 @@ public class MediaReviewService {
     private final ReporterCreditService reporterCreditService;
     /** 全局举报水位（P1 #132 动态阈值因子）：近窗举报总量 → 复审升级阈值浮动。 */
     private final ReviewWaterLevelService reviewWaterLevelService;
+    /** 审核信号外供 KV（P2-1）：处置/健康分写成 Redis，供上游推荐系统消费。 */
+    private final ModerationSignalService moderationSignalService;
 
     public MediaReviewService(MediaJdbcRepository mediaRepository,
                               MediaTagJdbcRepository mediaTagRepository,
@@ -122,7 +125,8 @@ public class MediaReviewService {
                               DispositionPolicy dispositionPolicy,
             AccountHealthService accountHealthService,
             ReporterCreditService reporterCreditService,
-            ReviewWaterLevelService reviewWaterLevelService) {
+            ReviewWaterLevelService reviewWaterLevelService,
+            ModerationSignalService moderationSignalService) {
         this.mediaRepository = mediaRepository;
         this.mediaTagRepository = mediaTagRepository;
         this.redisTemplate = redisTemplate;
@@ -138,6 +142,7 @@ public class MediaReviewService {
         this.accountHealthService = accountHealthService;
         this.reporterCreditService = reporterCreditService;
         this.reviewWaterLevelService = reviewWaterLevelService;
+        this.moderationSignalService = moderationSignalService;
     }
 
     /**
@@ -647,14 +652,36 @@ public class MediaReviewService {
                                  String operator, String reason, ViolationSeverity severity) {
         // P0-b：确认违规 → 扣健康分（MONITOR/INTERCEPT 都走这里，二者都是已确认违规）。
         // 与信用扣分、落处罚同触发点；三通道解耦，互不影响。
-        accountHealthService.recordViolation(authorId, severity);
+        int newScore = accountHealthService.recordViolation(authorId, severity);
+        // P2-1：把「账号健康分」写成外供 KV（刷新式，上游推荐据此降权/过滤）。
+        moderationSignalService.publishAccountHealth(authorId, newScore, healthTier(newScore));
 
         Disposition d = dispositionPolicy.resolve(source, severity);
+        // P2-1：把「内容处置」写成外供 KV（MONITOR/INTERCEPT 都写，二者都是已确认违规）。
+        String postId = mediaRepository.findPostId(mediaId, authorId);
+        moderationSignalService.publishMediaDisposition(postId, d, severity, source);
         if (d == Disposition.MONITOR) {
             return softLimit(mediaId, authorId, source, reason);
         }
         // INTERCEPT（默认）：原有「下架+扣信用+落处罚」，行为不变。
         return takeDownAndPenalize(mediaId, authorId, source, operator, reason, severity);
+    }
+
+    /** P2-1 健康分梯级（与 P0-b 阶梯一致，给上游推荐直接判定用）：NORMAL 正常 / DEMOTE 降权 / RESTRICT_SUBMIT 限投稿 / RESTRICT_MONETIZE 限变现 / BANNED 封禁。 */
+    private static String healthTier(int score) {
+        if (score >= 80) {
+            return "NORMAL";
+        }
+        if (score >= 60) {
+            return "DEMOTE";
+        }
+        if (score >= 40) {
+            return "RESTRICT_SUBMIT";
+        }
+        if (score > 0) {
+            return "RESTRICT_MONETIZE";
+        }
+        return "BANNED";
     }
 
     /**

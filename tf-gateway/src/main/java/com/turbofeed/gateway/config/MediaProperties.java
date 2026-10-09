@@ -70,6 +70,9 @@ public class MediaProperties {
     /** 评论区异常感知配置（turbofeed.media.comment-risk.*，P1 #133）。 */
     private CommentRisk commentRisk = new CommentRisk();
 
+    /** 审核信号外供 KV 配置（turbofeed.media.signal.*，P2-1）：命名空间与 TTL。 */
+    private Signal signal = new Signal();
+
     /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
      *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
     private boolean processingEnabled = false;
@@ -395,6 +398,14 @@ public class MediaProperties {
 
     public void setCommentRisk(CommentRisk commentRisk) {
         this.commentRisk = commentRisk;
+    }
+
+    public Signal getSignal() {
+        return signal;
+    }
+
+    public void setSignal(Signal signal) {
+        this.signal = signal;
     }
 
     /**
@@ -880,6 +891,58 @@ public class MediaProperties {
 
         public void setFoldOnSpike(boolean foldOnSpike) {
             this.foldOnSpike = foldOnSpike;
+        }
+    }
+
+    /**
+     * 审核信号外供 KV 配置（turbofeed.media.signal.*，P2-1）。
+     *
+     * <p>抖音式「审核与推荐解耦」：turbo-feed 把内容处置/账号健康分/举报人信用写成 Redis KV，
+     * 上游推荐系统直读做召回过滤与排序降权，不直连审核 MySQL。本配置控制命名空间前缀与各信号 TTL。</p>
+     */
+    public static class Signal {
+        /** KV 命名空间前缀（所有审核信号键的前缀）。默认 tf:mod:，避免与现有 tf:report:/tf:comment:/tf:media: 混用。 */
+        private String namespace = "tf:mod:";
+
+        /** 内容处置信号 TTL（秒）：随内容生命周期，默认 30 天可刷新。0 表示不设过期（不推荐）。 */
+        private long mediaTtlSeconds = 2592000L;
+
+        /** 账号健康分信号 TTL（秒）：刷新式，默认 0=不过期（每次写覆盖）。 */
+        private long accountTtlSeconds = 0L;
+
+        /** 举报人信用信号 TTL（秒）：刷新式，默认 0=不过期。 */
+        private long reporterTtlSeconds = 0L;
+
+        public String getNamespace() {
+            return namespace;
+        }
+
+        public void setNamespace(String namespace) {
+            this.namespace = namespace;
+        }
+
+        public long getMediaTtlSeconds() {
+            return mediaTtlSeconds;
+        }
+
+        public void setMediaTtlSeconds(long mediaTtlSeconds) {
+            this.mediaTtlSeconds = mediaTtlSeconds;
+        }
+
+        public long getAccountTtlSeconds() {
+            return accountTtlSeconds;
+        }
+
+        public void setAccountTtlSeconds(long accountTtlSeconds) {
+            this.accountTtlSeconds = accountTtlSeconds;
+        }
+
+        public long getReporterTtlSeconds() {
+            return reporterTtlSeconds;
+        }
+
+        public void setReporterTtlSeconds(long reporterTtlSeconds) {
+            this.reporterTtlSeconds = reporterTtlSeconds;
         }
     }
 }
