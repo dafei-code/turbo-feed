@@ -77,6 +77,8 @@ turbofeed:
     #   interest-recall-ratio 兴趣位：按用户兴趣标签召回（因人而异）
     hot-recall-ratio: ${TURBOFEED_FEED_HOT_RECALL_RATIO:0.1}
     interest-recall-ratio: ${TURBOFEED_FEED_INTEREST_RECALL_RATIO:0.15}
+    # 关注流召回占每页槽位比例（抖音式「关注流 / 社交分发」G6）：关注作者近期已审内容混入发现流
+    follow-recall-ratio: ${TURBOFEED_FEED_FOLLOW_RECALL_RATIO:0.1}
     # 兴趣画像的完播加权（观看进度是连续信号，不该压成固定权重）
     interest:
       watch-skip-ratio: 0.3        # 低于该观看比例 = 划走，不计画像（划走不表达兴趣）

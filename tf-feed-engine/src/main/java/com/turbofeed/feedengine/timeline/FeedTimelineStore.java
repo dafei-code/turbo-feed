@@ -15,6 +15,7 @@ import com.turbofeed.feedengine.ranking.PreRankFilter;
 import com.turbofeed.feedengine.ranking.RealtimeFeatureService;
 import com.turbofeed.feedengine.ranking.UserRealtimeProfile;
 import com.turbofeed.feedengine.recall.VectorRecallChannel;
+import com.turbofeed.feedengine.social.FollowService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,6 +30,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -120,6 +122,8 @@ public class FeedTimelineStore {
     private static final String TL_PREFIX = "tf:feed:tl:";
     /** 反查索引前缀：帖身份（postId，历史数据回退 mediaId）-&gt; 所在桶 key + 成员串（用于精确 ZREM）。 */
     private static final String IDX_PREFIX = "tf:feed:idx:";
+    /** 作者内容索引前缀（关注流 G6 召回用）：authorId -&gt; ZSET(成员串 → 入流时刻毫秒)。 */
+    private static final String AUTHOR_PREFIX = "tf:feed:author:";
     /** 合并最近 N 天分桶（覆盖发现流"看最新"诉求，同时限制归并成本）。 */
     private static final int MERGE_BUCKETS = 3;
     /** 单桶最多拉取条数（防单天批准量过大时归并开销爆炸）。 */
@@ -132,6 +136,10 @@ public class FeedTimelineStore {
     private static final String IDX_SEP = "\u0001";
     /** 兴趣召回的过量取倍数：过滤掉与热点/流量池重复的后仍要够填满槽位。 */
     private static final int RECALL_OVERFETCH = 3;
+    /** 关注流召回：单次最多扫描的关注作者数（限制 Redis 往返，避免大 V 关注爆炸）。 */
+    private static final int FOLLOW_SCAN_LIMIT = 50;
+    /** 关注流召回：每位关注作者最多取其近期已审内容条数。 */
+    private static final int FOLLOW_PER_AUTHOR = 3;
 
     /**
      * 兴趣召回位的时间序取值：以<b>内容创建时间</b>作代理。
@@ -178,11 +186,22 @@ public class FeedTimelineStore {
     @Value("${turbofeed.feed.vector-recall-ratio:0.1}")
     private double vectorRecallRatio;
     /**
-     * 打散窗口（抖音式"同类不连刷"）：同一标签的内容在连续的该窗口大小内<b>不重复出现</b>。
-     * {@code 0} = 关闭打散，页内严格按重排后的分值顺序输出。
+     * 关注流召回占每页槽位的比例（抖音式「关注流 / 社交分发」G6，推荐消费侧）。
+     * {@code 0} = 关闭，读路径退化为「热点 + 兴趣 + 向量 + 流量池」，不做社交分发。
      */
-    @Value("${turbofeed.feed.diversity-window:3}")
-    private int diversityWindow;
+    @Value("${turbofeed.feed.follow-recall-ratio:0.1}")
+    private double followRecallRatio;
+    /**
+     * 重排多样性配置（抖音式「同类不连刷 + 作者去重 + 标签打散」上下文感知重排 G8）。
+     * 取代原先单一的 {@code diversity-window} 二进制打散，升级为贪心 listwise 重排。
+     */
+    private final DiversityRerankProperties diversityRerankProperties;
+    /** 上下文感知重排服务（G8）：贪心 listwise 重排，强化作者去重与标签多样性，fail-open 回退原序。 */
+    private final DiversityRerankService diversityRerankService;
+    /** 冷启动探索服务（G7：EE 探索利用）——给新内容 / 低曝光内容固定曝光配额，避免饿死。 */
+    private final ColdStartService coldStartService;
+    /** 关注关系读取（G6：抖音式「关注流 / 社交分发」推荐消费侧，读 tf:follow:{userId} 社交图）。 */
+    private final FollowService followService;
 
     /**
      * 审核通过：按信用池写时间线（denormalized {@link FeedItemView} JSON），fail-open。
@@ -223,6 +242,12 @@ public class FeedTimelineStore {
         redisTemplate.opsForZSet().add(key, member, approvedAt.toEpochMilli());
         redisTemplate.expire(key, BUCKET_TTL);
         redisTemplate.opsForValue().set(IDX_PREFIX + timelineKey, key + IDX_SEP + member, BUCKET_TTL);
+        // 关注流作者索引（G6）：denormalized 同成员串，score = 入流时刻；关注召回依此取作者近期内容。
+        String authorId = authorIdOf(item);
+        if (authorId != null) {
+            redisTemplate.opsForZSet().add(AUTHOR_PREFIX + authorId, member, approvedAt.toEpochMilli());
+            redisTemplate.expire(AUTHOR_PREFIX + authorId, BUCKET_TTL);
+        }
     }
 
     /** 兼容重载：未指定池时落 L1 小池。 */
@@ -470,7 +495,42 @@ public class FeedTimelineStore {
                     scoreOf(a, interest, shortInterest, session, negative, authorHealthCache, realtimeProfile)));
         }
 
-        int remainingSlots = Math.max(limit - hotItems.size() - interestPart.size() - vectorPart.size(), 0);
+        // ==================================================================
+        // 关注流召回（抖音式「关注流 / 社交分发」G6，推荐消费侧）：读 tf:follow:{userId} 社交图，
+        // 把关注作者的近期已审内容混入发现流。它是流量池之外的<b>社交分发通路</b>，单独占
+        // follow-recall-ratio 的槽位；与热点/兴趣/向量并列，剩余归流量池。
+        // 关注关系缺失 / 无关注 → 空，发现流退化为纯公域（fail-open 不阻断浏览）。
+        // ==================================================================
+        int followSlots = (userId != null && followRecallRatio > 0d && followService.hasFollows(userId))
+                ? (int) Math.floor(limit * Math.min(followRecallRatio, 1.0d))
+                : 0;
+        List<ScoredItem> followPart = new ArrayList<>();
+        Set<String> followKeys = new LinkedHashSet<>();
+        if (followSlots > 0) {
+            int budget = followSlots * RECALL_OVERFETCH + 4;
+            for (String aid : followService.followedAuthors(userId, FOLLOW_SCAN_LIMIT)) {
+                if (followPart.size() >= followSlots) {
+                    break;
+                }
+                for (FeedItemView it : authorRecentItems(aid, FOLLOW_PER_AUTHOR)) {
+                    if (followPart.size() >= followSlots) {
+                        break;
+                    }
+                    String tk = it == null ? null : it.timelineKey();
+                    if (tk == null || !followKeys.add(tk) || hotKeys.contains(tk)
+                            || interestKeys.contains(tk) || vectorKeys.contains(tk)) {
+                        continue;
+                    }
+                    followPart.add(new ScoredItem(it, recencyOf(it)));
+                }
+            }
+            // 社交位内部仍按精排分排序（召回只保证"进得来"，排序权交给 RankingModel）。
+            followPart.sort((a, b) -> Double.compare(
+                    scoreOf(b, interest, shortInterest, session, negative, authorHealthCache, realtimeProfile),
+                    scoreOf(a, interest, shortInterest, session, negative, authorHealthCache, realtimeProfile)));
+        }
+
+        int remainingSlots = Math.max(limit - hotItems.size() - followPart.size() - interestPart.size() - vectorPart.size(), 0);
         int[] alloc = allocateSlots(remainingSlots, weights, parsed);
         long pageNum = Math.max(page, 0);
         List<FeedItemView> result = new ArrayList<>(limit);
@@ -519,6 +579,9 @@ public class FeedTimelineStore {
         for (ScoredItem s : interestPart) {
             collectModerationKeys(s.item(), candidatePosts, candidateAuthors);
         }
+        for (ScoredItem s : followPart) {
+            collectModerationKeys(s.item(), candidatePosts, candidateAuthors);
+        }
         for (ScoredItem s : poolPart) {
             collectModerationKeys(s.item(), candidatePosts, candidateAuthors);
         }
@@ -530,16 +593,29 @@ public class FeedTimelineStore {
             blockedAuthors = reviewSignalClient.blockedAuthorIds(candidateAuthors);
         }
 
-        // 流量池部分：统一走一次"同类不连刷"重排（在<b>整页范围</b>内打散），再入流。
-        if (diversityWindow > 0) {
-            poolPart = diversify(poolPart, diversityWindow);
-        }
+        // 流量池部分：统一走一次上下文感知重排（G8：在整页范围内强化作者去重 + 标签多样性），再入流。
+        poolPart = diversityRerankService.rerank(poolPart);
+
+        // ===== 冷启动探索池（G7：EE 探索利用）=====
+        // 给新内容 / 低曝光内容固定曝光配额，避免「分数低就永远刷不到」的饿死。
+        // 取候选失败 / 关闭 → 空集，不注入（fail-open 不阻断浏览）。
+        int coldBudget = coldStartService.exploreBudget(limit);
+        List<FeedItemView> coldPart = coldBudget > 0
+                ? collectColdStartCandidates(coldBudget, coldStartService.coldThreshold(Instant.now()), coldStartService.maxPool())
+                : List.of();
 
         // 热点槽位<b>固定钉在最前</b>（先过召回过滤）：它是召回策略刻意给的探索位，不参与后续打散，
         // 否则"热门内容靠前"的策略语义会被重排层抹掉。
         for (FeedItemView it : hotItems) {
             if (!isModerationBlocked(it, blockedPosts, blockedAuthors)) {
                 result.add(it);
+            }
+        }
+        // 关注流位紧随热门之后（同为强信号位）：热点是"全站探索"、关注是"社交分发"，都先于兴趣/向量/流量池。
+        // 单列于召回层、不参与后续打散——再交给重排层会把"关注优先"的语义抹掉。
+        for (ScoredItem s : followPart) {
+            if (!isModerationBlocked(s.item(), blockedPosts, blockedAuthors)) {
+                result.add(s.item());
             }
         }
         // 兴趣召回位紧随热点之后：热点是"全站探索"，兴趣是"个性化兑现"，都先于流量池的通用排序。
@@ -561,11 +637,31 @@ public class FeedTimelineStore {
                 result.add(s.item());
             }
         }
+        // 冷启动探索池（G7）：把新鲜内容注入发现流末尾，去重 + 过召回过滤，保证新内容有曝光出路。
+        if (!coldPart.isEmpty()) {
+            Set<String> resultKeys = new HashSet<>();
+            for (FeedItemView r : result) {
+                String k = r.timelineKey();
+                if (k != null) {
+                    resultKeys.add(k);
+                }
+            }
+            for (FeedItemView it : coldPart) {
+                String tk = it.timelineKey();
+                if (tk != null && resultKeys.contains(tk)) {
+                    continue; // 已在热/兴趣/向量/池中，避免重复
+                }
+                if (isModerationBlocked(it, blockedPosts, blockedAuthors)) {
+                    continue;
+                }
+                result.add(it);
+            }
+        }
         return result;
     }
 
-    /** 池内重排用的"内容 + 入流时刻(score)"持有体。 */
-    private record ScoredItem(FeedItemView item, double recency) {
+    /** 池内重排用的"内容 + 入流时刻(score)"持有体（package-private 以便 {@link DiversityRerankService} 复用）。 */
+    record ScoredItem(FeedItemView item, double recency) {
     }
 
     // 负反馈惩罚的量级已迁至 RankingProperties#negativePenaltyMillis（打分统一归模型）。
@@ -623,8 +719,16 @@ public class FeedTimelineStore {
      * {@code media/{userId}/{uuid}.ext}），取首段斜杠后的 userId。与网关写入 {@code tf:mod:account:{userId}}
      * 的键约定对齐；解析失败返回 {@code null}（fail-open：不剔除、不降权）。
      */
-    private static String authorIdOf(FeedItemView item) {
-        String pk = item == null ? null : item.timelineKey();
+    static String authorIdOf(FeedItemView item) {
+        return authorIdFromKey(item == null ? null : item.timelineKey());
+    }
+
+    /**
+     * 从帖身份解析作者 userId：postId 形如 {@code post/{userId}/{uuid}}（历史单图回退 mediaId
+     * {@code media/{userId}/{uuid}.ext}），取首段斜杠后的 userId。与网关写入 {@code tf:mod:account:{userId}}
+     * 的键约定对齐；解析失败返回 {@code null}（fail-open：不剔除、不降权）。
+     */
+    private static String authorIdFromKey(String pk) {
         if (pk == null || pk.isEmpty()) {
             return null;
         }
@@ -745,75 +849,35 @@ public class FeedTimelineStore {
     }
 
     /**
-     * <b>重排层</b>：抖音式"同类不连刷"打散——同一标签的内容在连续 {@code window} 条内不重复出现。
+     * 取某作者近期已审内容（关注流 G6 召回用）：读作者索引 ZSET {@code tf:feed:author:{authorId}}，
+     * 按入流时刻倒序取最新 cap 条。复用 {@link #parseMember}；任何异常 → 空集（fail-open 不注入社交内容）。
      *
-     * <p><b>为什么需要这一层</b>：前序排序是按分值排的，但分值高不代表多样性好。若某一话题
-     * 恰好批量过审（比如一批都带同一标签），纯按分排会让用户连着刷到同一类内容，体感极差，
-     * 且会<b>挤占其它话题的曝光</b>，反过来拖累后续的兴趣探索与赛马样本质量。
-     * 打分决定"谁更重要"，打散决定"怎么排才好看"，二者是两个不同的问题。</p>
-     *
-     * <p><b>为什么用贪心前扫而不是重打分</b>：目标是"<b>尽量保持打分顺序</b>前提下的最小扰动"
-     * ——逐个输出位干活：在当前滑动窗口允许的前提下，取候选里<b>排名最靠前</b>的那一条。
-     * 这样高分内容的位置最多被推后几名，而不会像"给同类内容统一乘个惩罚系数"那样
-     * 把整个分值分布都改掉（后者会让排序失去可解释性）。</p>
-     *
-     * <p><b>打不散时为何按原序取首条</b>：若窗口内所有候选都撞标签（典型场景：整页只有一个话题，
-     * 或 content 极少），此时<b>不丢内容</b>比"形式上的多样性"更重要——宁可连着刷，也不能少给内容。
-     * 这是重排层的兜底底线。</p>
-     *
-     * <p><b>分页稳定性</b>：本方法只调整当前页内部的相对次序，不会改变哪些内容属于本页
-     * （页成员由 {@code [start,end)} 切片决定），因此翻页不会重复或漏内容。</p>
-     *
-     * @param ranked 已按 {@link #displayScore} 降序排好的候选
-     * @param window 滑动窗口大小（同一标签在该窗口内至多出现一次）
+     * @param authorId 作者 userId（来自 tf:follow 社交图）
+     * @param cap      最多返回条数
      */
-    private List<ScoredItem> diversify(List<ScoredItem> ranked, int window) {
-        if (ranked.size() <= 2 || window <= 0) {
-            return ranked;
+    private List<FeedItemView> authorRecentItems(String authorId, int cap) {
+        if (authorId == null || authorId.isEmpty() || cap <= 0) {
+            return List.of();
         }
-        List<ScoredItem> remaining = new ArrayList<>(ranked);
-        List<ScoredItem> out = new ArrayList<>(ranked.size());
-        List<Set<String>> recent = new ArrayList<>();      // 最近 window 条已输出内容的标签
-        while (!remaining.isEmpty()) {
-            int pick = -1;
-            for (int i = 0; i < remaining.size(); i++) {
-                if (!overlapsWindow(tagsOf(remaining.get(i)), recent)) {
-                    pick = i;
-                    break;
+        try {
+            Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
+                    .reverseRangeByScoreWithScores(AUTHOR_PREFIX + authorId,
+                            Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, 0, cap);
+            if (tuples == null) {
+                return List.of();
+            }
+            List<FeedItemView> out = new ArrayList<>(tuples.size());
+            for (ZSetOperations.TypedTuple<String> t : tuples) {
+                FeedItemView it = parseMember(t == null ? null : t.getValue());
+                if (it != null && it.approved()) {
+                    out.add(it);
                 }
             }
-            if (pick < 0) {
-                pick = 0;                                   // 都撞标签：保内容不保形式
-            }
-            ScoredItem chosen = remaining.remove(pick);
-            out.add(chosen);
-            recent.add(tagsOf(chosen));
-            if (recent.size() > window) {
-                recent.remove(0);
-            }
+            return out;
+        } catch (Exception e) {
+            log.warn("关注流作者内容读取失败（fail-open 不注入）: authorId={}, {}", authorId, e.getMessage());
+            return List.of();
         }
-        return out;
-    }
-
-    /** 内容的标签集合（{@code null} 安全）。无标签的内容不参与打散判定（永远不会"撞标签"）。 */
-    private static Set<String> tagsOf(ScoredItem s) {
-        List<String> tags = s.item().tags();
-        return tags == null ? Set.of() : new LinkedHashSet<>(tags);
-    }
-
-    /** 该内容的标签是否与滑动窗口内任意一条已输出内容相交。 */
-    private static boolean overlapsWindow(Set<String> tags, List<Set<String>> window) {
-        if (tags.isEmpty()) {
-            return false;
-        }
-        for (Set<String> prev : window) {
-            for (String t : tags) {
-                if (prev.contains(t)) {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     private FeedItemView parseMember(String json) {
@@ -824,6 +888,57 @@ public class FeedTimelineStore {
             return objectMapper.readValue(json, FeedItemView.class);
         } catch (Exception ignore) {
             return null;
+        }
+    }
+
+    /**
+     * 冷启动探索候选（G7）：从 L1/L2（新内容试水池）近 {@code MERGE_BUCKETS} 天桶里，
+     * 取入流时刻晚于 {@code threshold} 的新鲜内容，最多 {@code budget} 条。
+     * 复用池读取 + parseMember；任何异常 → 空集（fail-open 不注入探索内容）。
+     *
+     * @param budget    最多返回的候选条数
+     * @param threshold  新鲜阈值（入流时刻晚于此即视为冷启动内容）
+     * @param maxPool    只取前 maxPool 个池（试水池）
+     */
+    private List<FeedItemView> collectColdStartCandidates(int budget, Instant threshold, int maxPool) {
+        if (budget <= 0) {
+            return List.of();
+        }
+        try {
+            List<FeedItemView> out = new ArrayList<>(budget);
+            double minScore = threshold.toEpochMilli();
+            LocalDate today = LocalDate.now();
+            int pools = Math.min(maxPool, MAX_POOL_LEVELS);
+            for (int pool = 1; pool <= pools; pool++) {
+                for (int d = 0; d < MERGE_BUCKETS; d++) {
+                    String date = today.minusDays(d).format(DateTimeFormatter.BASIC_ISO_DATE);
+                    String key = TL_PREFIX + pool + ":" + date;
+                    Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
+                            .reverseRangeByScoreWithScores(key, minScore, Double.POSITIVE_INFINITY, 0, budget * 4);
+                    if (tuples == null) {
+                        continue;
+                    }
+                    for (ZSetOperations.TypedTuple<String> t : tuples) {
+                        FeedItemView it = parseMember(t == null ? null : t.getValue());
+                        if (it != null && it.approved()) {
+                            out.add(it);
+                        }
+                        if (out.size() >= budget) {
+                            break;
+                        }
+                    }
+                    if (out.size() >= budget) {
+                        break;
+                    }
+                }
+                if (out.size() >= budget) {
+                    break;
+                }
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("冷启动探索候选收集失败（fail-open 不注入）: {}", e.getMessage());
+            return List.of();
         }
     }
 
@@ -1139,8 +1254,14 @@ public class FeedTimelineStore {
         }
         int sep = location.indexOf(IDX_SEP);
         if (sep > 0) {
-            redisTemplate.opsForZSet().remove(location.substring(0, sep),
-                    location.substring(sep + IDX_SEP.length()));
+            String bucketKey = location.substring(0, sep);
+            String member = location.substring(sep + IDX_SEP.length());
+            redisTemplate.opsForZSet().remove(bucketKey, member);
+            // 同步摘除关注流作者索引（G6）：同成员串，避免已下架内容仍出现在关注流
+            String aid = authorIdFromKey(timelineKey);
+            if (aid != null) {
+                redisTemplate.opsForZSet().remove(AUTHOR_PREFIX + aid, member);
+            }
         }
         if (idxKeyToDelete != null) {
             redisTemplate.delete(idxKeyToDelete);

@@ -18,6 +18,9 @@ logs/
 application-local.yml
 shardingsphere-config-local.yml
 
+# 测试运行残片（本地启动/种子脚本生成的临时数据，绝不入仓）
+data/
+
 # 工作目录下的本地覆盖配置（Spring Boot 默认加载 file:./application.yml，
 # 优先级高于 classpath，用于放本机 MinIO/Redis/JWT 等凭据）。
 # ⚠️ 只忽略"工作目录"位置的 application.yml（仓库根与各部署单元模块根），
