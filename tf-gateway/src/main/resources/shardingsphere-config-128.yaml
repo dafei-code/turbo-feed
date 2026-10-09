@@ -217,6 +217,8 @@ rules:
       - ds_0.review_task
       - ds_0.account_health
       - ds_0.reporter_credit
+      # 异常行为日志（P2-2，抖音式审核闭环数据底座）：单表落 ds_0，只写多读少追加流。
+      - ds_0.behavior_log
 
 props:
   sql-show: true

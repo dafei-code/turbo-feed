@@ -73,6 +73,9 @@ public class MediaProperties {
     /** 审核信号外供 KV 配置（turbofeed.media.signal.*，P2-1）：命名空间与 TTL。 */
     private Signal signal = new Signal();
 
+    /** 异常行为日志配置（turbofeed.media.behavior-log.*，P2-2）：开关 + 行为落库控制。 */
+    private BehaviorLog behaviorLog = new BehaviorLog();
+
     /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
      *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
     private boolean processingEnabled = false;
@@ -406,6 +409,14 @@ public class MediaProperties {
 
     public void setSignal(Signal signal) {
         this.signal = signal;
+    }
+
+    public BehaviorLog getBehaviorLog() {
+        return behaviorLog;
+    }
+
+    public void setBehaviorLog(BehaviorLog behaviorLog) {
+        this.behaviorLog = behaviorLog;
     }
 
     /**
@@ -943,6 +954,26 @@ public class MediaProperties {
 
         public void setReporterTtlSeconds(long reporterTtlSeconds) {
             this.reporterTtlSeconds = reporterTtlSeconds;
+        }
+    }
+
+    /**
+     * 异常行为日志配置（turbofeed.media.behavior-log.*，P2-2）。
+     *
+     * <p>把审核相关行为（举报 / 评论异常 / 处置）持久化到 behavior_log 单表，供 P2-1 审核信号做闭环来源
+     * （离线跑恶意账号聚类、举报人信用再训练、全局举报水位因子校准）。开关默认开，fail-open：
+     * 写入失败仅记日志、不影响主流程。</p>
+     */
+    public static class BehaviorLog {
+        /** 是否启用行为日志写入（排障可置 false 一键停用）。默认 true。 */
+        private boolean enabled = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
         }
     }
 }

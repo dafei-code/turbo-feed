@@ -7,6 +7,7 @@ import com.turbofeed.gateway.util.SnowflakeIdGenerator;
 import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.repository.ReviewTaskRepository;
 import com.turbofeed.gateway.service.review.ReviewTask;
+import com.turbofeed.gateway.service.behavior.BehaviorLogService;
 import com.turbofeed.shared.result.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -52,6 +53,8 @@ public class CommentService {
     private final ReviewTaskRepository reviewTaskRepository;
     /** 评论区风控配置（turbofeed.media.comment-risk.*）。 */
     private final MediaProperties properties;
+    /** 异常行为日志（P2-2）：评论异常行为持久化，供 P2-1 信号闭环来源（fail-open）。 */
+    private final BehaviorLogService behaviorLogService;
 
     /**
      * 发布评论（顶层或回复）。
@@ -103,6 +106,8 @@ public class CommentService {
             reviewTaskRepository.insert(mediaId, userId, ReviewTask.TYPE_COMMENT_ANOMALY,
                     (int) Math.min(risk.rateCount(), Integer.MAX_VALUE));
             log.info("评论区速率异常→建巡查任务(COMMENT_ANOMALY，REVIEWER 二次研判): mediaId={}, rateCount={}", mediaId, risk.rateCount());
+            // 异常行为日志（P2-2）：评论异常行为归评论者，供 P2-1 信号闭环来源（fail-open，不影响主流程）
+            behaviorLogService.record(userId, mediaId, "COMMENT_ANOMALY", "rateCount=" + risk.rateCount());
         }
         return c;
     }

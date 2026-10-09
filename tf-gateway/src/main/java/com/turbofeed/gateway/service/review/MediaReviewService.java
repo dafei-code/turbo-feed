@@ -22,6 +22,7 @@ import com.turbofeed.gateway.service.penalty.ViolationSource;
 import com.turbofeed.gateway.service.health.AccountHealthService;
 import com.turbofeed.gateway.service.review.credit.ReporterCreditService;
 import com.turbofeed.gateway.service.signal.ModerationSignalService;
+import com.turbofeed.gateway.service.behavior.BehaviorLogService;
 import com.turbofeed.shared.caption.CaptionTagParser;
 import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
@@ -110,6 +111,8 @@ public class MediaReviewService {
     private final ReviewWaterLevelService reviewWaterLevelService;
     /** 审核信号外供 KV（P2-1）：处置/健康分写成 Redis，供上游推荐系统消费。 */
     private final ModerationSignalService moderationSignalService;
+    /** 异常行为日志（P2-2）：举报/处置行为持久化，供 P2-1 信号闭环来源。 */
+    private final BehaviorLogService behaviorLogService;
 
     public MediaReviewService(MediaJdbcRepository mediaRepository,
                               MediaTagJdbcRepository mediaTagRepository,
@@ -126,7 +129,8 @@ public class MediaReviewService {
             AccountHealthService accountHealthService,
             ReporterCreditService reporterCreditService,
             ReviewWaterLevelService reviewWaterLevelService,
-            ModerationSignalService moderationSignalService) {
+            ModerationSignalService moderationSignalService,
+            BehaviorLogService behaviorLogService) {
         this.mediaRepository = mediaRepository;
         this.mediaTagRepository = mediaTagRepository;
         this.redisTemplate = redisTemplate;
@@ -143,6 +147,7 @@ public class MediaReviewService {
         this.reporterCreditService = reporterCreditService;
         this.reviewWaterLevelService = reviewWaterLevelService;
         this.moderationSignalService = moderationSignalService;
+        this.behaviorLogService = behaviorLogService;
     }
 
     /**
@@ -337,6 +342,8 @@ public class MediaReviewService {
         reporterCreditService.recordReport(reporterUserId);
         // 全局举报水位计数（#132 动态阈值因子）：每举报 +1，近窗爆量时收紧升级阈值
         reviewWaterLevelService.recordReport();
+        // 异常行为日志（P2-2）：举报行为归举报人，供 P2-1 信号闭环来源（fail-open，不影响主流程）
+        behaviorLogService.record(reporterUserId, mediaId, "REPORT", "category=" + category.code() + ",reason=" + reason);
         if (isHighRisk(reason) || isHighRiskCategory(category)) {
             // CAS 保证「真正完成下架的那一次」才扣信用+落处罚；其余并发举报得 0 行幂等返回。
             int rows = applyDisposition(mediaId, authorId, ViolationSource.HUMAN_REPORT, "SYSTEM",
@@ -660,6 +667,8 @@ public class MediaReviewService {
         // P2-1：把「内容处置」写成外供 KV（MONITOR/INTERCEPT 都写，二者都是已确认违规）。
         String postId = mediaRepository.findPostId(mediaId, authorId);
         moderationSignalService.publishMediaDisposition(postId, d, severity, source);
+        // 异常行为日志（P2-2）：处置行为归内容作者，供 P2-1 信号闭环来源（fail-open，不影响主流程）
+        behaviorLogService.record(authorId, mediaId, "DISPOSITION", "severity=" + severity + ",source=" + source + ",action=" + d);
         if (d == Disposition.MONITOR) {
             return softLimit(mediaId, authorId, source, reason);
         }
