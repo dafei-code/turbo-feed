@@ -79,6 +79,23 @@ turbofeed:
     interest-recall-ratio: ${TURBOFEED_FEED_INTEREST_RECALL_RATIO:0.15}
     # 关注流召回占每页槽位比例（抖音式「关注流 / 社交分发」G6）：关注作者近期已审内容混入发现流
     follow-recall-ratio: ${TURBOFEED_FEED_FOLLOW_RECALL_RATIO:0.1}
+    # 向量召回（抖音式双塔/ANN 的本地可运行版）：
+    #   mode=hash  → 标签哈希占位（默认，零回归，无需任何训练）
+    #   mode=model → 走 Redis KV 中由 TagCooccurrenceTrainer 训练/写入的共现向量
+    #               （tf:emb:item:{timelineKey} / tf:emb:tag:{tag}），A0 即"学出来的"语义向量
+    #   真实双塔（A1）上线时只需把向量写入同一 KV，Source/通道/余弦全不动
+    recall:
+      vector:
+        mode: ${TURBOFEED_FEED_RECALL_VECTOR_MODE:hash}
+        auto-train: ${TURBOFEED_FEED_RECALL_VECTOR_AUTOTRAIN:true}
+        dim: 64
+        item-prefix: tf:emb:item:
+        tag-prefix: tf:emb:tag:
+        user-tags: 30
+        epochs: 2
+        learning-rate: 0.025
+        negatives: 5
+        max-scan: 5000
     # 生态调控层（G9 抖音式「生态调控」）：对流量池主内容源施加整页全局占比配额，
     # 防止单一话题/作者垄断整页（与 G8 滑窗重排互补：G8=局部窗、G9=整页全局）
     ecosystem:

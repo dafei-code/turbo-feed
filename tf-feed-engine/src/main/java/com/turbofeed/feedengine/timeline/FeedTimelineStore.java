@@ -472,7 +472,10 @@ public class FeedTimelineStore {
         // 与兴趣召回互补——后者是"显式同标签"，本路是"语义相近但未必同标签"的隐式兴趣。
         // 候选来自流量池全量（排除已占热点/兴趣槽位者），过量取后由通道内部按相似度截断。
         // ==================================================================
-        int vectorSlots = (userId != null && vectorRecallRatio > 0d && !interest.isEmpty())
+        // 向量召回门控：userId 非空 + 配比>0 即开。不再要求兴趣画像非空——
+        // model 模式下用户向量来自 KV/共现训练（未必走 InterestService），无画像时通道内部 fail-open 返回空，
+        // 不影响其余召回路。hash 模式无画像时 likewise 返回空，行为不变（零回归）。
+        int vectorSlots = (userId != null && vectorRecallRatio > 0d)
                 ? (int) Math.floor(limit * Math.min(vectorRecallRatio, 1.0d))
                 : 0;
         if (vectorSlots > 0) {
