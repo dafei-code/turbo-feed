@@ -1,4 +1,4 @@
-package com.turbofeed.feedengine.recall;
+package com.turbofeed.shared.recall;
 
 import java.util.Base64;
 
@@ -10,7 +10,10 @@ import java.util.Base64;
  * 解码失败返回 {@code null}（调用方据此 fail-open 跳过该内容）。</p>
  *
  * <p>与具体模型无关：哈希占位、SGNS 共现、真实双塔产出的向量都走同一套编解码，
- * 切换来源只换 Source 实现，本类与余弦计算 {@link TagEmbeddingService#cosine} 不动。</p>
+ * 切换来源只换 Source 实现，本类与余弦计算不动。</p>
+ *
+ * <p>原位于 tf-feed-engine/recall，因 A1 离线双塔训练作业（gateway 模块）也需同一套
+ * 编解码而抽到 {@code tf-shared}，成为引擎与网关共用的唯一向量编解码实现，避免重复。</p>
  */
 public final class EmbeddingCodec {
 

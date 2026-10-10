@@ -221,6 +221,9 @@ rules:
       - ds_0.behavior_log
       # 交互行为事件（A1 真双塔训练样本底座）：单表落 ds_0，只写多读少追加流。
       - ds_0.interaction_event
+      # 用户兴趣标签持久化（抖音式画像耐久层 + 离线特征源）：单表落 ds_0。
+      # 由网关 InterestTagSnapshotJob 定时 SCAN 引擎 Redis 画像键 upsert（引擎无 DataSource）。
+      - ds_0.interest_tag
 
 props:
   sql-show: true
