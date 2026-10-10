@@ -305,6 +305,12 @@ public class FeedTimelineStore {
         UserRealtimeProfile realtimeProfile = realtimeFeatureService.profileOf(userId);
         // 作者健康分排序系数懒加载缓存（抖音式「审核与推荐解耦」：scoreOf 内按 authorId 读 tf:mod:account 并缓存本页）。
         Map<String, Double> authorHealthCache = new LinkedHashMap<>();
+        // 关注流作者集合（G6 跨页去重前置）：提前一次性取出，作为「除关注位外所有召回通道」的排除集，
+        // 保证关注作者的内容只在首屏关注位曝光一次，不会在深页热点/兴趣/向量/流量池/冷启动位重复刷屏
+        // （用户诉求的「整页去重」跨页部分）。关注关系缺失/无关注 → 空集，其余通道行为完全不变。
+        Set<String> followeeAuthors = (userId != null && followService.hasFollows(userId))
+                ? new HashSet<>(followService.followedAuthors(userId, FOLLOW_SCAN_LIMIT))
+                : Set.of();
         // 先按池收集近 N 天、每池最新的候选（保留 ZSET score 以便回退路径按入流时刻排序）
         Map<Integer, List<ZSetOperations.TypedTuple<String>>> byPool = new LinkedHashMap<>();
         for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
@@ -365,7 +371,8 @@ public class FeedTimelineStore {
         if (hotSlots > 0) {
             for (String tk : postStatService.hotTimelineKeys(hotSlots)) {
                 FeedItemView hot = memberOf(tk);
-                if (hot != null && hotKeys.add(tk)) {
+                // 关注作者内容只在首屏关注位曝光，热点通道不再重复刷（跨页去重）。
+                if (hot != null && !followeeAuthors.contains(authorIdOf(hot)) && hotKeys.add(tk)) {
                     hotItems.add(hot);
                 }
             }
@@ -394,7 +401,8 @@ public class FeedTimelineStore {
                 if (interestPart.size() >= interestSlots) {
                     break;
                 }
-                if (tk == null || !interestKeys.add(tk) || hotKeys.contains(tk)) {
+                if (tk == null || !interestKeys.add(tk) || hotKeys.contains(tk)
+                        || followeeAuthors.contains(authorIdFromKey(tk))) {
                     continue;
                 }
                 FeedItemView it = memberOf(tk);
@@ -426,7 +434,8 @@ public class FeedTimelineStore {
                 // 同页去重：已在热点槽位 / 兴趣召回位露出的内容不再占流量池槽位——
                 // 否则同一页会重复出现同一条内容，还白白吃掉一个曝光位。
                 if (hotKeys.contains(it.timelineKey()) || interestKeys.contains(it.timelineKey())
-                        || vectorKeys.contains(it.timelineKey())) {
+                        || vectorKeys.contains(it.timelineKey())
+                        || followeeAuthors.contains(authorIdOf(it))) {
                     continue;
                 }
                 l.add(it);
@@ -486,7 +495,8 @@ public class FeedTimelineStore {
                     continue;
                 }
                 String tk = it.timelineKey();
-                if (tk == null || !vectorKeys.add(tk) || hotKeys.contains(tk) || interestKeys.contains(tk)) {
+                if (tk == null || !vectorKeys.add(tk) || hotKeys.contains(tk) || interestKeys.contains(tk)
+                        || followeeAuthors.contains(authorIdOf(it))) {
                     continue;
                 }
                 vectorPart.add(new ScoredItem(it, recencyOf(it)));
@@ -503,14 +513,17 @@ public class FeedTimelineStore {
         // follow-recall-ratio 的槽位；与热点/兴趣/向量并列，剩余归流量池。
         // 关注关系缺失 / 无关注 → 空，发现流退化为纯公域（fail-open 不阻断浏览）。
         // ==================================================================
-        int followSlots = (userId != null && followRecallRatio > 0d && followService.hasFollows(userId))
+        // 关注流召回仅在第 0 页注入（page==0）：关注作者是"社交分发强信号"，应置顶于发现流首屏；
+        // 若每页都重算并重钉，同一关注作者内容会在翻页时反复刷屏（整页去重前曾导致每页必含、翻页永不枯竭）。
+        // 深页中该作者内容仍可由流量池自然浮现，不会丢失曝光。
+        int followSlots = (userId != null && page == 0 && followRecallRatio > 0d && !followeeAuthors.isEmpty())
                 ? (int) Math.floor(limit * Math.min(followRecallRatio, 1.0d))
                 : 0;
         List<ScoredItem> followPart = new ArrayList<>();
         Set<String> followKeys = new LinkedHashSet<>();
         if (followSlots > 0) {
             int budget = followSlots * RECALL_OVERFETCH + 4;
-            for (String aid : followService.followedAuthors(userId, FOLLOW_SCAN_LIMIT)) {
+            for (String aid : followeeAuthors) {
                 if (followPart.size() >= followSlots) {
                     break;
                 }
@@ -536,6 +549,9 @@ public class FeedTimelineStore {
         int[] alloc = allocateSlots(remainingSlots, weights, parsed);
         long pageNum = Math.max(page, 0);
         List<FeedItemView> result = new ArrayList<>(limit);
+        // 整页级去重：按 timelineKey 记录已入流内容，避免关注/兴趣/向量/热点 与 流量池/冷启动 命中同一内容时
+        // 在同一页内重复出现（如关注作者内容同时落入关注位与流量池位）；G9 全局占比统计亦因此不被重复计数。
+        Set<String> seen = new HashSet<>();
 
         // 流量池部分先全量收集，最后统一走一次"同类不连刷"重排——在<b>整页范围</b>内打散，
         // 而不是每个池各自打散：否则相邻两池的交界处仍会连着刷同一个话题。
@@ -610,51 +626,48 @@ public class FeedTimelineStore {
         // 热点槽位<b>固定钉在最前</b>（先过召回过滤）：它是召回策略刻意给的探索位，不参与后续打散，
         // 否则"热门内容靠前"的策略语义会被重排层抹掉。
         for (FeedItemView it : hotItems) {
-            if (!isModerationBlocked(it, blockedPosts, blockedAuthors)) {
-                result.add(it);
+            if (isModerationBlocked(it, blockedPosts, blockedAuthors) || !seen.add(it.timelineKey())) {
+                continue;
             }
+            result.add(it);
         }
         // 关注流位紧随热门之后（同为强信号位）：热点是"全站探索"、关注是"社交分发"，都先于兴趣/向量/流量池。
         // 单列于召回层、不参与后续打散——再交给重排层会把"关注优先"的语义抹掉。
         for (ScoredItem s : followPart) {
-            if (!isModerationBlocked(s.item(), blockedPosts, blockedAuthors)) {
-                result.add(s.item());
+            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !seen.add(s.item().timelineKey())) {
+                continue;
             }
+            result.add(s.item());
         }
         // 兴趣召回位紧随热点之后：热点是"全站探索"，兴趣是"个性化兑现"，都先于流量池的通用排序。
         // 不参与后续打散——召回层已按多标签轮转保证覆盖，再交给打散层重排会抹掉"兴趣优先"的语义。
         for (ScoredItem s : interestPart) {
-            if (!isModerationBlocked(s.item(), blockedPosts, blockedAuthors)) {
-                result.add(s.item());
+            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !seen.add(s.item().timelineKey())) {
+                continue;
             }
+            result.add(s.item());
         }
         // 向量召回位紧随兴趣之后（同为个性化位）：热点=全站探索、兴趣/向量=个性化兑现，都先于流量池。
         for (ScoredItem s : vectorPart) {
-            if (!isModerationBlocked(s.item(), blockedPosts, blockedAuthors)) {
-                result.add(s.item());
+            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !seen.add(s.item().timelineKey())) {
+                continue;
             }
+            result.add(s.item());
         }
         // 流量池部分（已打散）入流。
         for (ScoredItem s : poolPart) {
-            if (!isModerationBlocked(s.item(), blockedPosts, blockedAuthors)) {
-                result.add(s.item());
+            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !seen.add(s.item().timelineKey())) {
+                continue;
             }
+            result.add(s.item());
         }
         // 冷启动探索池（G7）：把新鲜内容注入发现流末尾，去重 + 过召回过滤，保证新内容有曝光出路。
+        // 复用整页 seen 集合，与热/关注/兴趣/向量/池统一去重，避免任何来源命中同一内容时重复出现。
         if (!coldPart.isEmpty()) {
-            Set<String> resultKeys = new HashSet<>();
-            for (FeedItemView r : result) {
-                String k = r.timelineKey();
-                if (k != null) {
-                    resultKeys.add(k);
-                }
-            }
             for (FeedItemView it : coldPart) {
-                String tk = it.timelineKey();
-                if (tk != null && resultKeys.contains(tk)) {
-                    continue; // 已在热/兴趣/向量/池中，避免重复
-                }
-                if (isModerationBlocked(it, blockedPosts, blockedAuthors)) {
+                // 关注作者内容不在冷启动位重复刷（跨页去重）：只在首屏关注位曝光一次。
+                if (isModerationBlocked(it, blockedPosts, blockedAuthors) || followeeAuthors.contains(authorIdOf(it))
+                        || !seen.add(it.timelineKey())) {
                     continue;
                 }
                 result.add(it);
