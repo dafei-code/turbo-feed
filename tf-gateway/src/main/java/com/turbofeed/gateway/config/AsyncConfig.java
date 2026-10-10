@@ -67,4 +67,27 @@ public class AsyncConfig {
         executor.initialize();
         return executor;
     }
+
+    /**
+     * 交互事件执行器（{@code @Async("interactionExecutor")} 显式绑定）。
+     *
+     * <p><b>为什么独立</b>：交互事件（曝光/点击/完播…）写放大远高于审核/上传尾巴，且失败
+     * 仅丢训练样本（fail-open）。独立池避免与 reviewExecutor / uploadFinalizeExecutor 互相抢占，
+     * 且可给更大队列吸收推荐流突发。背压同用 CallerRunsPolicy：池与队列打满时退回调用线程
+     * 同步写，宁可让推荐接口变慢，也不静默丢弃样本（样本丢失 = 模型学偏）。</p>
+     */
+    @Bean("interactionExecutor")
+    public Executor interactionExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(16);
+        executor.setQueueCapacity(1024);
+        executor.setThreadNamePrefix("interaction-");
+        executor.setAllowCoreThreadTimeOut(true);
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
 }

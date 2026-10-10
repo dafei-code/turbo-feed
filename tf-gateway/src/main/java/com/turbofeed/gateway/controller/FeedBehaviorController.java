@@ -5,6 +5,7 @@ import com.turbofeed.gateway.security.RequirePermission;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.feed.BehaviorEventPublisher;
 import com.turbofeed.gateway.service.feed.BehaviorReport;
+import com.turbofeed.gateway.service.feed.InteractionEventService;
 import com.turbofeed.gateway.service.review.MediaReviewService;
 import com.turbofeed.shared.result.Result;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -35,10 +36,13 @@ public class FeedBehaviorController {
 
     private final BehaviorEventPublisher publisher;
     private final MediaReviewService reviewService;
+    private final InteractionEventService interactionEventService;
 
-    public FeedBehaviorController(BehaviorEventPublisher publisher, MediaReviewService reviewService) {
+    public FeedBehaviorController(BehaviorEventPublisher publisher, MediaReviewService reviewService,
+                                  InteractionEventService interactionEventService) {
         this.publisher = publisher;
         this.reviewService = reviewService;
+        this.interactionEventService = interactionEventService;
     }
 
     /**
@@ -52,11 +56,17 @@ public class FeedBehaviorController {
     @PostMapping("/behavior")
     @RequirePermission(Permission.FEED_INTERACT)
     public Result<Void> report(@RequestBody List<BehaviorReport> reports) {
-        publisher.report(reports, UserContextHolder.requireUserId());
+        String userId = UserContextHolder.requireUserId();
+        publisher.report(reports, userId);
         // 热度复审旁路：逐条正向互动计入热度（fail-open，异常不阻断发布主流程）。
         if (reports != null) {
             for (BehaviorReport r : reports) {
                 reviewService.onInteraction(r.postId(), r.type());
+                // A1 训练样本：客户端互动（点击/完播/点赞/评论/分享/不感兴趣）落 interaction_event。
+                // 服务端 IMPRESSION 已是曝光真源，客户端再报 IMPRESSION 跳过避免重复计数。
+                if (!"IMPRESSION".equals(r.type())) {
+                    interactionEventService.record(userId, r.postId(), r.type(), r.position(), null, null, null, r.requestId());
+                }
             }
         }
         return Result.ok();

@@ -79,6 +79,9 @@ public class MediaProperties {
     /** 异常行为日志配置（turbofeed.media.behavior-log.*，P2-2）：开关 + 行为落库控制。 */
     private BehaviorLog behaviorLog = new BehaviorLog();
 
+    /** 交互行为事件开关（A1 真双塔训练样本底座）：默认开，fail-open。 */
+    private InteractionEvent interactionEvent = new InteractionEvent();
+
     /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
      *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
     private boolean processingEnabled = false;
@@ -420,6 +423,14 @@ public class MediaProperties {
 
     public void setBehaviorLog(BehaviorLog behaviorLog) {
         this.behaviorLog = behaviorLog;
+    }
+
+    public InteractionEvent getInteractionEvent() {
+        return interactionEvent;
+    }
+
+    public void setInteractionEvent(InteractionEvent interactionEvent) {
+        this.interactionEvent = interactionEvent;
     }
 
     /**
@@ -1135,6 +1146,26 @@ public class MediaProperties {
      */
     public static class BehaviorLog {
         /** 是否启用行为日志写入（排障可置 false 一键停用）。默认 true。 */
+        private boolean enabled = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+    }
+
+    /**
+     * 交互行为事件配置（A1 真双塔召回的训练样本底座）。
+     *
+     * <p>把用户对内容的互动反馈（曝光/观看/完播/点赞/评论/分享/不感兴趣）持久化到
+     * interaction_event 单表，供离线双塔作业产出 (user, item, label) 三元组。开关默认开，
+     * fail-open：写入失败仅记日志、不影响推荐/互动主流程。</p>
+     */
+    public static class InteractionEvent {
+        /** 是否启用交互事件写入（排障可置 false 一键停用）。默认 true。 */
         private boolean enabled = true;
 
         public boolean isEnabled() {

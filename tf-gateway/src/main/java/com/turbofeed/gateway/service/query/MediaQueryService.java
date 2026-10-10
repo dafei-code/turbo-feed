@@ -3,6 +3,7 @@ package com.turbofeed.gateway.service.query;
 import com.turbofeed.gateway.client.FeedEngineClient;
 import com.turbofeed.gateway.config.FeedEngineProperties;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
+import com.turbofeed.gateway.service.feed.InteractionEventService;
 import com.turbofeed.gateway.service.review.MediaStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +42,7 @@ public class MediaQueryService {
     private final StringRedisTemplate redisTemplate;
     private final FeedEngineClient feedEngineClient;
     private final FeedEngineProperties feedProperties;
+    private final InteractionEventService interactionEventService;
 
     /** 单条状态缓存 TTL：60s（个人中心轮询刷新，较长 TTL 进一步降 DB 压力） */
     private static final Duration STATUS_CACHE_TTL = Duration.ofSeconds(60);
@@ -79,7 +81,9 @@ public class MediaQueryService {
         int limit = size <= 0 ? 20 : size;
         Optional<List<MediaItem>> fromEngine = feedEngineClient.recommended(page, limit, userId);
         if (fromEngine.isPresent()) {
-            return fromEngine.get();
+            List<MediaItem> items = fromEngine.get();
+            emitImpressions(userId, items, page);
+            return items;
         }
         if (feedProperties.getDegradedMode() == FeedEngineProperties.DegradedMode.LOCAL_SCAN) {
             // 演示口径：等价于拆分前的行为——带回源跨分片广播，生产禁用
@@ -91,6 +95,29 @@ public class MediaQueryService {
         log.warn("Feed 引擎不可用，降级返回空列表（degraded-mode=empty，拒绝跨分片广播）: page={}, size={}",
                 page, limit);
         return List.of();
+    }
+
+    /**
+     * 服务端曝光发射（A1 训练样本底座）：推荐流组页返回时，对每条内容异步记一次 IMPRESSION。
+     *
+     * <p>匿名用户（userId 为空）跳过——个性化训练样本需绑定用户；异步 fire-and-forget，
+     * 不阻塞返回（落库失败由 {@link InteractionEventService} fail-open 兜底）。</p>
+     *
+     * @param userId 已登录用户（来自 JWT）；匿名为 null
+     * @param items  本次返回的推荐内容
+     * @param page   页码
+     */
+    private void emitImpressions(String userId, List<MediaItem> items, int page) {
+        if (userId == null || userId.isBlank() || items == null || items.isEmpty()) {
+            return;
+        }
+        for (int i = 0; i < items.size(); i++) {
+            MediaItem item = items.get(i);
+            String key = item.timelineKey();
+            if (key != null && !key.isBlank()) {
+                interactionEventService.recordImpression(userId, key, page, i);
+            }
+        }
     }
 
     /**
