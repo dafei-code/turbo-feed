@@ -65,6 +65,7 @@ public class TagCooccurrenceTrainer {
     private final double lr;
     private final int negatives;
     private final int maxScan;
+    private final VectorIndexWriter vectorIndexWriter;
     private final AtomicBoolean trained = new AtomicBoolean(false);
 
     /** 运行时内存中的 tag 向量（训练后填充；供 {@link RedisUserEmbeddingSource} 即时聚合用户向量）。 */
@@ -80,7 +81,8 @@ public class TagCooccurrenceTrainer {
                                   @Value("${turbofeed.feed.recall.vector.epochs:2}") int epochs,
                                   @Value("${turbofeed.feed.recall.vector.learning-rate:0.025}") double lr,
                                   @Value("${turbofeed.feed.recall.vector.negatives:5}") int negatives,
-                                  @Value("${turbofeed.feed.recall.vector.max-scan:5000}") int maxScan) {
+                                  @Value("${turbofeed.feed.recall.vector.max-scan:5000}") int maxScan,
+                                  VectorIndexWriter vectorIndexWriter) {
         this.redis = redis;
         this.objectMapper = objectMapper;
         this.mode = mode;
@@ -92,11 +94,13 @@ public class TagCooccurrenceTrainer {
         this.lr = lr;
         this.negatives = negatives;
         this.maxScan = maxScan;
+        this.vectorIndexWriter = vectorIndexWriter;
     }
 
     @EventListener(ContextRefreshedEvent.class)
     public void onStart() {
-        if (!"model".equalsIgnoreCase(mode) || !autoTrain) {
+        // model / ann 都需要训练：model 写 KV，ann 额外写 HNSW hash 索引（同源训练）
+        if (!autoTrain || (!"model".equalsIgnoreCase(mode) && !"ann".equalsIgnoreCase(mode))) {
             return;
         }
         if (trained.compareAndSet(false, true)) {
@@ -122,6 +126,10 @@ public class TagCooccurrenceTrainer {
         }
         Map<String, double[]> vecs = trainSgns(tagLists);
         this.tagVectors = vecs;
+        // ann 模式需建 HNSW 索引（plain redis 上失败 fail-open，不影响 KV 写入）
+        if ("ann".equalsIgnoreCase(mode)) {
+            vectorIndexWriter.ensureIndex();
+        }
         int tagWritten = 0;
         for (Map.Entry<String, double[]> e : vecs.entrySet()) {
             try {
@@ -140,6 +148,8 @@ public class TagCooccurrenceTrainer {
             try {
                 redis.opsForValue().set(itemPrefix + it.timelineKey(), EmbeddingCodec.encode(iv));
                 itemWritten++;
+                // ann 模式额外写 HNSW hash（vec=原始 FLOAT32 + payload=FeedItemView JSON）
+                vectorIndexWriter.writeItem(it.timelineKey(), iv, it);
             } catch (Exception ignore) {
                 // 单条跳过
             }

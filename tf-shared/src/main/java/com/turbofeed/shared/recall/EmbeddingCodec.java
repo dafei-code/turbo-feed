@@ -1,5 +1,7 @@
 package com.turbofeed.shared.recall;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Base64;
 
 /**
@@ -55,5 +57,38 @@ public final class EmbeddingCodec {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /**
+     * 向量 → 原始 FLOAT32 小端字节（供 RediSearch HNSW 的 VECTOR 字段存储）。
+     *
+     * <p>RediSearch 的向量索引只认<b>原始 FLOAT32 二进制</b>（不接受 base64、也不接受 double），
+     * 且要求小端序；{@code StringRedisTemplate} 按 UTF-8 序列化会破坏二进制，故 HNSW 路径必须
+     * 经 {@code RedisConnection} 原生命令直接写字节。double→float 精度损失可忽略，L2 归一不变。</p>
+     *
+     * <p>与原 double/base64 编解码并存：KV 走 base64（{@link #encode}），向量索引走本方法。</p>
+     */
+    public static byte[] toFloat32Bytes(double[] v) {
+        if (v == null) {
+            return null;
+        }
+        ByteBuffer buf = ByteBuffer.allocate(v.length * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        for (double x : v) {
+            buf.putFloat((float) x);
+        }
+        return buf.array();
+    }
+
+    /** 原始 FLOAT32 小端字节 → 向量（非法/长度不符 → {@code null}，fail-open）。 */
+    public static double[] fromFloat32Bytes(byte[] b) {
+        if (b == null || b.length == 0 || b.length % Float.BYTES != 0) {
+            return null;
+        }
+        ByteBuffer buf = ByteBuffer.wrap(b).order(ByteOrder.LITTLE_ENDIAN);
+        double[] v = new double[b.length / Float.BYTES];
+        for (int i = 0; i < v.length; i++) {
+            v[i] = buf.getFloat();
+        }
+        return v;
     }
 }

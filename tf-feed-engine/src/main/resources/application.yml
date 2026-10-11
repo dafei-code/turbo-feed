@@ -84,13 +84,20 @@ turbofeed:
     #   mode=model → 走 Redis KV 中由 TagCooccurrenceTrainer 训练/写入的共现向量
     #               （tf:emb:item:{timelineKey} / tf:emb:tag:{tag}），A0 即"学出来的"语义向量
     #   真实双塔（A1）上线时只需把向量写入同一 KV，Source/通道/余弦全不动
+    #   mode=ann   → 路线 A：抖音式工业版，走 Redis Stack / RediSearch 的 HNSW 向量索引做亚线性 KNN 召回；
+    #               向量仍由 A0 同源训练，额外写入 tf:vec:item:{timelineKey} hash（vec=原始 FLOAT32 二进制 +
+    #               payload=FeedItemView JSON）。需 Redis Stack / Redis 8（含 query engine）环境；
+    #               模块缺失时 FT.SEARCH 失败 → fail-open 退回暴力余弦，不影响启动/浏览。默认不启用。
     recall:
       vector:
         mode: ${TURBOFEED_FEED_RECALL_VECTOR_MODE:hash}
         auto-train: ${TURBOFEED_FEED_RECALL_VECTOR_AUTOTRAIN:true}
         dim: 64
-        item-prefix: tf:emb:item:
-        tag-prefix: tf:emb:tag:
+        item-prefix: "tf:emb:item:"
+        tag-prefix: "tf:emb:tag:"
+        # ann 模式（HNSW 索引）配置：仅 mode=ann 且 Redis Stack 时生效
+        ann-index: ${TURBOFEED_FEED_RECALL_VECTOR_ANN_INDEX:tfVecIdx}
+        vec-prefix: "tf:vec:item:"
         user-tags: 30
         epochs: 2
         learning-rate: 0.025

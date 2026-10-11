@@ -5,7 +5,7 @@ import com.turbofeed.shared.recall.EmbeddingCodec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -26,14 +26,15 @@ import java.util.Map;
  * </ul>
  * </p>
  *
- * <p>与默认 {@link InterestUserEmbeddingSource}（hash 占位）互斥：本类在 {@code mode=model} 时
- * 以 {@code @Primary} 生效。无 tag 向量/空画像/KV 全缺 → {@code null}（退回规则召回）。</p>
+ * <p>与默认 {@link InterestUserEmbeddingSource}（hash 占位）互斥：本类在 {@code mode=model} 或
+ * {@code mode=ann} 时以 {@code @Primary} 生效（见 {@link VectorUserSourceEnabledCondition}）。
+ * 无 tag 向量/空画像/KV 全缺 → {@code null}（退回规则召回）。</p>
  *
  * <p>⚠️ 本机构建环境 Lombok 对新文件不生效 → 显式构造器 + 显式 Logger。</p>
  */
 @Service
 @Primary
-@ConditionalOnProperty(name = "turbofeed.feed.recall.vector.mode", havingValue = "model")
+@Conditional(VectorUserSourceEnabledCondition.class)
 public class RedisUserEmbeddingSource implements UserEmbeddingSource {
 
     private static final Logger log = LoggerFactory.getLogger(RedisUserEmbeddingSource.class);
