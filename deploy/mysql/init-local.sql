@@ -2816,12 +2816,15 @@ CREATE TABLE `turbo_feed_2`.`appeal_3` (
   KEY `idx_author` (`author_user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容申诉表(物理分片 turbo_feed_2.appeal_3)';
 
--- ==================== 评论表（comment_0..comment_3，分片键 media_id，HASH_MOD 4 节点） ====================
+-- ==================== 评论表（comment_0..comment_127，分片键 media_id，HASH_MOD 128 节点） ====================
 -- 设计：comment 独立于 media（独立包、独立读写路径），按 media_id 分片保证
 --       「读某条内容下所有评论」单分片命中，与 media(user_id) 分片键正交——不依赖
 --       content 所在库即可定位评论。楼中楼用 root_id(顶层=commentId) + parent_id(直接父)
 --       双指针：一级列表 root_id=commentId，二级回复按 root_id 聚合按 created_at 排。
--- 配置见 shardingsphere-config.yaml 的 comment autoTable。
+-- 扩容（④，2026-10-13）：分片数 4 -> 128，物理表由 SS autoTables 依 HASH_MOD(128) 推断
+--       全局连续编号 comment_0..comment_127（偶数下标落 ds_0=turbo_feed_1、奇数 ds_1=turbo_feed_2）。
+--       存量数据仅灾备（Redis 为权威），采用清空重建（A 方案），无历史灾备数据需保留。
+-- 配置见 shardingsphere-config(-128).yaml 的 comment autoTable（shardingAlgorithmName: hashMod128）。
 CREATE TABLE `turbo_feed_1`.`comment_0` (
   `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
   `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
@@ -2836,23 +2839,7 @@ CREATE TABLE `turbo_feed_1`.`comment_0` (
   PRIMARY KEY (`comment_id`),
   KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
   KEY `idx_user_created` (`user_id`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论表(物理分片 turbo_feed_1.comment_0)';
-
-CREATE TABLE `turbo_feed_1`.`comment_2` (
-  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
-  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
-  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
-  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
-  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
-  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
-  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
-  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
-  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
-  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
-  KEY `idx_user_created` (`user_id`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论表(物理分片 turbo_feed_1.comment_2)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_0)';
 
 CREATE TABLE `turbo_feed_2`.`comment_1` (
   `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
@@ -2868,7 +2855,23 @@ CREATE TABLE `turbo_feed_2`.`comment_1` (
   PRIMARY KEY (`comment_id`),
   KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
   KEY `idx_user_created` (`user_id`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论表(物理分片 turbo_feed_2.comment_1)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_1)';
+
+CREATE TABLE `turbo_feed_1`.`comment_2` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_2)';
 
 CREATE TABLE `turbo_feed_2`.`comment_3` (
   `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
@@ -2884,16 +2887,2001 @@ CREATE TABLE `turbo_feed_2`.`comment_3` (
   PRIMARY KEY (`comment_id`),
   KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
   KEY `idx_user_created` (`user_id`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论表(物理分片 turbo_feed_2.comment_3)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_3)';
 
--- ==================== 视频点赞表（media_like_0..media_like_3，分片键 post_id，HASH_MOD 4 节点） ====================
+CREATE TABLE `turbo_feed_1`.`comment_4` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_4)';
+
+CREATE TABLE `turbo_feed_2`.`comment_5` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_5)';
+
+CREATE TABLE `turbo_feed_1`.`comment_6` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_6)';
+
+CREATE TABLE `turbo_feed_2`.`comment_7` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_7)';
+
+CREATE TABLE `turbo_feed_1`.`comment_8` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_8)';
+
+CREATE TABLE `turbo_feed_2`.`comment_9` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_9)';
+
+CREATE TABLE `turbo_feed_1`.`comment_10` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_10)';
+
+CREATE TABLE `turbo_feed_2`.`comment_11` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_11)';
+
+CREATE TABLE `turbo_feed_1`.`comment_12` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_12)';
+
+CREATE TABLE `turbo_feed_2`.`comment_13` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_13)';
+
+CREATE TABLE `turbo_feed_1`.`comment_14` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_14)';
+
+CREATE TABLE `turbo_feed_2`.`comment_15` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_15)';
+
+CREATE TABLE `turbo_feed_1`.`comment_16` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_16)';
+
+CREATE TABLE `turbo_feed_2`.`comment_17` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_17)';
+
+CREATE TABLE `turbo_feed_1`.`comment_18` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_18)';
+
+CREATE TABLE `turbo_feed_2`.`comment_19` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_19)';
+
+CREATE TABLE `turbo_feed_1`.`comment_20` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_20)';
+
+CREATE TABLE `turbo_feed_2`.`comment_21` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_21)';
+
+CREATE TABLE `turbo_feed_1`.`comment_22` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_22)';
+
+CREATE TABLE `turbo_feed_2`.`comment_23` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_23)';
+
+CREATE TABLE `turbo_feed_1`.`comment_24` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_24)';
+
+CREATE TABLE `turbo_feed_2`.`comment_25` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_25)';
+
+CREATE TABLE `turbo_feed_1`.`comment_26` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_26)';
+
+CREATE TABLE `turbo_feed_2`.`comment_27` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_27)';
+
+CREATE TABLE `turbo_feed_1`.`comment_28` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_28)';
+
+CREATE TABLE `turbo_feed_2`.`comment_29` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_29)';
+
+CREATE TABLE `turbo_feed_1`.`comment_30` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_30)';
+
+CREATE TABLE `turbo_feed_2`.`comment_31` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_31)';
+
+CREATE TABLE `turbo_feed_1`.`comment_32` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_32)';
+
+CREATE TABLE `turbo_feed_2`.`comment_33` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_33)';
+
+CREATE TABLE `turbo_feed_1`.`comment_34` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_34)';
+
+CREATE TABLE `turbo_feed_2`.`comment_35` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_35)';
+
+CREATE TABLE `turbo_feed_1`.`comment_36` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_36)';
+
+CREATE TABLE `turbo_feed_2`.`comment_37` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_37)';
+
+CREATE TABLE `turbo_feed_1`.`comment_38` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_38)';
+
+CREATE TABLE `turbo_feed_2`.`comment_39` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_39)';
+
+CREATE TABLE `turbo_feed_1`.`comment_40` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_40)';
+
+CREATE TABLE `turbo_feed_2`.`comment_41` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_41)';
+
+CREATE TABLE `turbo_feed_1`.`comment_42` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_42)';
+
+CREATE TABLE `turbo_feed_2`.`comment_43` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_43)';
+
+CREATE TABLE `turbo_feed_1`.`comment_44` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_44)';
+
+CREATE TABLE `turbo_feed_2`.`comment_45` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_45)';
+
+CREATE TABLE `turbo_feed_1`.`comment_46` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_46)';
+
+CREATE TABLE `turbo_feed_2`.`comment_47` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_47)';
+
+CREATE TABLE `turbo_feed_1`.`comment_48` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_48)';
+
+CREATE TABLE `turbo_feed_2`.`comment_49` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_49)';
+
+CREATE TABLE `turbo_feed_1`.`comment_50` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_50)';
+
+CREATE TABLE `turbo_feed_2`.`comment_51` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_51)';
+
+CREATE TABLE `turbo_feed_1`.`comment_52` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_52)';
+
+CREATE TABLE `turbo_feed_2`.`comment_53` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_53)';
+
+CREATE TABLE `turbo_feed_1`.`comment_54` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_54)';
+
+CREATE TABLE `turbo_feed_2`.`comment_55` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_55)';
+
+CREATE TABLE `turbo_feed_1`.`comment_56` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_56)';
+
+CREATE TABLE `turbo_feed_2`.`comment_57` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_57)';
+
+CREATE TABLE `turbo_feed_1`.`comment_58` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_58)';
+
+CREATE TABLE `turbo_feed_2`.`comment_59` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_59)';
+
+CREATE TABLE `turbo_feed_1`.`comment_60` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_60)';
+
+CREATE TABLE `turbo_feed_2`.`comment_61` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_61)';
+
+CREATE TABLE `turbo_feed_1`.`comment_62` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_62)';
+
+CREATE TABLE `turbo_feed_2`.`comment_63` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_63)';
+
+CREATE TABLE `turbo_feed_1`.`comment_64` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_64)';
+
+CREATE TABLE `turbo_feed_2`.`comment_65` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_65)';
+
+CREATE TABLE `turbo_feed_1`.`comment_66` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_66)';
+
+CREATE TABLE `turbo_feed_2`.`comment_67` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_67)';
+
+CREATE TABLE `turbo_feed_1`.`comment_68` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_68)';
+
+CREATE TABLE `turbo_feed_2`.`comment_69` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_69)';
+
+CREATE TABLE `turbo_feed_1`.`comment_70` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_70)';
+
+CREATE TABLE `turbo_feed_2`.`comment_71` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_71)';
+
+CREATE TABLE `turbo_feed_1`.`comment_72` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_72)';
+
+CREATE TABLE `turbo_feed_2`.`comment_73` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_73)';
+
+CREATE TABLE `turbo_feed_1`.`comment_74` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_74)';
+
+CREATE TABLE `turbo_feed_2`.`comment_75` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_75)';
+
+CREATE TABLE `turbo_feed_1`.`comment_76` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_76)';
+
+CREATE TABLE `turbo_feed_2`.`comment_77` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_77)';
+
+CREATE TABLE `turbo_feed_1`.`comment_78` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_78)';
+
+CREATE TABLE `turbo_feed_2`.`comment_79` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_79)';
+
+CREATE TABLE `turbo_feed_1`.`comment_80` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_80)';
+
+CREATE TABLE `turbo_feed_2`.`comment_81` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_81)';
+
+CREATE TABLE `turbo_feed_1`.`comment_82` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_82)';
+
+CREATE TABLE `turbo_feed_2`.`comment_83` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_83)';
+
+CREATE TABLE `turbo_feed_1`.`comment_84` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_84)';
+
+CREATE TABLE `turbo_feed_2`.`comment_85` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_85)';
+
+CREATE TABLE `turbo_feed_1`.`comment_86` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_86)';
+
+CREATE TABLE `turbo_feed_2`.`comment_87` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_87)';
+
+CREATE TABLE `turbo_feed_1`.`comment_88` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_88)';
+
+CREATE TABLE `turbo_feed_2`.`comment_89` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_89)';
+
+CREATE TABLE `turbo_feed_1`.`comment_90` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_90)';
+
+CREATE TABLE `turbo_feed_2`.`comment_91` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_91)';
+
+CREATE TABLE `turbo_feed_1`.`comment_92` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_92)';
+
+CREATE TABLE `turbo_feed_2`.`comment_93` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_93)';
+
+CREATE TABLE `turbo_feed_1`.`comment_94` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_94)';
+
+CREATE TABLE `turbo_feed_2`.`comment_95` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_95)';
+
+CREATE TABLE `turbo_feed_1`.`comment_96` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_96)';
+
+CREATE TABLE `turbo_feed_2`.`comment_97` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_97)';
+
+CREATE TABLE `turbo_feed_1`.`comment_98` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_98)';
+
+CREATE TABLE `turbo_feed_2`.`comment_99` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_99)';
+
+CREATE TABLE `turbo_feed_1`.`comment_100` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_100)';
+
+CREATE TABLE `turbo_feed_2`.`comment_101` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_101)';
+
+CREATE TABLE `turbo_feed_1`.`comment_102` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_102)';
+
+CREATE TABLE `turbo_feed_2`.`comment_103` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_103)';
+
+CREATE TABLE `turbo_feed_1`.`comment_104` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_104)';
+
+CREATE TABLE `turbo_feed_2`.`comment_105` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_105)';
+
+CREATE TABLE `turbo_feed_1`.`comment_106` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_106)';
+
+CREATE TABLE `turbo_feed_2`.`comment_107` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_107)';
+
+CREATE TABLE `turbo_feed_1`.`comment_108` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_108)';
+
+CREATE TABLE `turbo_feed_2`.`comment_109` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_109)';
+
+CREATE TABLE `turbo_feed_1`.`comment_110` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_110)';
+
+CREATE TABLE `turbo_feed_2`.`comment_111` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_111)';
+
+CREATE TABLE `turbo_feed_1`.`comment_112` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_112)';
+
+CREATE TABLE `turbo_feed_2`.`comment_113` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_113)';
+
+CREATE TABLE `turbo_feed_1`.`comment_114` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_114)';
+
+CREATE TABLE `turbo_feed_2`.`comment_115` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_115)';
+
+CREATE TABLE `turbo_feed_1`.`comment_116` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_116)';
+
+CREATE TABLE `turbo_feed_2`.`comment_117` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_117)';
+
+CREATE TABLE `turbo_feed_1`.`comment_118` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_118)';
+
+CREATE TABLE `turbo_feed_2`.`comment_119` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_119)';
+
+CREATE TABLE `turbo_feed_1`.`comment_120` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_120)';
+
+CREATE TABLE `turbo_feed_2`.`comment_121` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_121)';
+
+CREATE TABLE `turbo_feed_1`.`comment_122` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_122)';
+
+CREATE TABLE `turbo_feed_2`.`comment_123` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_123)';
+
+CREATE TABLE `turbo_feed_1`.`comment_124` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_124)';
+
+CREATE TABLE `turbo_feed_2`.`comment_125` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_125)';
+
+CREATE TABLE `turbo_feed_1`.`comment_126` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_126)';
+
+CREATE TABLE `turbo_feed_2`.`comment_127` (
+  `comment_id` BIGINT       NOT NULL                COMMENT '雪花ID',
+  `media_id`   VARCHAR(255) NOT NULL                COMMENT '被评论内容ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '评论者用户ID',
+  `root_id`    BIGINT       NOT NULL DEFAULT 0      COMMENT '根评论ID, 0=顶层',
+  `parent_id`  BIGINT       NOT NULL DEFAULT 0      COMMENT '直接父评论ID, 0=顶层',
+  `content`    VARCHAR(1024) NOT NULL               COMMENT '评论内容(经过敏感词过滤)',
+  `status`     TINYINT      NOT NULL DEFAULT 0      COMMENT '0=PENDING 1=APPROVED 2=REJECTED 3=DELETED',
+  `like_count` INT          NOT NULL DEFAULT 0      COMMENT '点赞数(冗余, 异步累加)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`comment_id`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_127)';
+
+-- ==================== 视频点赞表（media_like_0..media_like_127，分片键 post_id，HASH_MOD 128 节点） ====================
 -- 设计：media_like 是点赞的持久化兜底；点赞的「去重权威 + 已赞态 + 计数」实时源是
 --       Redis Set tf:like:users:{postId}（SADD 原子去重、SCARD 计数、SISMEMBER 已赞态）。
 --       本表仅在赞/取消时同步 INSERT/DELETE，供 Redis 重启后据表重建去重集合（运维脚本）。
 --       分片键 post_id（= 时间线幂等键 timelineKey，与公域实时分 tf:post:stat:{postId}、去重集合同身份），
 --       与 comment(media_id) 正交；保证「读某条内容下所有点赞」单分片命中。
---       物理表分布：ds_0(turbo_feed_1) → media_like_0/_2，ds_1(turbo_feed_2) → media_like_1/_3（与 comment 一致）。
--- 配置见 shardingsphere-config(-128).yaml 的 media_like autoTable。
+-- 扩容（④，2026-10-13）：分片数 4 -> 128，物理表全局连续编号 media_like_0..media_like_127
+--       （偶数下标落 ds_0=turbo_feed_1、奇数 ds_1=turbo_feed_2）。存量采用清空重建（A 方案）。
+-- 配置见 shardingsphere-config(-128).yaml 的 media_like autoTable（shardingAlgorithmName: hashMod128）。
 CREATE TABLE `turbo_feed_1`.`media_like_0` (
   `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
   `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
@@ -2902,17 +4890,7 @@ CREATE TABLE `turbo_feed_1`.`media_like_0` (
   PRIMARY KEY (`id`),
   KEY `idx_post_user` (`post_id`, `user_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='视频点赞表(物理分片 turbo_feed_1.media_like_0)';
-
-CREATE TABLE `turbo_feed_1`.`media_like_2` (
-  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
-  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
-  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
-  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_post_user` (`post_id`, `user_id`),
-  KEY `idx_user_created` (`user_id`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='视频点赞表(物理分片 turbo_feed_1.media_like_2)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_0)';
 
 CREATE TABLE `turbo_feed_2`.`media_like_1` (
   `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
@@ -2922,7 +4900,17 @@ CREATE TABLE `turbo_feed_2`.`media_like_1` (
   PRIMARY KEY (`id`),
   KEY `idx_post_user` (`post_id`, `user_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='视频点赞表(物理分片 turbo_feed_2.media_like_1)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_1)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_2` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_2)';
 
 CREATE TABLE `turbo_feed_2`.`media_like_3` (
   `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
@@ -2932,7 +4920,1247 @@ CREATE TABLE `turbo_feed_2`.`media_like_3` (
   PRIMARY KEY (`id`),
   KEY `idx_post_user` (`post_id`, `user_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='视频点赞表(物理分片 turbo_feed_2.media_like_3)';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_3)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_4` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_4)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_5` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_5)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_6` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_6)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_7` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_7)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_8` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_8)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_9` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_9)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_10` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_10)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_11` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_11)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_12` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_12)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_13` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_13)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_14` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_14)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_15` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_15)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_16` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_16)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_17` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_17)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_18` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_18)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_19` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_19)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_20` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_20)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_21` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_21)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_22` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_22)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_23` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_23)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_24` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_24)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_25` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_25)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_26` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_26)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_27` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_27)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_28` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_28)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_29` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_29)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_30` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_30)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_31` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_31)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_32` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_32)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_33` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_33)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_34` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_34)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_35` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_35)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_36` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_36)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_37` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_37)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_38` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_38)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_39` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_39)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_40` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_40)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_41` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_41)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_42` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_42)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_43` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_43)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_44` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_44)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_45` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_45)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_46` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_46)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_47` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_47)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_48` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_48)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_49` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_49)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_50` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_50)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_51` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_51)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_52` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_52)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_53` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_53)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_54` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_54)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_55` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_55)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_56` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_56)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_57` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_57)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_58` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_58)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_59` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_59)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_60` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_60)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_61` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_61)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_62` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_62)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_63` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_63)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_64` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_64)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_65` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_65)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_66` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_66)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_67` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_67)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_68` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_68)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_69` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_69)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_70` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_70)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_71` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_71)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_72` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_72)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_73` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_73)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_74` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_74)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_75` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_75)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_76` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_76)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_77` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_77)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_78` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_78)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_79` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_79)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_80` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_80)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_81` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_81)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_82` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_82)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_83` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_83)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_84` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_84)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_85` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_85)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_86` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_86)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_87` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_87)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_88` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_88)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_89` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_89)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_90` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_90)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_91` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_91)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_92` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_92)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_93` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_93)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_94` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_94)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_95` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_95)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_96` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_96)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_97` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_97)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_98` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_98)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_99` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_99)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_100` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_100)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_101` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_101)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_102` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_102)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_103` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_103)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_104` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_104)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_105` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_105)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_106` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_106)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_107` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_107)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_108` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_108)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_109` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_109)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_110` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_110)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_111` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_111)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_112` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_112)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_113` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_113)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_114` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_114)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_115` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_115)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_116` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_116)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_117` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_117)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_118` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_118)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_119` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_119)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_120` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_120)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_121` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_121)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_122` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_122)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_123` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_123)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_124` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_124)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_125` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_125)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_126` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_1.media_like_126)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_127` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_like(物理分片 turbo_feed_2.media_like_127)';
 
 -- ==================== 敏感词库（sensitive_word，单表放 ds_0） ====================
 -- ⚠️ 部署：单表必须由 shardingsphere-config.yaml 的 `!SINGLE` 规则显式登记

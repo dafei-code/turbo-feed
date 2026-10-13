@@ -178,25 +178,25 @@ rules:
             shardingColumn: media_id
             shardingAlgorithmName: hashMod4
       # 逻辑表 comment：分片键 media_id（与 media 按 user_id 分片正交），
-      # 保证「读某条内容下所有评论」单分片命中
+      # 保证「读某条内容下所有评论」单分片命中；④ 扩容 4->128（hashMod128）
       comment:
         actualDataSources: ds_0, ds_1
         shardingStrategy:
           standard:
             shardingColumn: media_id
-            shardingAlgorithmName: hashMod4
+            shardingAlgorithmName: hashMod128
         keyGenerateStrategy:
           column: comment_id
           keyGeneratorName: snowflake
       # 逻辑表 media_like：视频点赞持久化（抖音式 per-user 去重兜底）。
-      # 分片键 post_id（= 时间线幂等键 timelineKey，与公域统计/去重集合同身份），hashMod4 与 comment 同策略；
+      # 分片键 post_id（= 时间线幂等键 timelineKey，与公域统计/去重集合同身份），hashMod128 与 comment 同策略（④ 扩容 4->128）；
       # 保证「读某条内容下所有点赞」单分片命中。Redis Set tf:like:users:{postId} 为去重权威，本表为持久化兜底。
       media_like:
         actualDataSources: ds_0, ds_1
         shardingStrategy:
           standard:
             shardingColumn: post_id
-            shardingAlgorithmName: hashMod4
+            shardingAlgorithmName: hashMod128
         keyGenerateStrategy:
           column: id
           keyGeneratorName: snowflake
