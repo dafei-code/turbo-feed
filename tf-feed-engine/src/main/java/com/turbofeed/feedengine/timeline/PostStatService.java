@@ -141,6 +141,37 @@ public class PostStatService {
         }
     }
 
+    /**
+     * 取消（撤销）一条正向行为（当前用于 {@code UNLIKE} 取消点赞）。
+     *
+     * <p><b>抖音式"赛马回退"</b>：用户取消点赞必须等于原正向信号的反向——实时分 {@code likes}
+     * 字段 {@code HINCRBY -1}，热点榜按"对应正向行为的负权重"回退（{@code UNLIKE} 等价于
+     * {@code LIKE} 的负向，权重 −1.0），使内容热度随取消实时回落，不会赖在榜上。</p>
+     *
+     * <p>fail-open：与 {@link #record} 同语义，统计丢失只告警，绝不抛给调用方。</p>
+     */
+    public void cancel(String timelineKey, String type) {
+        if (timelineKey == null || type == null) {
+            return;
+        }
+        String field = toField(type);
+        if (field == null) {
+            return;
+        }
+        try {
+            redisTemplate.opsForHash().increment(STAT_PREFIX + timelineKey, field, -1);
+            redisTemplate.expire(STAT_PREFIX + timelineKey, STAT_TTL);
+            Double w = hotWeightOf(type);
+            if (w != null && w != 0.0d) {
+                String key = HOT_PREFIX + today();
+                redisTemplate.opsForZSet().incrementScore(key, timelineKey, -w);
+                redisTemplate.expire(key, HOT_TTL);
+            }
+        } catch (Exception e) {
+            log.warn("行为撤销写入失败（不影响主流程）: timelineKey={}, type={}, {}", timelineKey, type, e.getMessage());
+        }
+    }
+
     /** 读取某帖的实时分快照（晋级器用）。 */
     public PostStat snapshot(String timelineKey) {
         try {
@@ -231,11 +262,24 @@ public class PostStatService {
             case "IMPRESSION", "impression" -> "impressions";
             case "PLAY_COMPLETE", "play_complete" -> "playCompletes";
             case "LIKE", "like" -> "likes";
+            case "UNLIKE", "unlike" -> "likes";
             case "COMMENT", "comment" -> "comments";
             case "SHARE", "share" -> "shares";
             case "DISLIKE", "dislike", "NOT_INTERESTED", "not_interested" -> "dislikes";
             default -> null;
         };
+    }
+
+    /**
+     * 热点榜权重查询（取消路径用）：返回<b>正向基础权重</b>，{@code UNLIKE} 映射到 {@code LIKE}
+     * 的权重，由调用方取负实现"回退"。未知/无权重类型返回 {@code null}。
+     */
+    private static Double hotWeightOf(String type) {
+        String t = type == null ? "" : type.toUpperCase();
+        if (t.equals("UNLIKE")) {
+            t = "LIKE";
+        }
+        return HOT_WEIGHTS.get(t);
     }
 
     /**

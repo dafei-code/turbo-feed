@@ -1,6 +1,8 @@
 package com.turbofeed.feedengine.timeline;
 
 import com.turbofeed.shared.model.FeedItemView;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -40,9 +42,14 @@ public class EcosystemRegulationService {
     private static final Logger log = LoggerFactory.getLogger(EcosystemRegulationService.class);
 
     private final EcosystemRegulationProperties props;
+    // fail-open 可观测性（P1）：G9 整页配额裁剪掉的条数（「rerank 剔除」的量化，与 G8 滑窗重排互补）。
+    private final Counter removed;
 
-    public EcosystemRegulationService(EcosystemRegulationProperties props) {
+    public EcosystemRegulationService(EcosystemRegulationProperties props, MeterRegistry registry) {
         this.props = props;
+        this.removed = Counter.builder("tf_feed_ecosystem_removed_total")
+                .description("生态调控层(G9)整页配额裁剪掉的内容条数")
+                .register(registry);
     }
 
     /**
@@ -114,6 +121,8 @@ public class EcosystemRegulationService {
             }
         }
         if (out.size() < page.size()) {
+            int dropped = page.size() - out.size();
+            removed.increment(dropped);
             log.info("生态调控裁剪：前 {} 条 → 后 {} 条（整页limit={}, 标签封顶={}, 作者封顶={}）",
                     page.size(), out.size(), limit, tagCap, authorCap);
         }

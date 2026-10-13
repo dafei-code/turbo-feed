@@ -41,6 +41,13 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- Prometheus 指标暴露：fail-open 可观测性（P1）。actuator 已传递 micrometer-core，
+             本依赖仅补充 PrometheusMeterRegistry + /actuator/prometheus 端点；
+             版本由 spring-boot-dependencies BOM 托管，无需写 version。 -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
         <!-- Redis 客户端（Lettuce）：时间线 ZSET 与推荐流旁路缓存只需 RedisTemplate 级原子命令
              （ZADD / ZREM / ZREVRANGEBYSCORE），不需要分布式锁与 Redisson 的丰富数据结构，
              故不引入 redisson-spring-boot-starter。

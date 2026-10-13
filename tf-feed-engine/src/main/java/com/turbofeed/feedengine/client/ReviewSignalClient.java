@@ -1,11 +1,14 @@
 package com.turbofeed.feedengine.client;
 
 import com.turbofeed.feedengine.ranking.FeedModerationProperties;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -47,9 +50,37 @@ public class ReviewSignalClient {
     private final StringRedisTemplate redisTemplate;
     private final FeedModerationProperties props;
 
-    public ReviewSignalClient(StringRedisTemplate redisTemplate, FeedModerationProperties props) {
+    // fail-open 可观测性（P1）：tf:mod KV 是推荐主流程的「加速副本」，读失败/缺失一律 fail-open
+    // （不拦截、不降权）。这些指标让「fail-open 是否在被悄悄触发」「信号是否真的在生效」可被观测。
+    //   · lookups   —— 按 op 统计 KV 读取次数（blockedContent / blockedAuthor / healthScale）
+    //   · failures  —— 按 op 统计读异常（fail-open 真正兜底的次数，应为 0，非 0 即 Redis 故障）
+    //   · miss      —— 按 op 统计「查了但无信号」的 key 数（缺失/未回源；高 miss 率提示信号未铺满）
+    //   · blocked   —— 实际拦截的内容/作者数（验证信号确实在生效）
+    //   · demotions —— healthScale<1.0 的降权次数（与 P0-b 降权语义对齐的「降级数」）
+    private final Map<String, Counter> lookups = new HashMap<>();
+    private final Map<String, Counter> failures = new HashMap<>();
+    private final Map<String, Counter> miss = new HashMap<>();
+    private final Counter blockedContent;
+    private final Counter blockedAuthor;
+    private final Counter demotions;
+
+    public ReviewSignalClient(StringRedisTemplate redisTemplate, FeedModerationProperties props, MeterRegistry registry) {
         this.redisTemplate = redisTemplate;
         this.props = props;
+        for (String op : new String[]{"blockedContent", "blockedAuthor", "healthScale"}) {
+            this.lookups.put(op, Counter.builder("tf_feed_moderation_kv_lookups_total")
+                    .tag("op", op).description("tf:mod KV 读取次数（按操作）").register(registry));
+            this.failures.put(op, Counter.builder("tf_feed_moderation_kv_failures_total")
+                    .tag("op", op).description("tf:mod KV 读异常次数（fail-open 兜底，应为 0）").register(registry));
+            this.miss.put(op, Counter.builder("tf_feed_moderation_kv_miss_total")
+                    .tag("op", op).description("tf:mod KV 查无信号（缺失/未回源）的 key 数").register(registry));
+        }
+        this.blockedContent = Counter.builder("tf_feed_moderation_kv_blocked_total")
+                .tag("kind", "content").description("召回层实际拦截的内容数（INTERCEPT/MONITOR）").register(registry);
+        this.blockedAuthor = Counter.builder("tf_feed_moderation_kv_blocked_total")
+                .tag("kind", "author").description("召回层实际拦截的作者数（BANNED/低健康分）").register(registry);
+        this.demotions = Counter.builder("tf_feed_ranking_demotions_total")
+                .description("排序降权次数（healthScale<1.0，与 P0-b 降权 0.5 语义对齐）").register(registry);
     }
 
     private String mediaKey(String postId) {
@@ -72,12 +103,18 @@ public class ReviewSignalClient {
         }
         try {
             for (String postId : postIds) {
+                lookups.get("blockedContent").increment();
                 Object action = redisTemplate.opsForHash().get(mediaKey(postId), "action");
                 if (action != null && ("INTERCEPT".equals(action) || "MONITOR".equals(action))) {
                     blocked.add(postId);
+                    blockedContent.increment();
+                } else if (action == null) {
+                    // 该 postId 无处置信号（key 缺失或未回源 MySQL）：统计 miss，不拦截（fail-open）
+                    miss.get("blockedContent").increment();
                 }
             }
         } catch (Exception e) {
+            failures.get("blockedContent").increment();
             log.warn("读内容处置信号失败（fail-open，不拦截）: {}", e.getMessage());
         }
         return blocked;
@@ -98,13 +135,16 @@ public class ReviewSignalClient {
         }
         try {
             for (String aid : authorIds) {
+                lookups.get("blockedAuthor").increment();
                 Map<Object, Object> h = redisTemplate.opsForHash().entries(accountKey(aid));
                 if (h == null || h.isEmpty()) {
+                    miss.get("blockedAuthor").increment();
                     continue;
                 }
                 String tier = asString(h.get("tier"));
                 if ("BANNED".equals(tier)) {
                     blocked.add(aid);
+                    blockedAuthor.increment();
                     continue;
                 }
                 String scoreStr = asString(h.get("score"));
@@ -113,6 +153,7 @@ public class ReviewSignalClient {
                         int score = Integer.parseInt(scoreStr);
                         if (score < props.getDropBelowScore()) {
                             blocked.add(aid);
+                            blockedAuthor.increment();
                         }
                     } catch (NumberFormatException ignore) {
                         // 脏数据跳过该作者，不影响其余
@@ -120,6 +161,7 @@ public class ReviewSignalClient {
                 }
             }
         } catch (Exception e) {
+            failures.get("blockedAuthor").increment();
             log.warn("读账号健康分信号失败（fail-open，不拦截）: {}", e.getMessage());
         }
         return blocked;
@@ -139,15 +181,19 @@ public class ReviewSignalClient {
             return 1.0d;
         }
         try {
+            lookups.get("healthScale").increment();
             Map<Object, Object> h = redisTemplate.opsForHash().entries(accountKey(authorId));
             if (h == null || h.isEmpty()) {
+                miss.get("healthScale").increment();
                 return 1.0d;
             }
             if ("DEMOTE".equals(asString(h.get("tier")))) {
+                demotions.increment();
                 return props.getDemoteScale();
             }
             return 1.0d;
         } catch (Exception e) {
+            failures.get("healthScale").increment();
             log.warn("读账号健康分信号失败（fail-open，不降权）: authorId={}, {}", authorId, e.getMessage());
             return 1.0d;
         }

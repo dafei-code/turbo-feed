@@ -2,6 +2,8 @@ package com.turbofeed.feedengine.recall;
 
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.recall.EmbeddingCodec;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,15 +38,22 @@ public class TagVectorRecallChannel implements VectorRecallChannel {
     private final ItemEmbeddingSource itemEmbeddingSource;
     private final VectorIndexWriter vectorIndexWriter;
     private final String mode;
+    private final Counter failOpen;
 
     public TagVectorRecallChannel(UserEmbeddingSource userEmbeddingSource,
                                   ItemEmbeddingSource itemEmbeddingSource,
                                   VectorIndexWriter vectorIndexWriter,
+                                  MeterRegistry registry,
                                   @Value("${turbofeed.feed.recall.vector.mode:hash}") String mode) {
         this.userEmbeddingSource = userEmbeddingSource;
         this.itemEmbeddingSource = itemEmbeddingSource;
         this.vectorIndexWriter = vectorIndexWriter;
         this.mode = mode;
+        // fail-open 可观测性（P1）：ann / bruteForce 两路异常 catch 自计兜底次数，带 path 标签区分检索路径。
+        this.failOpen = Counter.builder("tf_feed_recall_vector_failopen_total")
+                .tag("path", mode)
+                .description("向量召回内部 fail-open 兜底次数（ann/model 路径异常返回空列表）")
+                .register(registry);
     }
 
     @Override
@@ -81,6 +90,7 @@ public class TagVectorRecallChannel implements VectorRecallChannel {
             return out;
         } catch (Exception e) {
             log.warn("HNSW 向量召回失败（fail-open，退回规则召回）: userId={}, {}", userId, e.getMessage());
+            failOpen.increment();
             return List.of();
         }
     }
@@ -115,6 +125,7 @@ public class TagVectorRecallChannel implements VectorRecallChannel {
             return out;
         } catch (Exception e) {
             log.warn("向量召回失败（fail-open，退回规则召回）: userId={}, {}", userId, e.getMessage());
+            failOpen.increment();
             return List.of();
         }
     }

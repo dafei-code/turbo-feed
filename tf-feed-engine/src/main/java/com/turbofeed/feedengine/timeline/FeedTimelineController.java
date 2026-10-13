@@ -121,6 +121,9 @@ public class FeedTimelineController {
                 }
                 if ("WATCH".equalsIgnoreCase(e.type())) {
                     postStatService.recordWatch(e.timelineKey(), e.watchDuration(), e.mediaDuration());
+                } else if ("UNLIKE".equalsIgnoreCase(e.type())) {
+                    // 取消点赞：实时分 −1 + 热点榜按 LIKE 负权重回退（抖音式赛马回退）
+                    postStatService.cancel(e.timelineKey(), e.type());
                 } else {
                     postStatService.record(e.timelineKey(), e.type());
                 }
