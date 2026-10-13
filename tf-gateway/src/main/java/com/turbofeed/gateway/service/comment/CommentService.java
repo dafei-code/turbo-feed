@@ -3,6 +3,7 @@ package com.turbofeed.gateway.service.comment;
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.service.moderation.ContentScene;
 import com.turbofeed.gateway.service.moderation.ContentSecurityService;
+import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
 import com.turbofeed.gateway.util.SnowflakeIdGenerator;
 import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.repository.ReviewTaskRepository;
@@ -12,7 +13,11 @@ import com.turbofeed.shared.result.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
+
+import java.util.concurrent.Executor;
 
 import java.time.Instant;
 import java.util.List;
@@ -35,6 +40,9 @@ import java.util.List;
  *   <li><b>状态</b>：内容安全通过即 {@code APPROVED}。灰度词 → {@code PENDING}
  *       留作后续「机器初审 + 人审队列」扩展点（见
  *       {@code docs/architecture/content-security-design.md}）。</li>
+ *   <li><b>落库异步化（③）</b>：主 INSERT 经 {@code interactionExecutor} 异步刷盘（与 ② 点赞同套路），
+ *       主链路不阻塞 DB 写；Redis 计数为权威、落库仅为灾备。{@code assess}/建巡查任务/异常日志保持同步
+ *       （它们不依赖落库结果）。fail-open：落库异常只告警，不影响评论发布。</li>
  * </ul>
  */
 @Service
@@ -43,12 +51,24 @@ public class CommentService {
 
     private static final Logger log = LoggerFactory.getLogger(CommentService.class);
 
+    /** 评论用户维度限流 key 前缀（与上传 rl:upload: / 点赞 rl:like: 隔离计数，共用阈值配置）。 */
+    private static final String RL_COMMENT_PREFIX = "rl:comment:";
+
     private final CommentJdbcRepository commentRepository;
     private final ContentSecurityService contentSecurityService;
     /** 雪花 ID 生成器由 {@code SnowflakeConfig} 装配（workerId/datacenterId 必须逐实例区分）。 */
     private final SnowflakeIdGenerator snowflakeIdGenerator;
     /** 评论区异常感知（P1 #133）：速率/聚集异常检测，fail-open。 */
     private final CommentRiskService commentRiskService;
+    /** 用户维度限流（跨实例统一计数，复用上传同款 Redis 固定窗口；点赞/评论共用阈值配置）。 */
+    private final UploadRateLimiter rateLimiter;
+    /** 异步落库执行器（与 ② 点赞同款 interactionExecutor：队列 1024、CallerRunsPolicy 背压）。
+     *  非 final + @Autowired@Qualifier 字段注入：@RequiredArgsConstructor 只注入其余 final 字段，
+     *  而构造器注入不会读取字段级 @Qualifier，故这里用字段注入精确指定 Bean 名，避免与
+     *  reviewExecutor/uploadFinalizeExecutor/taskScheduler 等同类型 Executor 冲突。 */
+    @Autowired
+    @Qualifier("interactionExecutor")
+    private Executor interactionExecutor;
     /** 复审任务仓储（进 COMMENT_ANOMALY 巡查队列，复用 review_task 单表）。 */
     private final ReviewTaskRepository reviewTaskRepository;
     /** 评论区风控配置（turbofeed.media.comment-risk.*）。 */
@@ -72,6 +92,10 @@ public class CommentService {
         }
         if (content == null || content.isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "评论内容不能为空");
+        }
+        // ⑤ 用户维度限流（跨实例统一计数，复用上传同款 Redis 固定窗口；前缀隔离计数，不与点赞互扰）
+        if (!rateLimiter.tryAcquire(String.valueOf(userId), RL_COMMENT_PREFIX)) {
+            throw new BizException(ErrorCode.RATE_LIMITED, "评论过于频繁，请稍后再试");
         }
         // 长度上限 + 敏感词（含归一化抗绕过与白名单豁免）
         contentSecurityService.requireClean(ContentScene.COMMENT, content, userId);
@@ -100,7 +124,17 @@ public class CommentService {
         Comment c = new Comment(
                 commentId, mediaId, userId, rootId, parentId, content,
                 status, 0, Instant.now());
-        commentRepository.insert(c);
+        // ③ 评论落库异步化：主链路不阻塞 DB 写，经 interactionExecutor 异步刷盘（与 ② 点赞同套路）。
+        // Redis 计数为权威，落库仅为灾备重建用；fail-open：落库异常只告警，不影响评论发布主流程。
+        // 注：assess / reviewTask / behaviorLog 等判定与风控逻辑保持同步（不依赖落库结果），仅主 INSERT 异步化。
+        interactionExecutor.execute(() -> {
+            try {
+                commentRepository.insert(c);
+            } catch (Exception ex) {
+                log.warn("评论异步落库失败（fail-open，不影响主流程）: mediaId={}, commentId={}, {}",
+                        mediaId, commentId, ex.getMessage());
+            }
+        });
         // #133：评论区速率异常 → 进 REVIEWER 巡查队列（仅巡查，不下架内容），防重复建单
         if (spikeFold && !reviewTaskRepository.existsOpenForMedia(mediaId)) {
             reviewTaskRepository.insert(mediaId, userId, ReviewTask.TYPE_COMMENT_ANOMALY,

@@ -64,12 +64,26 @@ public class UploadRateLimiter {
      * @return true 放行；false 已超限，调用方应按 RATE_LIMITED 拒绝
      */
     public boolean tryAcquire(String userId) {
+        return tryAcquire(userId, KEY_PREFIX);
+    }
+
+    /**
+     * 通用用户维度限流（可指定 key 前缀，供点赞/评论等复用同一套 Redis 固定窗口 + 本地兜底）。
+     *
+     * <p>阈值与窗口统一取自 {@code MediaProperties.RateLimit}（turbofeed.media.rate-limit.per-user /
+     * window-seconds），与上传共用一套配置；不同业务用不同前缀隔离计数，互不干扰。</p>
+     *
+     * @param userId    归属用户
+     * @param keyPrefix 限流 key 前缀（如 {@code rl:like:} / {@code rl:comment:}），区分业务维度
+     * @return true 放行；false 已超限
+     */
+    public boolean tryAcquire(String userId, String keyPrefix) {
         int perUser = properties.getRateLimit().getPerUser();
         int windowSeconds = properties.getRateLimit().getWindowSeconds();
         if (perUser <= 0) {
             return true; // 配置关闭用户维度限流
         }
-        String key = KEY_PREFIX + userId;
+        String key = keyPrefix + userId;
         try {
             Long count = redisTemplate.execute(
                     RedisScript.of(LUA_INCR_WITH_TTL, Long.class),
@@ -78,13 +92,13 @@ public class UploadRateLimiter {
                     String.valueOf(windowSeconds));
             boolean allowed = count != null && count <= perUser;
             if (!allowed) {
-                log.warn("用户维度上传限流触发: userId={}, count={}, perUser={}, window={}s",
-                        userId, count, perUser, windowSeconds);
+                log.warn("用户维度限流触发: prefix={}, userId={}, count={}, perUser={}, window={}s",
+                        keyPrefix, userId, count, perUser, windowSeconds);
             }
             return allowed;
         } catch (Exception e) {
             // Redis 不可用：降级为进程内兜底限流（仍拦单用户刷接口，而非完全放开），保证主链路可用
-            log.warn("用户维度限流 Redis 异常，降级本地兜底限流: userId={}, {}", userId, e.getMessage());
+            log.warn("用户维度限流 Redis 异常，降级本地兜底限流: prefix={}, userId={}, {}", keyPrefix, userId, e.getMessage());
             return localFallback.tryAcquire(userId);
         }
     }

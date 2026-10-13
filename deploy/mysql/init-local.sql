@@ -2886,6 +2886,54 @@ CREATE TABLE `turbo_feed_2`.`comment_3` (
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评论表(物理分片 turbo_feed_2.comment_3)';
 
+-- ==================== 视频点赞表（media_like_0..media_like_3，分片键 post_id，HASH_MOD 4 节点） ====================
+-- 设计：media_like 是点赞的持久化兜底；点赞的「去重权威 + 已赞态 + 计数」实时源是
+--       Redis Set tf:like:users:{postId}（SADD 原子去重、SCARD 计数、SISMEMBER 已赞态）。
+--       本表仅在赞/取消时同步 INSERT/DELETE，供 Redis 重启后据表重建去重集合（运维脚本）。
+--       分片键 post_id（= 时间线幂等键 timelineKey，与公域实时分 tf:post:stat:{postId}、去重集合同身份），
+--       与 comment(media_id) 正交；保证「读某条内容下所有点赞」单分片命中。
+--       物理表分布：ds_0(turbo_feed_1) → media_like_0/_2，ds_1(turbo_feed_2) → media_like_1/_3（与 comment 一致）。
+-- 配置见 shardingsphere-config(-128).yaml 的 media_like autoTable。
+CREATE TABLE `turbo_feed_1`.`media_like_0` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='视频点赞表(物理分片 turbo_feed_1.media_like_0)';
+
+CREATE TABLE `turbo_feed_1`.`media_like_2` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='视频点赞表(物理分片 turbo_feed_1.media_like_2)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_1` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='视频点赞表(物理分片 turbo_feed_2.media_like_1)';
+
+CREATE TABLE `turbo_feed_2`.`media_like_3` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被赞内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '点赞者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '点赞时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='视频点赞表(物理分片 turbo_feed_2.media_like_3)';
+
 -- ==================== 敏感词库（sensitive_word，单表放 ds_0） ====================
 -- ⚠️ 部署：单表必须由 shardingsphere-config.yaml 的 `!SINGLE` 规则显式登记
 --    （tables: [ds_0.sensitive_word]）。旧注释「未配置规则的表走默认 ds_0」在

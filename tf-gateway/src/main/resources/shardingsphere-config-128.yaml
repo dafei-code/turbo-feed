@@ -93,19 +93,20 @@ rules:
   # 部署侧需提供副本地址（TURBOFEED_REPLICA_DB_0_URL / _1_URL）；未提供则回落本机 3307 默认值。
   # transactional-read-query-strategy=PRIMARY：事务内读走主库，规避写后读复制延迟。
   - !READWRITE_SPLITTING
-    dataSources:
+    # 5.5.3 正确写法：YamlReadwriteSplittingRuleConfiguration 认 dataSourceGroups（javap 实证，无 dataSources 字段）；
+    # 每组用 writeDataSourceName / readDataSourceNames(列表) / transactionalReadQueryStrategy 扁平字段，
+    # 不再是 5.3.x 的 type:Static + props: 写法（5.5.3 解析会抛 Cannot create property 'dataSources'）。
+    dataSourceGroups:
       ds_0:
-        type: Static
-        props:
-          write-data-source-name: ds_0_primary
-          read-data-source-names: ds_0_read
-          transactional-read-query-strategy: PRIMARY
+        writeDataSourceName: ds_0_primary
+        readDataSourceNames:
+          - ds_0_read
+        transactionalReadQueryStrategy: PRIMARY
       ds_1:
-        type: Static
-        props:
-          write-data-source-name: ds_1_primary
-          read-data-source-names: ds_1_read
-          transactional-read-query-strategy: PRIMARY
+        writeDataSourceName: ds_1_primary
+        readDataSourceNames:
+          - ds_1_read
+        transactionalReadQueryStrategy: PRIMARY
 
   - !SHARDING
     # 采用 autoTables（自动分片）而非 tables（手动分片）：
@@ -186,6 +187,18 @@ rules:
             shardingAlgorithmName: hashMod4
         keyGenerateStrategy:
           column: comment_id
+          keyGeneratorName: snowflake
+      # 逻辑表 media_like：视频点赞持久化（抖音式 per-user 去重兜底）。
+      # 分片键 post_id（= 时间线幂等键 timelineKey，与公域统计/去重集合同身份），hashMod4 与 comment 同策略；
+      # 保证「读某条内容下所有点赞」单分片命中。Redis Set tf:like:users:{postId} 为去重权威，本表为持久化兜底。
+      media_like:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: post_id
+            shardingAlgorithmName: hashMod4
+        keyGenerateStrategy:
+          column: id
           keyGeneratorName: snowflake
     shardingAlgorithms:
       # 分片数 4：user / account_credit / violation_record / account_penalty / report / appeal / comment
