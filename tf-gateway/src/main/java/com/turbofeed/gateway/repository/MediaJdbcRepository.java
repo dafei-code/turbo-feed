@@ -95,7 +95,7 @@ public class MediaJdbcRepository {
         MediaItem toItem() {
             // 行级视图：images 仅含自身（真正的帖内图片由聚合阶段补齐）
             return new MediaItem(postId, mediaId, url, List.of(url), seq, status, createdAt, caption, captionMark,
-                    CaptionTagParser.parse(caption));
+                    CaptionTagParser.parse(caption), 0L, 0L, false);
         }
     }
 
@@ -535,7 +535,7 @@ public class MediaJdbcRepository {
             }
             posts.add(new MediaItem(r.postId(), r.mediaId(), r.url(), images, r.seq(),
                     r.status(), r.createdAt(), r.caption(), r.captionMark(),
-                    CaptionTagParser.parse(r.caption())));
+                    CaptionTagParser.parse(r.caption()), 0L, 0L, false));
         }
         return posts;
     }

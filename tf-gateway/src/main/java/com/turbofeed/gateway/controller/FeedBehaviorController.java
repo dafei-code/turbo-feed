@@ -6,6 +6,7 @@ import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.feed.BehaviorEventPublisher;
 import com.turbofeed.gateway.service.feed.BehaviorReport;
 import com.turbofeed.gateway.service.feed.InteractionEventService;
+import com.turbofeed.gateway.service.like.MediaLikeService;
 import com.turbofeed.gateway.service.review.MediaReviewService;
 import com.turbofeed.shared.result.Result;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -37,12 +38,14 @@ public class FeedBehaviorController {
     private final BehaviorEventPublisher publisher;
     private final MediaReviewService reviewService;
     private final InteractionEventService interactionEventService;
+    private final MediaLikeService mediaLikeService;
 
     public FeedBehaviorController(BehaviorEventPublisher publisher, MediaReviewService reviewService,
-                                  InteractionEventService interactionEventService) {
+                                  InteractionEventService interactionEventService, MediaLikeService mediaLikeService) {
         this.publisher = publisher;
         this.reviewService = reviewService;
         this.interactionEventService = interactionEventService;
+        this.mediaLikeService = mediaLikeService;
     }
 
     /**
@@ -57,17 +60,26 @@ public class FeedBehaviorController {
     @RequirePermission(Permission.FEED_INTERACT)
     public Result<Void> report(@RequestBody List<BehaviorReport> reports) {
         String userId = UserContextHolder.requireUserId();
-        publisher.report(reports, userId);
-        // 热度复审旁路：逐条正向互动计入热度（fail-open，异常不阻断发布主流程）。
+        // 热度复审旁路 + 训练样本落盘：逐条正向互动计入热度（fail-open，异常不阻断发布主流程）。
+        // LIKE 类型单独走点赞去重通道（MediaLikeService），保证「一次实际状态变化 = 一条引擎事件」，
+        // 与专用点赞接口 /api/feed/media/like 共用同一去重集合，避免双写导致计数漂移。
+        java.util.List<BehaviorReport> nonLike = new java.util.ArrayList<>();
         if (reports != null) {
             for (BehaviorReport r : reports) {
                 reviewService.onInteraction(r.postId(), r.type());
-                // A1 训练样本：客户端互动（点击/完播/点赞/评论/分享/不感兴趣）落 interaction_event。
-                // 服务端 IMPRESSION 已是曝光真源，客户端再报 IMPRESSION 跳过避免重复计数。
                 if (!"IMPRESSION".equals(r.type())) {
                     interactionEventService.record(userId, r.postId(), r.type(), r.position(), null, null, null, r.requestId());
                 }
+                if (r.postId() != null && "LIKE".equalsIgnoreCase(r.type())) {
+                    mediaLikeService.apply(r.postId(), Long.parseLong(userId), true);
+                } else {
+                    nonLike.add(r);
+                }
             }
+        }
+        // 非 LIKE 类型（曝光/完播/评论/分享/不感兴趣）照旧整批投递引擎。
+        if (!nonLike.isEmpty()) {
+            publisher.report(nonLike, userId);
         }
         return Result.ok();
     }

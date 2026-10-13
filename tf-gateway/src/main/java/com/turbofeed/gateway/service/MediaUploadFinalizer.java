@@ -80,7 +80,7 @@ public class MediaUploadFinalizer {
             MediaItem post = new MediaItem(postId, mediaIds.get(0), urls.get(0), List.copyOf(urls), 0,
                     MediaStatus.PENDING, reservation.createdAt(),
                     reservation.caption(), reservation.captionMark(),
-                    CaptionTagParser.parse(reservation.caption()));
+                    CaptionTagParser.parse(reservation.caption()), 0L, 0L, false);
             idempotency.store(reservation.userId(), reservation.requestId(), post);
 
             log.info("预签名上传收尾完成: postId={}, images={}, userId={}",

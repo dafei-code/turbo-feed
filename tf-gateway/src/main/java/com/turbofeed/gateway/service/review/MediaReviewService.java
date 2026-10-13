@@ -831,7 +831,7 @@ public class MediaReviewService {
         String cover = event.urls().isEmpty() ? null : event.urls().get(0);
         return new MediaItem(event.postId(), representativeId, cover, event.urls(), 0,
                 MediaStatus.APPROVED, event.occurredAt(), event.caption(), event.captionMark(),
-                CaptionTagParser.parse(event.caption()));
+                CaptionTagParser.parse(event.caption()), 0L, 0L, false);
     }
 
     /**
@@ -861,7 +861,7 @@ public class MediaReviewService {
         }
         return new MediaItem(row.postId(), row.mediaId(), row.url(), images, 0,
                 MediaStatus.APPROVED, row.createdAt(), row.caption(), row.captionMark(),
-                CaptionTagParser.parse(row.caption()));
+                CaptionTagParser.parse(row.caption()), 0L, 0L, false);
     }
 
     /**

@@ -75,7 +75,8 @@ public final class FeedItemMapper {
                 item.createdAt(),
                 item.caption(),
                 item.captionMark(),
-                item.tags());
+                item.tags(),
+                0L, 0L, false);
     }
 
     /** 保证 {@code images} 非空：缺省时回退为单元素列表（{@code url} 为 null 时为空列表）。 */

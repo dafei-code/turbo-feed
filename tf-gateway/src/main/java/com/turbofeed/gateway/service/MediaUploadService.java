@@ -295,7 +295,7 @@ public class MediaUploadService {
         // 否则后续入库/投递的帖视图缺标签，兴趣画像与召回拿不到信号。
         MediaItem post = new MediaItem(postId, mediaIds.get(0), urls.get(0), List.copyOf(urls), 0,
                 MediaStatus.PENDING, createdAt, rawCaption, captionMark.markJson(),
-                CaptionTagParser.parse(rawCaption));
+                CaptionTagParser.parse(rawCaption), 0L, 0L, false);
         log.info("帖子上传受理: userId={}, postId={}, images={}, requestId={}, captionLen={}",
                 userId, postId, urls.size(), requestId, rawCaption.length());
         idempotency.store(userId, requestId, post);

@@ -4,6 +4,7 @@ import com.turbofeed.gateway.client.FeedEngineClient;
 import com.turbofeed.gateway.config.FeedEngineProperties;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.service.feed.InteractionEventService;
+import com.turbofeed.gateway.service.like.MediaLikeService;
 import com.turbofeed.gateway.service.review.MediaStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +12,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -43,6 +45,10 @@ public class MediaQueryService {
     private final FeedEngineClient feedEngineClient;
     private final FeedEngineProperties feedProperties;
     private final InteractionEventService interactionEventService;
+    private final MediaLikeService mediaLikeService;
+
+    /** 引擎共享实时分前缀（{@code tf:post:stat:{timelineKey}} Hash；与引擎 PostStatService 同命名空间，复用现有 Redis）。 */
+    private static final String POST_STAT_PREFIX = "tf:post:stat:";
 
     /** 单条状态缓存 TTL：60s（个人中心轮询刷新，较长 TTL 进一步降 DB 压力） */
     private static final Duration STATUS_CACHE_TTL = Duration.ofSeconds(60);
@@ -82,8 +88,11 @@ public class MediaQueryService {
         Optional<List<MediaItem>> fromEngine = feedEngineClient.recommended(page, limit, userId);
         if (fromEngine.isPresent()) {
             List<MediaItem> items = fromEngine.get();
-            emitImpressions(userId, items, page);
-            return items;
+            // 抖音式卡片计数注入：点赞数（网关 Redis Set 基数，去重权威值）/ 已赞态 /
+            // 评论数（引擎共享实时分 comments 字段，客户端 COMMENT 行为事件实时累加）。
+            List<MediaItem> enriched = enrichCounts(items, userId);
+            emitImpressions(userId, enriched, page);
+            return enriched;
         }
         if (feedProperties.getDegradedMode() == FeedEngineProperties.DegradedMode.LOCAL_SCAN) {
             // 演示口径：等价于拆分前的行为——带回源跨分片广播，生产禁用
@@ -151,5 +160,48 @@ public class MediaQueryService {
     private MediaStatus resolve(String mediaId, String userId) {
         MediaStatus status = mediaRepository.getStatus(mediaId, Long.parseLong(userId));
         return status != null ? status : MediaStatus.PENDING;
+    }
+
+    /**
+     * 给推荐流卡片注入点赞/评论计数与已赞态（抖音式「计数接卡片」）。
+     *
+     * <p>逐条以时间线幂等键 {@link MediaItem#timelineKey()} 为身份：点赞数取网关 Redis Set
+     * {@code tf:like:users:{postId}} 的基数（天然 per-user 去重），已赞态取 {@code SISMEMBER}
+     * （匿名用户按未赞），评论数取引擎共享实时分 {@code tf:post:stat:{postId}.comments}
+     * （与引擎 PostStatService 同命名空间，复用现有 Redis，避免再查分片库）。</p>
+     *
+     * <p>fail-open：单条计数读不到按 0 / 未赞处理，绝不因计数缺失让整页失败。</p>
+     */
+    private List<MediaItem> enrichCounts(List<MediaItem> items, String userId) {
+        if (items == null || items.isEmpty()) {
+            return items;
+        }
+        boolean authed = userId != null && !userId.isBlank();
+        List<MediaItem> out = new ArrayList<>(items.size());
+        for (MediaItem it : items) {
+            String tk = it.timelineKey();
+            long likeCount = mediaLikeService.likeCount(tk);
+            boolean liked = authed && mediaLikeService.isLiked(tk, Long.parseLong(userId));
+            long commentCount = commentCountOf(tk);
+            out.add(it.withCounts(likeCount, commentCount, liked));
+        }
+        return out;
+    }
+
+    /** 评论数：引擎共享实时分 comments 字段（客户端 COMMENT 行为事件实时累加）。读不到按 0。 */
+    private long commentCountOf(String timelineKey) {
+        try {
+            Object v = redisTemplate.opsForHash().get(POST_STAT_PREFIX + timelineKey, "comments");
+            if (v == null) {
+                return 0L;
+            }
+            if (v instanceof Number n) {
+                return n.longValue();
+            }
+            return Long.parseLong(v.toString());
+        } catch (Exception e) {
+            log.warn("评论数读取失败（按 0 处理）: timelineKey={}, {}", timelineKey, e.getMessage());
+            return 0L;
+        }
     }
 }

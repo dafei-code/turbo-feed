@@ -48,6 +48,12 @@ import java.util.List;
  *                   {@link CaptionTagParser}）。本模型在便捷构造器内<b>直接从 caption 派生</b>，
  *                   因此调用方无需手动传标签；从引擎契约反向映射时（{@link #MediaItem} 规范构造器）
  *                   则透传引擎已物化的 {@code tags}，避免二次解析产生不一致。
+ * @param likeCount   当前点赞数（抖音式"单一事实源"= 网关 Redis Set {@code tf:like:users:{mediaId}}
+ *                   的基数 SCARD，天然 per-user 去重）。列表接口在组装阶段注入，单条视图缺省 0。
+ * @param commentCount 当前评论数（来自引擎共享实时分 {@code tf:post:stat:{timelineKey}.comments}，
+ *                   客户端 COMMENT 行为事件实时累加）。列表接口组装阶段注入，缺省 0。
+ * @param liked       当前登录用户是否已赞该内容（{@code SISMEMBER tf:like:users:{mediaId} {userId}}）。
+ *                   匿名/未注入时为 false；用于前端红心态展示。
  */
 public record MediaItem(
         @JsonProperty("postId") String postId,
@@ -59,7 +65,10 @@ public record MediaItem(
         @JsonProperty("createdAt") Instant createdAt,
         @JsonProperty("caption") String caption,
         @JsonProperty("captionMark") String captionMark,
-        @JsonProperty("tags") List<String> tags) {
+        @JsonProperty("tags") List<String> tags,
+        @JsonProperty("likeCount") long likeCount,
+        @JsonProperty("commentCount") long commentCount,
+        @JsonProperty("liked") boolean liked) {
 
     /**
      * 单行视图（非帖子聚合）便捷构造：{@code images} 回退为 {@code [url]}、{@code seq} 为 0，
@@ -73,7 +82,7 @@ public record MediaItem(
         this(postId, mediaId, url,
                 url == null ? List.of() : List.of(url),
                 0, status, createdAt, caption, captionMark,
-                CaptionTagParser.parse(caption));
+                CaptionTagParser.parse(caption), 0L, 0L, false);
     }
 
     /**
@@ -84,5 +93,16 @@ public record MediaItem(
      */
     public String timelineKey() {
         return postId == null || postId.isBlank() ? mediaId : postId;
+    }
+
+    /**
+     * 返回注入了点赞/评论计数与已赞态的副本（record 不可变，组装阶段用）。
+     *
+     * <p>列表接口（{@link MediaQueryService#listRecommended}）在拿到引擎返回的视图后，
+     * 逐条用本方法覆盖计数/已赞态——其余字段原样透传。避免在各构造点重复写全字段。</p>
+     */
+    public MediaItem withCounts(long likeCount, long commentCount, boolean liked) {
+        return new MediaItem(postId, mediaId, url, images, seq, status, createdAt,
+                caption, captionMark, tags, likeCount, commentCount, liked);
     }
 }
