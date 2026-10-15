@@ -1,8 +1,10 @@
 package com.turbofeed.gateway.controller;
 
+import com.turbofeed.gateway.client.FeedEngineClient;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.query.MediaQueryService;
+import com.turbofeed.shared.model.PlayableView;
 import com.turbofeed.shared.result.Result;
 
 import lombok.RequiredArgsConstructor;
@@ -11,7 +13,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 公域推荐流接口（与「个人中心 /api/media/mine」职责分离）。
@@ -38,6 +42,7 @@ import java.util.List;
 public class FeedController {
 
     private final MediaQueryService mediaQueryService;
+    private final FeedEngineClient feedEngineClient;
 
     /**
      * 推荐流（按入流时间倒序返回全平台 APPROVED 内容，分页）。
@@ -57,5 +62,26 @@ public class FeedController {
         // 匿名访问返回 null（不抛）；已登录则取 userId 做个性化。
         String userId = UserContextHolder.get() == null ? null : UserContextHolder.get().userId();
         return Result.ok(mediaQueryService.listRecommended(page, size, userId));
+    }
+
+    /**
+     * 播放前可放性复校（抖音式「非公平态 5s 刷新」）。
+     *
+     * <p>客户端在播放每条 feed 前调用（可顺带预查下 1~2 条）：命中不可见则渲染占位 + 5s 跳下一条，
+     * 且不发 WATCH/曝光/点赞以免污染推荐模型。引擎不可用时 fail-open 把入参全部当作「可播放」，
+     * 绝不误杀用户（最坏漏拦一条，而非整页不可用）。</p>
+     *
+     * @param postIds 待复校帖子（逗号分隔）
+     * @return 每条 postId 的复校结论（playable + reason）
+     */
+    @GetMapping("/playable")
+    public Result<List<PlayableView>> playable(
+            @RequestParam("postIds") List<String> postIds) {
+        if (postIds == null || postIds.isEmpty()) {
+            return Result.ok(List.of());
+        }
+        Set<String> ids = new LinkedHashSet<>(postIds);
+        return Result.ok(feedEngineClient.playable(ids)
+                .orElseGet(() -> postIds.stream().map(PlayableView::playable).toList()));
     }
 }

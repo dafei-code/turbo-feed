@@ -1,6 +1,7 @@
 package com.turbofeed.feedengine.client;
 
 import com.turbofeed.feedengine.ranking.FeedModerationProperties;
+import com.turbofeed.shared.model.PlayableView;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
@@ -165,6 +166,69 @@ public class ReviewSignalClient {
             log.warn("读账号健康分信号失败（fail-open，不拦截）: {}", e.getMessage());
         }
         return blocked;
+    }
+
+    /**
+     * 播放前复校辅助：仅返回处置为 {@code INTERCEPT}（拦截下架）的 postId 集合，
+     * <b>不含 {@code MONITOR}</b>——MONITOR 在抖音式语义里只是「限公域 / 排序降权」，内容仍
+     * 可播放，不应触发「非公平态 5s 刷新」的打断。与 {@link #blockedContentKeys} 的区别仅在于
+     * 是否把 MONITOR 计入拦截。fail-open：异常返回空集（不拦截）。
+     */
+    public Set<String> interceptedContentKeys(Set<String> postIds) {
+        Set<String> blocked = new LinkedHashSet<>();
+        if (postIds == null || postIds.isEmpty()) {
+            return blocked;
+        }
+        try {
+            for (String postId : postIds) {
+                Object action = redisTemplate.opsForHash().get(mediaKey(postId), "action");
+                if ("INTERCEPT".equals(action)) {
+                    blocked.add(postId);
+                }
+            }
+        } catch (Exception e) {
+            failures.get("blockedContent").increment();
+            log.warn("读内容处置信号失败（fail-open，不拦截）: {}", e.getMessage());
+        }
+        return blocked;
+    }
+
+    /**
+     * 播放前复校辅助：返回作者被拦截的具体原因（{@code ACCOUNT_BANNED} / {@code ACCOUNT_LOW_SCORE} /
+     * {@code null}=未拦截），供 {@code PlayabilityService} 细分 reason。
+     *
+     * <p>与 {@link #blockedAuthorIds} 同源（同一 {@code tf:mod:account} hash、同一阈值），但额外
+     * 区分「封禁」与「低健康分」两种语义；fail-open：读异常 / 缺失 / 脏数据一律返回 {@code null}
+     * （不拦截）。本方法仅在作者已被 {@code blockedAuthorIds} 判为拦截后才调用，额外读仅发生在
+     * 少量被拦截作者上，成本可忽略。</p>
+     */
+    public String authorBlockReason(String authorId) {
+        if (authorId == null || authorId.isBlank()) {
+            return null;
+        }
+        try {
+            Map<Object, Object> h = redisTemplate.opsForHash().entries(accountKey(authorId));
+            if (h == null || h.isEmpty()) {
+                return null;
+            }
+            if ("BANNED".equals(asString(h.get("tier")))) {
+                return PlayableView.REASON_ACCOUNT_BANNED;
+            }
+            String scoreStr = asString(h.get("score"));
+            if (scoreStr != null) {
+                try {
+                    int score = Integer.parseInt(scoreStr);
+                    if (score < props.getDropBelowScore()) {
+                        return PlayableView.REASON_ACCOUNT_LOW_SCORE;
+                    }
+                } catch (NumberFormatException ignore) {
+                    // 脏数据跳过
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**

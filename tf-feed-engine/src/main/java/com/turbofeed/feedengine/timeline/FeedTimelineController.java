@@ -2,6 +2,7 @@ package com.turbofeed.feedengine.timeline;
 
 import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.shared.model.FeedItemView;
+import com.turbofeed.shared.model.PlayableView;
 import com.turbofeed.shared.result.Result;
 import com.turbofeed.feedengine.interest.InterestService;
 import com.turbofeed.feedengine.interest.SessionSequenceService;
@@ -51,6 +52,7 @@ public class FeedTimelineController {
     private final InterestService interestService;
     private final SessionSequenceService sessionSequenceService;
     private final BehaviorLogSink behaviorLogSink;
+    private final PlayabilityService playabilityService;
 
     /**
      * 读取公域推荐流（入流时间倒序，分页）。
@@ -65,6 +67,23 @@ public class FeedTimelineController {
             @RequestParam(value = "size", defaultValue = "20") int size,
             @RequestParam(value = "userId", required = false) String userId) {
         return Result.ok(recommendedFeedService.recommended(page, size, userId));
+    }
+
+    /**
+     * 播放前可放性复校（抖音式「非公平态 5s 刷新」）。
+     *
+     * <p>召回阶段已过滤 INTERCEPT/MONITOR 与低健康分/封禁作者，但那是「预取时刻」结论；用户滑到
+     * 播放的那一刻内容可能已被异步审核 / 举报复审 / 晋级调度翻成下架。本接口在「播放前」再复校一次，
+     * 命中不可见则客户端渲染占位 + 5s 跳下一条（不发 WATCH/曝光/点赞以免污染推荐模型）。
+     * 复用 {@link PlayabilityService}（{@code ReviewSignalClient} 直读 {@code tf:mod:} KV），fail-open。</p>
+     *
+     * @param postIds 待复校帖子（通常 1~3 条：当前条 + 预查的下一条），逗号分隔
+     * @return 每条 postId 的复校结论（playable + reason）
+     */
+    @GetMapping("/playable")
+    public Result<List<PlayableView>> playable(
+            @RequestParam("postIds") List<String> postIds) {
+        return Result.ok(playabilityService.check(postIds));
     }
 
     /**

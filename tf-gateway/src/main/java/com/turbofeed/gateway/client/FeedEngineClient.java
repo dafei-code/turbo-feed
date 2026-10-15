@@ -7,6 +7,7 @@ import com.turbofeed.gateway.service.feed.FeedDeliveryHealth;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.shared.model.FeedItemView;
+import com.turbofeed.shared.model.PlayableView;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -19,6 +20,7 @@ import static com.turbofeed.gateway.security.InternalTokenInterceptor.HEADER;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * tf-feed-engine 的 HTTP 客户端（网关 → 引擎，同步）。
@@ -55,6 +57,7 @@ public class FeedEngineClient {
     private static final String PATH_TIMELINE_APPEND = "/internal/feed/timeline/append";
     private static final String PATH_TIMELINE_REMOVE = "/internal/feed/timeline/remove";
     private static final String PATH_BEHAVIOR = "/internal/feed/behavior";
+    private static final String PATH_PLAYABLE = "/internal/feed/playable";
 
     private final FeedEngineProperties properties;
     private final ObjectMapper objectMapper;
@@ -138,6 +141,45 @@ public class FeedEngineClient {
             health.recordReadFailure(e.toString());
             log.warn("Feed 引擎读取失败（由调用方按 degraded-mode 决定降级口径）: page={}, size={}, {}",
                     page, limit, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * 播放前可放性复校（抖音式「非公平态 5s 刷新」）。fail-open：引擎不可用 / 非 2xx / 失败码
+     * 均返回 {@link Optional#empty()}，由网关决定 fail-open 口径（默认「全部可播放」不误杀）。
+     *
+     * @param postIds 待复校帖子集合
+     * @return {@code Optional.of(list)} = 引擎正常响应；{@code Optional.empty()} = 引擎不可用
+     */
+    public Optional<List<PlayableView>> playable(Set<String> postIds) {
+        if (postIds == null || postIds.isEmpty()) {
+            return Optional.of(List.of());
+        }
+        try {
+            String body = restClient.get()
+                    .uri(uri -> uri.path(PATH_PLAYABLE)
+                            .queryParam("postIds", String.join(",", postIds))
+                            .build())
+                    .retrieve()
+                    .body(String.class);
+            JsonNode root = objectMapper.readTree(body == null ? "{}" : body);
+            int code = root.path("code").asInt(-1);
+            if (code != 0) {
+                health.recordReadFailure("引擎返回失败码 code=" + code);
+                log.warn("Feed 引擎 playable 返回失败码，按不可用处理: {}", code);
+                return Optional.empty();
+            }
+            JsonNode data = root.path("data");
+            if (data.isMissingNode() || data.isNull()) {
+                return Optional.of(List.of());
+            }
+            List<PlayableView> items = objectMapper.convertValue(data,
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, PlayableView.class));
+            return Optional.of(items);
+        } catch (Exception e) {
+            health.recordReadFailure(e.toString());
+            log.warn("Feed 引擎 playable 读取失败（fail-open）: {}", e.getMessage());
             return Optional.empty();
         }
     }
