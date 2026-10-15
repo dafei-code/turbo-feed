@@ -6,14 +6,15 @@
 --     不纳入 Flyway（ShardingSphere + Flyway 对分片 DDL 协作成本高，评审方案已确认）。
 --   · 本迁移只管「单表」(sensitive_word / sensitive_whitelist / user_phone_router /
 --     outbox_event / review_task)，这些表落在物理库 ds_0(turbo_feed_1)。
---   · Flyway 配置(spring.flyway.url)直连 turbo_feed_1，**绕过 ShardingSphere 驱动**，
---     否则 DDL 会被 SS 路由/拒绝。
+--   · Flyway 配置(spring.flyway.url)直连物理库 ds_0（turbo_feed_1），**绕过 ShardingSphere 驱动**，
+--     否则 DDL 会被 SS 路由/拒绝。DDL 使用「当前 schema」（不硬编码库名），由 spring.flyway.url
+--     决定落到哪个物理库——改 url 即改落库，迁移脚本保持可移植。
 --   · 全部 CREATE TABLE IF NOT EXISTS：现有库(已跑过 init-local.sql)幂等无操作；
 --     全新库也能建出这 5 张表，满足「克隆即跑 + 版本化」双目标。
 --   · DDL 与 init-local.sql 逐字一致，避免漂移。
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS `turbo_feed_1`.`sensitive_word` (
+CREATE TABLE IF NOT EXISTS `sensitive_word` (
   `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
   `word`       VARCHAR(64)  NOT NULL                COMMENT '敏感词',
   `category`   VARCHAR(32)  NOT NULL DEFAULT 'DEFAULT' COMMENT '分类: POLITICS/PORN/VIOLENCE/AD/DEFAULT',
@@ -27,7 +28,7 @@ CREATE TABLE IF NOT EXISTS `turbo_feed_1`.`sensitive_word` (
   KEY `idx_enabled` (`enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感词库(单表, AC 自动机加载源)';
 
-CREATE TABLE IF NOT EXISTS `turbo_feed_1`.`sensitive_whitelist` (
+CREATE TABLE IF NOT EXISTS `sensitive_whitelist` (
   `id`         BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
   `word`       VARCHAR(64)  NOT NULL                COMMENT '被豁免的词（与词库存储形态一致）',
   `scene`      VARCHAR(16)  NOT NULL DEFAULT '*'    COMMENT '生效场景: * / NICKNAME / CAPTION / COMMENT',
@@ -44,7 +45,7 @@ CREATE TABLE IF NOT EXISTS `turbo_feed_1`.`sensitive_whitelist` (
   KEY `idx_enabled` (`enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT='误杀豁免白名单(单表, 内存索引加载源)';
 
-CREATE TABLE IF NOT EXISTS `turbo_feed_1`.`user_phone_router` (
+CREATE TABLE IF NOT EXISTS `user_phone_router` (
   `phone`      VARCHAR(20) NOT NULL                COMMENT '登录手机号, 全局唯一(本表是唯一真正 enforce 该约束的地方)',
   `user_id`    BIGINT      NOT NULL                COMMENT '用户ID(user表分片键), 命中后按 id 精准查 user 单分片',
   `created_at` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '绑定时间',
@@ -52,7 +53,7 @@ CREATE TABLE IF NOT EXISTS `turbo_feed_1`.`user_phone_router` (
   KEY `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='手机号→UID 路由表(单表, 消灭跨分片广播查重)';
 
-CREATE TABLE IF NOT EXISTS `turbo_feed_1`.`outbox_event` (
+CREATE TABLE IF NOT EXISTS `outbox_event` (
   `id`              BIGINT       NOT NULL                COMMENT '事件ID(雪花), 投递顺序键',
   `event_type`      VARCHAR(64)  NOT NULL                COMMENT 'TIMELINE_APPEND / TIMELINE_REMOVE',
   `aggregate_id`    VARCHAR(255) NOT NULL                COMMENT '业务聚合标识(mediaId/postId), 对账与人工补偿定位用',
@@ -72,7 +73,7 @@ CREATE TABLE IF NOT EXISTS `turbo_feed_1`.`outbox_event` (
   KEY `idx_aggregate` (`aggregate_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='事务发件箱(单表, 杜绝"事务已提交但消息丢失")';
 
-CREATE TABLE IF NOT EXISTS `turbo_feed_1`.`review_task` (
+CREATE TABLE IF NOT EXISTS `review_task` (
   `id`            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '任务ID(自增, 单表队列)',
   `media_id`      VARCHAR(255) NOT NULL                COMMENT '被举报内容标识(帖代表媒体ID)',
   `author_id`     BIGINT       NOT NULL                COMMENT '内容作者 userId',
