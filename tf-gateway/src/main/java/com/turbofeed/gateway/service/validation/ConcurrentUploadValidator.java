@@ -77,4 +77,45 @@ public class ConcurrentUploadValidator extends UploadValidator {
             }
         });
     }
+
+    /**
+     * 直传路径（{@code presign}）显式获取并发占位。
+     *
+     * <p>与 {@link #doValidate} 共用同一把「同用户同时仅一个上传任务」的锁
+     * （key = {@code rl:upload:inflight:{userId}}），使并发护栏在 {@code upload} 与
+     * {@code presign}/{@code complete} 两条入口语义一致——否则被封/刷接口用户可走直传并发多发，
+     * 绕过 {@code upload} 路径才有的占位锁。{@code SET NX EX} 原子占位，Redis 不可用 fail-open。</p>
+     *
+     * @return true 占位成功（可继续签发凭证）；false 已有任务进行中
+     */
+    public boolean tryAcquireInflight(String userId) {
+        String key = INFLIGHT_KEY_PREFIX + userId;
+        Duration ttl = Duration.ofSeconds(properties.getRateLimit().getInflightTtlSeconds());
+        try {
+            return Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(key, "1", ttl));
+        } catch (RedisConnectionFailureException e) {
+            // 与 doValidate 一致的容灾：Redis 故障不阻断上传主链路（可用性优先）
+            log.warn("Redis 不可用，并发护栏降级放行（fail-open）: userId={}", userId, e);
+            return true;
+        }
+    }
+
+    /**
+     * 直传路径（{@code complete}）释放并发占位。
+     *
+     * <p>直传任务跨度 = presign → 客户端 PUT → complete，占位锁须在 complete 收尾时释放
+     * （而非 presign 返回时，否则锁立即失效）。key 由 userId 决定、幂等删除，
+     * 不存在也安全；TTL 仍兜底进程崩溃场景。</p>
+     *
+     * @param userId 归属用户（与获取时同一 userId）
+     */
+    public void releaseInflight(String userId) {
+        String key = INFLIGHT_KEY_PREFIX + userId;
+        try {
+            redisTemplate.delete(key);
+        } catch (Exception e) {
+            // 释放失败不影响响应；TTL 兜底过期，用户最多等待 inflight-ttl-seconds
+            log.warn("上传占位释放失败（依赖 TTL 兜底过期）: key={}", key, e);
+        }
+    }
 }

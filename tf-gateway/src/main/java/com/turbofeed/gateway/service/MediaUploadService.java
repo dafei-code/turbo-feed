@@ -29,6 +29,7 @@ import com.turbofeed.gateway.service.processing.ImageProcessingChain;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
 import com.turbofeed.gateway.service.review.MediaStatus;
+import com.turbofeed.gateway.service.validation.ConcurrentUploadValidator;
 import com.turbofeed.gateway.service.validation.UploadValidation;
 import com.turbofeed.gateway.service.validation.UploadValidationChain;
 import com.turbofeed.gateway.storage.MediaStorageClient;
@@ -95,6 +96,7 @@ public class MediaUploadService {
     private final MediaEventPublisher eventPublisher;
     private final ImageProcessingChain processingChain;
     private final UploadValidationChain validationChain;
+    private final ConcurrentUploadValidator concurrentUploadValidator;
     private final UploadRateLimiter rateLimiter;
     private final UploadIdempotency idempotency;
     private final MediaJdbcRepository mediaRepository;
@@ -122,6 +124,7 @@ public class MediaUploadService {
                               MediaEventPublisher eventPublisher,
                               ImageProcessingChain processingChain,
                               UploadValidationChain validationChain,
+                              ConcurrentUploadValidator concurrentUploadValidator,
                               UploadRateLimiter rateLimiter,
                               UploadIdempotency idempotency,
                               MediaJdbcRepository mediaRepository,
@@ -138,6 +141,7 @@ public class MediaUploadService {
         this.eventPublisher = eventPublisher;
         this.processingChain = processingChain;
         this.validationChain = validationChain;
+        this.concurrentUploadValidator = concurrentUploadValidator;
         this.rateLimiter = rateLimiter;
         this.idempotency = idempotency;
         this.mediaRepository = mediaRepository;
@@ -348,7 +352,8 @@ public class MediaUploadService {
                     "预签名直传仅在 turbofeed.media.storage=minio 时可用");
         }
 
-        // 幂等：同一 requestId 复用同一预约 → 同一批对象名，避免重试把孤儿对象翻倍
+        // 幂等：同一 requestId 复用同一预约 → 同一批对象名，避免重试把孤儿对象翻倍。
+        // 必须在并发占位之前：复用已有预约不应被「进行中」误拒（锁由首次 presign 持有，尚未 complete）。
         Optional<String> existed = reservationStore.findPostIdByRequest(userId, requestId);
         if (existed.isPresent()) {
             Optional<UploadReservation> resv = reservationStore.load(existed.get());
@@ -359,44 +364,56 @@ public class MediaUploadService {
             }
         }
 
-        List<PresignRequest.FileMeta> files = request != null && request.files() != null
-                ? request.files() : List.of();
-        if (files.isEmpty() || files.size() > properties.getMaxBatchCount()) {
-            throw new BizException(ErrorCode.UPLOAD_INVALID,
-                    "上传数量不合法（1.." + properties.getMaxBatchCount() + "）");
+        // 并发护栏：直传路径也要拦「同用户同时仅一个上传任务」。原仅 upload 路径经校验链持有该占位锁，
+        // 直传（presign→客户端 PUT→complete）若不获取，被封/刷接口用户可并发多发绕过该锁。
+        if (!concurrentUploadValidator.tryAcquireInflight(userId)) {
+            throw new BizException(ErrorCode.UPLOAD_IN_PROGRESS, "已有上传任务进行中，请等待完成后再试");
         }
-
-        String rawCaption = request != null && request.caption() != null ? request.caption() : "";
-        contentSecurityService.requireClean(ContentScene.CAPTION, rawCaption, Long.parseLong(userId));
-        CaptionMarkParser.ParseResult captionMark = captionMarkParser.parse(rawCaption);
-
-        long maxBytes = properties.getMaxFileSize().toBytes();
-        List<UploadReservation.Slot> slots = new ArrayList<>(files.size());
-        for (int seq = 0; seq < files.size(); seq++) {
-            PresignRequest.FileMeta meta = files.get(seq);
-            ImageFormat format = ImageFormat.fromContentType(meta.contentType());
-            if (format == null) {
-                throw new BizException(ErrorCode.UPLOAD_INVALID, "不支持的图片类型: " + meta.contentType());
+        try {
+            List<PresignRequest.FileMeta> files = request != null && request.files() != null
+                    ? request.files() : List.of();
+            if (files.isEmpty() || files.size() > properties.getMaxBatchCount()) {
+                throw new BizException(ErrorCode.UPLOAD_INVALID,
+                        "上传数量不合法（1.." + properties.getMaxBatchCount() + "）");
             }
-            if (meta.size() <= 0 || meta.size() > maxBytes) {
-                throw new BizException(ErrorCode.UPLOAD_INVALID, "文件大小超限: " + meta.size());
+
+            String rawCaption = request != null && request.caption() != null ? request.caption() : "";
+            contentSecurityService.requireClean(ContentScene.CAPTION, rawCaption, Long.parseLong(userId));
+            CaptionMarkParser.ParseResult captionMark = captionMarkParser.parse(rawCaption);
+
+            long maxBytes = properties.getMaxFileSize().toBytes();
+            List<UploadReservation.Slot> slots = new ArrayList<>(files.size());
+            for (int seq = 0; seq < files.size(); seq++) {
+                PresignRequest.FileMeta meta = files.get(seq);
+                ImageFormat format = ImageFormat.fromContentType(meta.contentType());
+                if (format == null) {
+                    throw new BizException(ErrorCode.UPLOAD_INVALID, "不支持的图片类型: " + meta.contentType());
+                }
+                if (meta.size() <= 0 || meta.size() > maxBytes) {
+                    throw new BizException(ErrorCode.UPLOAD_INVALID, "文件大小超限: " + meta.size());
+                }
+                slots.add(new UploadReservation.Slot(seq,
+                        storageClient.generateMediaId(userId, format), format, meta.size(),
+                        meta.duration()));
             }
-            slots.add(new UploadReservation.Slot(seq,
-                    storageClient.generateMediaId(userId, format), format, meta.size(),
-                    meta.duration()));
+
+            String postId = POST_ID_PREFIX + userId + "/" + UUID.randomUUID().toString().replace("-", "");
+            UploadReservation reservation = new UploadReservation(postId, userId, List.copyOf(slots),
+                    rawCaption, captionMark.markJson(), requestId, Instant.now(),
+                    UploadReservation.Status.RESERVED);
+            reservationStore.save(reservation);
+            reservationStore.saveRequestIndex(userId, requestId, postId);
+
+            PresignResponse response = toPresignResponse(reservation);
+            log.info("预签名凭证已签发: userId={}, postId={}, images={}, requestId={}",
+                    userId, postId, slots.size(), requestId);
+            return response;
+        } catch (RuntimeException e) {
+            // 占位锁须在 presign 失败（数量/大小/格式/敏感词等）时立即释放，否则 TTL 兜底期内
+            // 同用户重试会被「进行中」误拒（与 upload 路径 finally 释放口径一致）。
+            concurrentUploadValidator.releaseInflight(userId);
+            throw e;
         }
-
-        String postId = POST_ID_PREFIX + userId + "/" + UUID.randomUUID().toString().replace("-", "");
-        UploadReservation reservation = new UploadReservation(postId, userId, List.copyOf(slots),
-                rawCaption, captionMark.markJson(), requestId, Instant.now(),
-                UploadReservation.Status.RESERVED);
-        reservationStore.save(reservation);
-        reservationStore.saveRequestIndex(userId, requestId, postId);
-
-        PresignResponse response = toPresignResponse(reservation);
-        log.info("预签名凭证已签发: userId={}, postId={}, images={}, requestId={}",
-                userId, postId, slots.size(), requestId);
-        return response;
     }
 
     /** Sentinel 限流回调（blockHandler）：签名契约同 {@link #uploadBlocked}。 */
@@ -451,22 +468,30 @@ public class MediaUploadService {
             return new UploadAccepted(postId, representative, MediaStatus.PENDING.name());
         }
 
-        long maxBytes = properties.getMaxFileSize().toBytes();
-        for (UploadReservation.Slot slot : reservation.slots()) {
-            long size = storageClient.sizeOf(slot.mediaId());
-            if (size <= 0 || size > maxBytes) {
-                discardUploadedObjects(reservation);
-                throw new BizException(ErrorCode.UPLOAD_INVALID, "上传对象缺失或大小超限: seq=" + slot.seq());
+        try {
+            long maxBytes = properties.getMaxFileSize().toBytes();
+            for (UploadReservation.Slot slot : reservation.slots()) {
+                long size = storageClient.sizeOf(slot.mediaId());
+                if (size <= 0 || size > maxBytes) {
+                    discardUploadedObjects(reservation);
+                    throw new BizException(ErrorCode.UPLOAD_INVALID, "上传对象缺失或大小超限: seq=" + slot.seq());
+                }
+                ImageFormat actual = ImageFormat.detect(
+                        storageClient.probeHeader(slot.mediaId(), HEADER_PROBE_BYTES));
+                if (actual != slot.format()) {
+                    discardUploadedObjects(reservation);
+                    throw new BizException(ErrorCode.UPLOAD_INVALID, "文件内容与声明类型不符: seq=" + slot.seq());
+                }
             }
-            ImageFormat actual = ImageFormat.detect(
-                    storageClient.probeHeader(slot.mediaId(), HEADER_PROBE_BYTES));
-            if (actual != slot.format()) {
-                discardUploadedObjects(reservation);
-                throw new BizException(ErrorCode.UPLOAD_INVALID, "文件内容与声明类型不符: seq=" + slot.seq());
-            }
-        }
 
-        uploadFinalizer.finalizeAsync(reservation);
+            // 直传任务收尾：释放 presign 阶段持有的并发占位锁（key 由 userId 决定、幂等删除，TTL 仍兜底）。
+            concurrentUploadValidator.releaseInflight(userId);
+            uploadFinalizer.finalizeAsync(reservation);
+        } catch (RuntimeException e) {
+            // 复核失败（大小/格式不符）已 discard 对象；占位锁仍须释放，避免同用户被「进行中」误拒。
+            concurrentUploadValidator.releaseInflight(userId);
+            throw e;
+        }
         return new UploadAccepted(postId, representative, MediaStatus.PENDING.name());
     }
 
