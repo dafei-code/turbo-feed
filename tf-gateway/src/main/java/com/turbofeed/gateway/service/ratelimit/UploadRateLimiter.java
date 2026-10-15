@@ -1,6 +1,8 @@
 package com.turbofeed.gateway.service.ratelimit;
 
 import com.turbofeed.gateway.config.MediaProperties;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -23,9 +25,10 @@ import java.util.List;
  * 缺点：窗口边界突刺（最多 2× 阈值），UGC 防刷场景可接受。阈值与窗口取自
  * {@code MediaProperties.RateLimit}（turbofeed.media.rate-limit.per-user / window-seconds）。</p>
  *
- * <p><b>降级</b>：Redis 不可用时（本地克隆即跑未启动 Redis）以 warn 级别放行，避免限流组件
- * 故障导致上传全量 500；代价是限流暂时失效，符合「依赖故障不阻断主链路」的取舍。
- * {@code perUser <= 0} 时视为关闭用户维度限流，直接放行。</p>
+ * <p><b>降级</b>：Redis 不可用时（本地克隆即跑未启动 Redis）降级为进程内兜底限流
+ * （{@link LocalFallbackRateLimiter}，带业务维度隔离 + 阈值下探），仍拦单用户刷接口，
+ * 而非完全放开——保证主链路可用且限流不"裸奔"。{@code perUser <= 0} 时视为关闭用户维度限流，
+ * 直接放行。</p>
  *
  * <p>key 命名：{@code rl:upload:{userId}}（前缀 rl 即 rate-limit，与媒体存储 key 前缀 media 区分）。</p>
  *
@@ -48,13 +51,19 @@ public class UploadRateLimiter {
     private final StringRedisTemplate redisTemplate;
     private final MediaProperties properties;
     private final LocalFallbackRateLimiter localFallback;
+    /** 限流转本地兜底的次数（Redis 不可用 / 异常）：观测降级触发率，长期 >0 应告警。 */
+    private final Counter fallbackEnteredTotal;
 
     public UploadRateLimiter(StringRedisTemplate redisTemplate,
                              MediaProperties properties,
-                             LocalFallbackRateLimiter localFallback) {
+                             LocalFallbackRateLimiter localFallback,
+                             MeterRegistry registry) {
         this.redisTemplate = redisTemplate;
         this.properties = properties;
         this.localFallback = localFallback;
+        this.fallbackEnteredTotal = Counter.builder("tf_upload_ratelimit_fallback_total")
+                .description("用户维度限流转本地兜底的次数（Redis 不可用 / 异常，跨业务聚合）")
+                .register(registry);
     }
 
     /**
@@ -71,7 +80,8 @@ public class UploadRateLimiter {
      * 通用用户维度限流（可指定 key 前缀，供点赞/评论等复用同一套 Redis 固定窗口 + 本地兜底）。
      *
      * <p>阈值与窗口统一取自 {@code MediaProperties.RateLimit}（turbofeed.media.rate-limit.per-user /
-     * window-seconds），与上传共用一套配置；不同业务用不同前缀隔离计数，互不干扰。</p>
+     * window-seconds），与上传共用一套配置；不同业务用不同前缀隔离计数，互不干扰。降级时把同一
+     * 前缀透传给本地兜底，保证业务隔离口径在 Redis 不可用期间也不丢失。</p>
      *
      * @param userId    归属用户
      * @param keyPrefix 限流 key 前缀（如 {@code rl:like:} / {@code rl:comment:}），区分业务维度
@@ -99,7 +109,8 @@ public class UploadRateLimiter {
         } catch (Exception e) {
             // Redis 不可用：降级为进程内兜底限流（仍拦单用户刷接口，而非完全放开），保证主链路可用
             log.warn("用户维度限流 Redis 异常，降级本地兜底限流: prefix={}, userId={}, {}", keyPrefix, userId, e.getMessage());
-            return localFallback.tryAcquire(userId);
+            fallbackEnteredTotal.increment();
+            return localFallback.tryAcquire(userId, keyPrefix);
         }
     }
 }

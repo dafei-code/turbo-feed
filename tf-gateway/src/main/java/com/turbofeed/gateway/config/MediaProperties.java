@@ -118,12 +118,25 @@ public class MediaProperties {
         /** 上传并发占位 TTL（秒，ConcurrentUploadValidator）：进程崩溃 / 释放失败时的兜底过期时间。 */
         private int inflightTtlSeconds = 30;
 
+        /** 本地兜底限流实例数预估（fallback 阈值下探用）：单实例阈值 = perUser / max(estimate,1)。
+         *  多实例下 Redis 不可用走本地兜底时，若不下调则全局实际限流被放大成 perUser×N（过松）。
+         *  运维按实际实例数设置（如 3），默认 1 表示不下探。 */
+        private int fallbackInstanceEstimate = 1;
+
         public int getInflightTtlSeconds() {
             return inflightTtlSeconds;
         }
 
         public void setInflightTtlSeconds(int inflightTtlSeconds) {
             this.inflightTtlSeconds = inflightTtlSeconds;
+        }
+
+        public int getFallbackInstanceEstimate() {
+            return fallbackInstanceEstimate;
+        }
+
+        public void setFallbackInstanceEstimate(int fallbackInstanceEstimate) {
+            this.fallbackInstanceEstimate = fallbackInstanceEstimate;
         }
 
         public int getThread() {
