@@ -18,6 +18,9 @@ logs/
 application-local.yml
 shardingsphere-config-local.yml
 
+# 环境变量密钥文件：由 `cp .env.example .env` 生成，含 JWT 密钥 / 内部令牌 / MinIO 凭据，绝不入仓
+.env
+
 # 测试运行残片（本地启动/种子脚本生成的临时数据，绝不入仓）
 data/
 

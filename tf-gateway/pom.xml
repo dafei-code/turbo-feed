@@ -36,6 +36,13 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- Prometheus 指标暴露（P0-4 可观测性）：actuator 已传递 micrometer-core，
+             本依赖仅补充 PrometheusMeterRegistry + /actuator/prometheus 端点；
+             版本由 spring-boot-dependencies BOM 托管，无需写 version。与 tf-feed-engine 对齐。 -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
         <!-- JDBC 持久层：media 元数据落库（P1）。复用 ShardingSphere 已装配的 DataSource，
              经 JdbcTemplate 读写分片后的 media 表；版本由 Spring Boot BOM 托管。
              一并带来 HikariCP，与 shardingsphere-config.yaml 引用的 HikariDataSource 对齐。 -->
@@ -184,10 +191,14 @@
             <artifactId>rocketmq-spring-boot-starter</artifactId>
             <version>2.3.5</version>
         </dependency>
-        <!-- Lombok：@RequiredArgsConstructor 简化构造器注入（版本由 Spring Boot BOM 托管；optional 不参与传递、不打入可执行 jar） -->
+        <!-- Lombok：@RequiredArgsConstructor / @Slf4j 简化构造器与日志（optional 不参与传递、不打入可执行 jar）。
+             钉 1.18.42：本机 JDK 为 17.0.19（2026 补丁版），Lombok 1.18.36 的 TypeTag 反射在改版
+             javac 内部 API 上抛 ExceptionInInitializerError，clean 编译时 @Slf4j 的 log 字段无法生成、
+             全量报「找不到符号」；1.18.42 已适配该 JDK。覆盖 spring-boot-dependencies BOM 的 1.18.36。 -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
+            <version>1.18.42</version>
             <optional>true</optional>
         </dependency>
         <!-- 对象存储客户端（MinIO / 兼容 S3）：百亿级媒体文件的存储落点。
@@ -202,6 +213,21 @@
 
     <build>
         <plugins>
+            <!-- 显式把 Lombok 1.18.42 放到注解处理器路径：clean 编译时 javac 才能发现 @Slf4j/@RequiredArgsConstructor
+                 处理器（本机 JDK 17.0.19 需 1.18.42，见 lombok 依赖注释）。与引擎 tf-feed-engine 一致。 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>1.18.42</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

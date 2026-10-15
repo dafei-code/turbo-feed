@@ -8,10 +8,14 @@ import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.shared.model.FeedItemView;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+
+import static com.turbofeed.gateway.security.InternalTokenInterceptor.HEADER;
 
 import java.util.List;
 import java.util.Optional;
@@ -57,6 +61,8 @@ public class FeedEngineClient {
     private final RestClient restClient;
     /** 投递成功/失败计数：fail-open 不能变成"无声丢失"，失败必须留下可查的痕迹。 */
     private final FeedDeliveryHealth health;
+    /** 服务间内部接口共享令牌（评审 doc P0-2）；为空时不为请求附加 X-Internal-Token（fail-open 本地开发）。 */
+    private final String internalToken;
 
     /**
      * 使用 Spring Boot 自动装配的 {@link RestClient.Builder}（prototype 作用域，故 clone 后使用）：
@@ -67,10 +73,12 @@ public class FeedEngineClient {
     public FeedEngineClient(FeedEngineProperties properties,
                             ObjectMapper objectMapper,
                             RestClient.Builder restClientBuilder,
-                            FeedDeliveryHealth health) {
+                            FeedDeliveryHealth health,
+                            @Value("${turbofeed.internal.token:}") String internalToken) {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.health = health;
+        this.internalToken = internalToken == null ? "" : internalToken;
         FeedEngineProperties.Engine engine = properties.getEngine();
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout((int) engine.getConnectTimeout().toMillis());
@@ -78,10 +86,17 @@ public class FeedEngineClient {
         this.restClient = restClientBuilder.clone()
                 .baseUrl(engine.getBaseUrl())
                 .requestFactory(requestFactory)
+                // 服务间内部接口鉴权（评审 doc P0-2）：配置令牌时为所有 /internal/feed/** 请求加 X-Internal-Token，
+                // 与引擎侧 InternalTokenInterceptor 共享同一密钥。未配置令牌则不加（fail-open 本地开发）。
+                .defaultHeaders(headers -> {
+                    if (!this.internalToken.isBlank()) {
+                        headers.set(HEADER, this.internalToken);
+                    }
+                })
                 .build();
-        log.info("Feed 引擎客户端初始化: baseUrl={}, connectTimeout={}, readTimeout={}, degradedMode={}",
+        log.info("Feed 引擎客户端初始化: baseUrl={}, connectTimeout={}, readTimeout={}, degradedMode={}, internalToken={}",
                 engine.getBaseUrl(), engine.getConnectTimeout(), engine.getReadTimeout(),
-                properties.getDegradedMode());
+                properties.getDegradedMode(), this.internalToken.isBlank() ? "未配置(fail-open)" : "已配置");
     }
 
     /**

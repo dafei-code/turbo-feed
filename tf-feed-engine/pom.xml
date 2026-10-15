@@ -89,6 +89,10 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
+            <!-- 钉 1.18.42：本机 JDK 为 17.0.19（2026 补丁版），Lombok 1.18.36 的 TypeTag
+                 反射在改版 javac 内部 API 上抛 ExceptionInInitializerError（TypeTag :: UNKNOWN），
+                 clean 编译引擎直接失败；1.18.42 已适配该 JDK。覆盖 spring-boot-dependencies BOM 的 1.18.36。 -->
+            <version>1.18.42</version>
             <optional>true</optional>
         </dependency>
     </dependencies>
@@ -106,6 +110,8 @@
                         <path>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
+                            <!-- 与上方 lombok 依赖同版本：本机 JDK 17.0.19 需 1.18.42（见依赖注释） -->
+                            <version>1.18.42</version>
                         </path>
                     </annotationProcessorPaths>
                 </configuration>

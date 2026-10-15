@@ -1,7 +1,7 @@
 # 分库分表设计（turbo-feed-gateway 元数据层）
 
 > 载体：ShardingSphere JDBC 5.5.3（原生驱动模式）+ **内置 HASH_MOD 算法** + `autoTables` 自动分片。
-> 适用：网关全部元数据表（当前 6 张逻辑表：`user` / `media` / `account_credit` / `report` / `appeal` / `comment`）。
+> 适用：网关全部元数据表（当前 **11 张逻辑表**：`user` / `media` / `account_credit` / `violation_record` / `account_penalty` / `report` / `appeal`（7 张走 hashMod4）+ `comment` / `media_like` / `user_follow` / `user_fans`（4 张走 hashMod128，含 P0-2 关注关系））。
 > 其他服务（counter / feed-engine）不持有元数据表，不参与分片。
 
 ## 1. 为什么分片
@@ -26,18 +26,16 @@ UGC 场景元数据增速 ≈ 用户量 × 人均写入量。单表在千万级�
 ## 3. 分片方案（当前）
 
 ```
-规则：autoTables + HASH_MOD，sharding-count = 4（= 库数 2 × 表数 2）
+规则：autoTables + HASH_MOD，**两套算法并存**（库数 2 固定，表数按表不同）：
+  - 7 张元数据表（user / media / account_credit / violation_record / account_penalty / report / appeal）走 `hashMod4`（sharding-count = 4 = 库数 2 × 表数 2）
+  - 4 张高写入表（comment / media_like / user_follow / user_fans，P0-2 关注关系 + 评论/点赞扩容）走 `hashMod128`（sharding-count = 128）
 
-逻辑表 → 物理表命名：<逻辑表>_0 .. <逻辑表>_3
-落库规则：第 i 张物理表落在 actualDataSources.get(i % 2)
-            ds_0(turbo_feed_1) ← 偶数下标 _0, _2
-            ds_1(turbo_feed_2) ← 奇数下标 _1, _3
+逻辑表 → 物理表命名：<逻辑表>_0 .. <逻辑表>_{N-1}（N = 各自的 sharding-count）
+落库规则：第 i 张物理表落在 actualDataSources.get(i % 2)，偶数下标落 ds_0(turbo_feed_1)、奇数下标落 ds_1(turbo_feed_2)
 
-物理表（每张逻辑表 4 张，6 张逻辑表共 24 张）：
-  turbo_feed_1：user_0 user_2 | media_0 media_2 | account_credit_0 account_credit_2
-                report_0 report_2 | appeal_0 appeal_2 | comment_0 comment_2
-  turbo_feed_2：user_1 user_3 | media_1 media_3 | account_credit_1 account_credit_3
-                report_1 report_3 | appeal_1 appeal_3 | comment_1 comment_3
+物理表（11 张逻辑表共 540 张）：
+  hashMod4（7 表 × 4 = 28 张）：user / media / account_credit / violation_record / account_penalty / report / appeal 各 _0.._3
+  hashMod128（4 表 × 128 = 512 张）：comment / media_like / user_follow / user_fans 各 _0.._127
 ```
 
 选择 2×2 的考量：起步规模小，2 库解决单实例容量上限、2 表解决单表行数上限，足以撑到亿级；且 2 的幂次取模无余数偏差。
@@ -90,8 +88,8 @@ UGC 场景元数据增速 ≈ 用户量 × 人均写入量。单表在千万级�
 
 | 阶段 | 动作 | 状态 / 影响 |
 |---|---|---|
-| 当前 | 2 库 × 2 表（`sharding-count=4`） | ✅ **已落地**，撑到约亿级 |
-| 媒体表大幅扩容 | 2 库 × 64 表 = **128 物理表** | ⚠️ **前置已就绪并实机验证，仍未切换**：`shardingsphere-config-128.yaml`（0041 重写为 `autoTables`，此前根本起不来）+ `db/expand_media_tables_128.sql`（已在本机建成 128 张）+ `db/rebalance_media_128.sql`（存量搬迁）。切换需改 `application.yml` 的 `spring.datasource.url` 指向 128 版配置并**重启应用**（SS 启动期加载元数据） |
+| 当前 | 混合：7 表 hashMod4 + 4 表 hashMod128（comment / media_like / user_follow / user_fans） | ✅ **已落地**，撑到约亿级；4 张高写入表已直接 128 无需再切 |
+| media 进一步扩容 | 2 库 × 64 表 = **128 物理表** | ⚠️ **前置已就绪并实机验证，仍未切换**（其余 4 张高写入表已直接 128）：`shardingsphere-config-128.yaml`（0041 重写为 `autoTables`，此前根本起不来）+ `db/expand_media_tables_128.sql`（已在本机建成 128 张）+ `db/rebalance_media_128.sql`（存量搬迁）。切换需改 `application.yml` 的 `spring.datasource.url` 指向 128 版配置并**重启应用**（SS 启动期加载元数据） |
 | 单库容量瓶颈 | 4 库 × N 表 | 加 `ds_2`/`ds_3` 数据源 + 库层 `sharding-count` + 建表 |
 | 扩容再平衡 | 复制 + 清理两阶段，库内搬迁 | 4 → 128 是 2 的幂倍扩展，实证 **库定位不变**（`idx128 % 4 == idx4`，故 `%2` 亦同）——源 `media_X` 只是拆到同库的 `{X, X+4, ..., X+124}` 共 32 张表，**不跨库**。搬迁必须「先复制再删源表中不属于它的行」，缺一步会重复或丢数据（见 changelog 0041）。生产仍建议双写 + 灰度，勿停机硬切 |
 
@@ -102,7 +100,7 @@ UGC 场景元数据增速 ≈ 用户量 × 人均写入量。单表在千万级�
 - `application.yml`：`spring.datasource.driver-class-name=org.apache.shardingsphere.driver.ShardingSphereDriver` + `url=jdbc:shardingsphere:classpath:shardingsphere-config.yaml`；
 - `shardingsphere-config.yaml`：
   - `dataSources`：`ds_0` / `ds_1`（Hikari + MySQL 驱动，指向 `turbo_feed_1` / `turbo_feed_2`）。**注意文件内账号密码仅供克隆即跑，生产必须用环境变量/密钥管理注入**（文件内已留 TODO）；
-  - `rules - !SHARDING`：`autoTables`（6 张逻辑表的 `shardingColumn` 与算法引用）+ `shardingAlgorithms.hashMod`（`type: HASH_MOD` / `props.sharding-count: 4`）+ `keyGenerators.snowflake`；
+  - `rules - !SHARDING`：`autoTables`（11 张逻辑表的 `shardingColumn` 与算法引用，分属 `hashMod4` 与 `hashMod128` 两套算法）+ `shardingAlgorithms.hashMod` / `hashMod128`（`type: HASH_MOD` / `props.sharding-count: 4 | 128`）+ `keyGenerators.snowflake`；
   - `props.sql-show: true`（开发期打印实际落库表与 SQL，便于核对路由；生产可关）；
 - `pom.xml`：`shardingsphere-jdbc:5.5.3`（原生驱动，无需 starter；⚠️ 是 `shardingsphere-jdbc`，**不是** `shardingsphere-jdbc-core`，后者不存在导致 import 全军报红）。**版本选择**：5.5.3 是 5.5.x 线最新稳定版，相比 5.5.0 已修复"test-util 缺失发布"的 release 缺陷（Apache PR #31143），无需 exclusion。
 - **主键生成**：`user.id` 与 `comment.comment_id` 配置了雪花生成器；`media` / `report` / `appeal` 的业务主键由应用侧生成（如 `media/{userId}/{uuid}.{ext}`、`post/{userId}/{uuid}`），非 SS 生成。业务侧显式传 `id` 时以传入值为准。

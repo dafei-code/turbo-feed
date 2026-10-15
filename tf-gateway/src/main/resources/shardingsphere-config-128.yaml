@@ -200,6 +200,21 @@ rules:
         keyGenerateStrategy:
           column: id
           keyGeneratorName: snowflake
+      # 逻辑表 user_follow：关注关系(我关注了谁)，分片键 user_id，hashMod128 与 media 同规模（④ 同款扩容）。
+      # 偶数下标落 ds_0(turbo_feed_1)、奇数落 ds_1(turbo_feed_2)；Redis ZSET tf:follow:{userId} 为读源(供 G6 关注流)，本表为持久化兜底。
+      user_follow:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: hashMod128
+      # 逻辑表 user_fans：粉丝关系(谁关注了我)，分片键 author_id，hashMod128。与 user_follow 互为镜像双写，零 fan-out。
+      user_fans:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: author_id
+            shardingAlgorithmName: hashMod128
     shardingAlgorithms:
       # 分片数 4：user / account_credit / violation_record / account_penalty / report / appeal / comment
       hashMod4:

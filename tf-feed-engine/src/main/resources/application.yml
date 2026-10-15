@@ -43,11 +43,11 @@ management:
   health:
     redis:
       enabled: false
-  # 健康检查仅暴露基础端点（K8s 探活）；接 Prometheus 时再开放 prometheus 端点
+  # 健康检查仅暴露基础端点（K8s 探活）+ Prometheus 拉取端点（Grafana 指标采集）
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
 
 turbofeed:
   # Redis 拓扑开关（与 tf-gateway 完全同名同义，实现来自 tf-redis 模块）：
@@ -163,3 +163,7 @@ turbofeed:
     # 同步调用必须设超时（毫秒）：网关故障时若无限等待，扫描线程会被慢调用拖垮（雪崩入口）
     connect-timeout-ms: 500
     read-timeout-ms: 2000
+  # 服务间内部接口共享令牌（评审 doc P0-2）：网关↔引擎的 /internal/** 调用须携带 X-Internal-Token。
+  # 两侧共用同一值（由 TURBOFEED_INTERNAL_TOKEN 注入）；未配置则两侧均 fail-open（克隆即跑）。
+  internal:
+    token: ${TURBOFEED_INTERNAL_TOKEN:}

@@ -2,10 +2,13 @@ package com.turbofeed.feedengine.client;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+
+import static com.turbofeed.feedengine.interceptor.InternalTokenInterceptor.HEADER;
 
 /**
  * 网关「流量池晋级加严」内部回调客户端（引擎 → 网关，同步 fail-open）。
@@ -29,20 +32,31 @@ public class GatewayReviewClient {
 
     private final RestClient restClient;
     private final String baseUrl;
+    /** 服务间内部接口共享令牌（评审 doc P0-2）；为空时不为请求附加 X-Internal-Token（fail-open 本地开发）。 */
+    private final String internalToken;
 
     public GatewayReviewClient(@Value("${turbofeed.gateway.base-url:http://localhost:8080}") String baseUrl,
                                @Value("${turbofeed.gateway.connect-timeout-ms:500}") int connectTimeoutMs,
-                               @Value("${turbofeed.gateway.read-timeout-ms:2000}") int readTimeoutMs) {
+                               @Value("${turbofeed.gateway.read-timeout-ms:2000}") int readTimeoutMs,
+                               @Value("${turbofeed.internal.token:}") String internalToken) {
         this.baseUrl = baseUrl;
+        this.internalToken = internalToken == null ? "" : internalToken;
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(connectTimeoutMs);
         requestFactory.setReadTimeout(readTimeoutMs);
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
                 .requestFactory(requestFactory)
+                // 服务间内部接口鉴权（评审 doc P0-2）：配置令牌时为回调网关 /internal/review/** 加 X-Internal-Token，
+                // 与网关侧 InternalTokenInterceptor 共享同一密钥。未配置令牌则不加（fail-open 本地开发）。
+                .defaultHeaders(headers -> {
+                    if (!this.internalToken.isBlank()) {
+                        headers.set(HEADER, this.internalToken);
+                    }
+                })
                 .build();
-        log.info("网关回调客户端初始化: baseUrl={}, connectTimeoutMs={}, readTimeoutMs={}",
-                baseUrl, connectTimeoutMs, readTimeoutMs);
+        log.info("网关回调客户端初始化: baseUrl={}, connectTimeoutMs={}, readTimeoutMs={}, internalToken={}",
+                baseUrl, connectTimeoutMs, readTimeoutMs, this.internalToken.isBlank() ? "未配置(fail-open)" : "已配置");
     }
 
     /**

@@ -7490,3 +7490,2567 @@ CREATE TABLE IF NOT EXISTS `turbo_feed_2`.`media_tag_127` (
   PRIMARY KEY (`post_id`, `tag`),
   KEY `idx_tag` (`tag`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='内容标签持久表(物理分片 turbo_feed_2.media_tag_127; 与 Redis tf:tag:media/* 同源, 可重建)';
+
+-- ==================== 关注关系分片表（P0-2，autoTables + HASH_MOD(128)）====================
+-- 分片键：user_follow.user_id / user_fans.author_id；偶数下标落 turbo_feed_1(ds_0)，奇数落 turbo_feed_2(ds_1)。
+-- Redis ZSET tf:follow:{userId} / tf:follower:{userId} 为读源(供 G6 关注流)，本表为持久化兜底(重启重建)。
+CREATE TABLE `turbo_feed_1`.`user_follow_0` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_0)';
+CREATE TABLE `turbo_feed_1`.`user_fans_0` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_0)';
+CREATE TABLE `turbo_feed_2`.`user_follow_1` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_1)';
+CREATE TABLE `turbo_feed_2`.`user_fans_1` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_1)';
+CREATE TABLE `turbo_feed_1`.`user_follow_2` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_2)';
+CREATE TABLE `turbo_feed_1`.`user_fans_2` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_2)';
+CREATE TABLE `turbo_feed_2`.`user_follow_3` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_3)';
+CREATE TABLE `turbo_feed_2`.`user_fans_3` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_3)';
+CREATE TABLE `turbo_feed_1`.`user_follow_4` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_4)';
+CREATE TABLE `turbo_feed_1`.`user_fans_4` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_4)';
+CREATE TABLE `turbo_feed_2`.`user_follow_5` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_5)';
+CREATE TABLE `turbo_feed_2`.`user_fans_5` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_5)';
+CREATE TABLE `turbo_feed_1`.`user_follow_6` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_6)';
+CREATE TABLE `turbo_feed_1`.`user_fans_6` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_6)';
+CREATE TABLE `turbo_feed_2`.`user_follow_7` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_7)';
+CREATE TABLE `turbo_feed_2`.`user_fans_7` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_7)';
+CREATE TABLE `turbo_feed_1`.`user_follow_8` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_8)';
+CREATE TABLE `turbo_feed_1`.`user_fans_8` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_8)';
+CREATE TABLE `turbo_feed_2`.`user_follow_9` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_9)';
+CREATE TABLE `turbo_feed_2`.`user_fans_9` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_9)';
+CREATE TABLE `turbo_feed_1`.`user_follow_10` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_10)';
+CREATE TABLE `turbo_feed_1`.`user_fans_10` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_10)';
+CREATE TABLE `turbo_feed_2`.`user_follow_11` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_11)';
+CREATE TABLE `turbo_feed_2`.`user_fans_11` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_11)';
+CREATE TABLE `turbo_feed_1`.`user_follow_12` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_12)';
+CREATE TABLE `turbo_feed_1`.`user_fans_12` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_12)';
+CREATE TABLE `turbo_feed_2`.`user_follow_13` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_13)';
+CREATE TABLE `turbo_feed_2`.`user_fans_13` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_13)';
+CREATE TABLE `turbo_feed_1`.`user_follow_14` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_14)';
+CREATE TABLE `turbo_feed_1`.`user_fans_14` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_14)';
+CREATE TABLE `turbo_feed_2`.`user_follow_15` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_15)';
+CREATE TABLE `turbo_feed_2`.`user_fans_15` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_15)';
+CREATE TABLE `turbo_feed_1`.`user_follow_16` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_16)';
+CREATE TABLE `turbo_feed_1`.`user_fans_16` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_16)';
+CREATE TABLE `turbo_feed_2`.`user_follow_17` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_17)';
+CREATE TABLE `turbo_feed_2`.`user_fans_17` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_17)';
+CREATE TABLE `turbo_feed_1`.`user_follow_18` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_18)';
+CREATE TABLE `turbo_feed_1`.`user_fans_18` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_18)';
+CREATE TABLE `turbo_feed_2`.`user_follow_19` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_19)';
+CREATE TABLE `turbo_feed_2`.`user_fans_19` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_19)';
+CREATE TABLE `turbo_feed_1`.`user_follow_20` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_20)';
+CREATE TABLE `turbo_feed_1`.`user_fans_20` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_20)';
+CREATE TABLE `turbo_feed_2`.`user_follow_21` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_21)';
+CREATE TABLE `turbo_feed_2`.`user_fans_21` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_21)';
+CREATE TABLE `turbo_feed_1`.`user_follow_22` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_22)';
+CREATE TABLE `turbo_feed_1`.`user_fans_22` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_22)';
+CREATE TABLE `turbo_feed_2`.`user_follow_23` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_23)';
+CREATE TABLE `turbo_feed_2`.`user_fans_23` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_23)';
+CREATE TABLE `turbo_feed_1`.`user_follow_24` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_24)';
+CREATE TABLE `turbo_feed_1`.`user_fans_24` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_24)';
+CREATE TABLE `turbo_feed_2`.`user_follow_25` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_25)';
+CREATE TABLE `turbo_feed_2`.`user_fans_25` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_25)';
+CREATE TABLE `turbo_feed_1`.`user_follow_26` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_26)';
+CREATE TABLE `turbo_feed_1`.`user_fans_26` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_26)';
+CREATE TABLE `turbo_feed_2`.`user_follow_27` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_27)';
+CREATE TABLE `turbo_feed_2`.`user_fans_27` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_27)';
+CREATE TABLE `turbo_feed_1`.`user_follow_28` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_28)';
+CREATE TABLE `turbo_feed_1`.`user_fans_28` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_28)';
+CREATE TABLE `turbo_feed_2`.`user_follow_29` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_29)';
+CREATE TABLE `turbo_feed_2`.`user_fans_29` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_29)';
+CREATE TABLE `turbo_feed_1`.`user_follow_30` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_30)';
+CREATE TABLE `turbo_feed_1`.`user_fans_30` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_30)';
+CREATE TABLE `turbo_feed_2`.`user_follow_31` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_31)';
+CREATE TABLE `turbo_feed_2`.`user_fans_31` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_31)';
+CREATE TABLE `turbo_feed_1`.`user_follow_32` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_32)';
+CREATE TABLE `turbo_feed_1`.`user_fans_32` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_32)';
+CREATE TABLE `turbo_feed_2`.`user_follow_33` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_33)';
+CREATE TABLE `turbo_feed_2`.`user_fans_33` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_33)';
+CREATE TABLE `turbo_feed_1`.`user_follow_34` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_34)';
+CREATE TABLE `turbo_feed_1`.`user_fans_34` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_34)';
+CREATE TABLE `turbo_feed_2`.`user_follow_35` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_35)';
+CREATE TABLE `turbo_feed_2`.`user_fans_35` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_35)';
+CREATE TABLE `turbo_feed_1`.`user_follow_36` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_36)';
+CREATE TABLE `turbo_feed_1`.`user_fans_36` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_36)';
+CREATE TABLE `turbo_feed_2`.`user_follow_37` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_37)';
+CREATE TABLE `turbo_feed_2`.`user_fans_37` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_37)';
+CREATE TABLE `turbo_feed_1`.`user_follow_38` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_38)';
+CREATE TABLE `turbo_feed_1`.`user_fans_38` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_38)';
+CREATE TABLE `turbo_feed_2`.`user_follow_39` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_39)';
+CREATE TABLE `turbo_feed_2`.`user_fans_39` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_39)';
+CREATE TABLE `turbo_feed_1`.`user_follow_40` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_40)';
+CREATE TABLE `turbo_feed_1`.`user_fans_40` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_40)';
+CREATE TABLE `turbo_feed_2`.`user_follow_41` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_41)';
+CREATE TABLE `turbo_feed_2`.`user_fans_41` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_41)';
+CREATE TABLE `turbo_feed_1`.`user_follow_42` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_42)';
+CREATE TABLE `turbo_feed_1`.`user_fans_42` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_42)';
+CREATE TABLE `turbo_feed_2`.`user_follow_43` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_43)';
+CREATE TABLE `turbo_feed_2`.`user_fans_43` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_43)';
+CREATE TABLE `turbo_feed_1`.`user_follow_44` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_44)';
+CREATE TABLE `turbo_feed_1`.`user_fans_44` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_44)';
+CREATE TABLE `turbo_feed_2`.`user_follow_45` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_45)';
+CREATE TABLE `turbo_feed_2`.`user_fans_45` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_45)';
+CREATE TABLE `turbo_feed_1`.`user_follow_46` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_46)';
+CREATE TABLE `turbo_feed_1`.`user_fans_46` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_46)';
+CREATE TABLE `turbo_feed_2`.`user_follow_47` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_47)';
+CREATE TABLE `turbo_feed_2`.`user_fans_47` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_47)';
+CREATE TABLE `turbo_feed_1`.`user_follow_48` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_48)';
+CREATE TABLE `turbo_feed_1`.`user_fans_48` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_48)';
+CREATE TABLE `turbo_feed_2`.`user_follow_49` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_49)';
+CREATE TABLE `turbo_feed_2`.`user_fans_49` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_49)';
+CREATE TABLE `turbo_feed_1`.`user_follow_50` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_50)';
+CREATE TABLE `turbo_feed_1`.`user_fans_50` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_50)';
+CREATE TABLE `turbo_feed_2`.`user_follow_51` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_51)';
+CREATE TABLE `turbo_feed_2`.`user_fans_51` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_51)';
+CREATE TABLE `turbo_feed_1`.`user_follow_52` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_52)';
+CREATE TABLE `turbo_feed_1`.`user_fans_52` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_52)';
+CREATE TABLE `turbo_feed_2`.`user_follow_53` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_53)';
+CREATE TABLE `turbo_feed_2`.`user_fans_53` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_53)';
+CREATE TABLE `turbo_feed_1`.`user_follow_54` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_54)';
+CREATE TABLE `turbo_feed_1`.`user_fans_54` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_54)';
+CREATE TABLE `turbo_feed_2`.`user_follow_55` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_55)';
+CREATE TABLE `turbo_feed_2`.`user_fans_55` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_55)';
+CREATE TABLE `turbo_feed_1`.`user_follow_56` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_56)';
+CREATE TABLE `turbo_feed_1`.`user_fans_56` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_56)';
+CREATE TABLE `turbo_feed_2`.`user_follow_57` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_57)';
+CREATE TABLE `turbo_feed_2`.`user_fans_57` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_57)';
+CREATE TABLE `turbo_feed_1`.`user_follow_58` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_58)';
+CREATE TABLE `turbo_feed_1`.`user_fans_58` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_58)';
+CREATE TABLE `turbo_feed_2`.`user_follow_59` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_59)';
+CREATE TABLE `turbo_feed_2`.`user_fans_59` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_59)';
+CREATE TABLE `turbo_feed_1`.`user_follow_60` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_60)';
+CREATE TABLE `turbo_feed_1`.`user_fans_60` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_60)';
+CREATE TABLE `turbo_feed_2`.`user_follow_61` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_61)';
+CREATE TABLE `turbo_feed_2`.`user_fans_61` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_61)';
+CREATE TABLE `turbo_feed_1`.`user_follow_62` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_62)';
+CREATE TABLE `turbo_feed_1`.`user_fans_62` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_62)';
+CREATE TABLE `turbo_feed_2`.`user_follow_63` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_63)';
+CREATE TABLE `turbo_feed_2`.`user_fans_63` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_63)';
+CREATE TABLE `turbo_feed_1`.`user_follow_64` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_64)';
+CREATE TABLE `turbo_feed_1`.`user_fans_64` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_64)';
+CREATE TABLE `turbo_feed_2`.`user_follow_65` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_65)';
+CREATE TABLE `turbo_feed_2`.`user_fans_65` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_65)';
+CREATE TABLE `turbo_feed_1`.`user_follow_66` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_66)';
+CREATE TABLE `turbo_feed_1`.`user_fans_66` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_66)';
+CREATE TABLE `turbo_feed_2`.`user_follow_67` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_67)';
+CREATE TABLE `turbo_feed_2`.`user_fans_67` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_67)';
+CREATE TABLE `turbo_feed_1`.`user_follow_68` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_68)';
+CREATE TABLE `turbo_feed_1`.`user_fans_68` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_68)';
+CREATE TABLE `turbo_feed_2`.`user_follow_69` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_69)';
+CREATE TABLE `turbo_feed_2`.`user_fans_69` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_69)';
+CREATE TABLE `turbo_feed_1`.`user_follow_70` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_70)';
+CREATE TABLE `turbo_feed_1`.`user_fans_70` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_70)';
+CREATE TABLE `turbo_feed_2`.`user_follow_71` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_71)';
+CREATE TABLE `turbo_feed_2`.`user_fans_71` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_71)';
+CREATE TABLE `turbo_feed_1`.`user_follow_72` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_72)';
+CREATE TABLE `turbo_feed_1`.`user_fans_72` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_72)';
+CREATE TABLE `turbo_feed_2`.`user_follow_73` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_73)';
+CREATE TABLE `turbo_feed_2`.`user_fans_73` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_73)';
+CREATE TABLE `turbo_feed_1`.`user_follow_74` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_74)';
+CREATE TABLE `turbo_feed_1`.`user_fans_74` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_74)';
+CREATE TABLE `turbo_feed_2`.`user_follow_75` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_75)';
+CREATE TABLE `turbo_feed_2`.`user_fans_75` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_75)';
+CREATE TABLE `turbo_feed_1`.`user_follow_76` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_76)';
+CREATE TABLE `turbo_feed_1`.`user_fans_76` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_76)';
+CREATE TABLE `turbo_feed_2`.`user_follow_77` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_77)';
+CREATE TABLE `turbo_feed_2`.`user_fans_77` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_77)';
+CREATE TABLE `turbo_feed_1`.`user_follow_78` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_78)';
+CREATE TABLE `turbo_feed_1`.`user_fans_78` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_78)';
+CREATE TABLE `turbo_feed_2`.`user_follow_79` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_79)';
+CREATE TABLE `turbo_feed_2`.`user_fans_79` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_79)';
+CREATE TABLE `turbo_feed_1`.`user_follow_80` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_80)';
+CREATE TABLE `turbo_feed_1`.`user_fans_80` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_80)';
+CREATE TABLE `turbo_feed_2`.`user_follow_81` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_81)';
+CREATE TABLE `turbo_feed_2`.`user_fans_81` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_81)';
+CREATE TABLE `turbo_feed_1`.`user_follow_82` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_82)';
+CREATE TABLE `turbo_feed_1`.`user_fans_82` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_82)';
+CREATE TABLE `turbo_feed_2`.`user_follow_83` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_83)';
+CREATE TABLE `turbo_feed_2`.`user_fans_83` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_83)';
+CREATE TABLE `turbo_feed_1`.`user_follow_84` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_84)';
+CREATE TABLE `turbo_feed_1`.`user_fans_84` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_84)';
+CREATE TABLE `turbo_feed_2`.`user_follow_85` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_85)';
+CREATE TABLE `turbo_feed_2`.`user_fans_85` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_85)';
+CREATE TABLE `turbo_feed_1`.`user_follow_86` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_86)';
+CREATE TABLE `turbo_feed_1`.`user_fans_86` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_86)';
+CREATE TABLE `turbo_feed_2`.`user_follow_87` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_87)';
+CREATE TABLE `turbo_feed_2`.`user_fans_87` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_87)';
+CREATE TABLE `turbo_feed_1`.`user_follow_88` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_88)';
+CREATE TABLE `turbo_feed_1`.`user_fans_88` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_88)';
+CREATE TABLE `turbo_feed_2`.`user_follow_89` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_89)';
+CREATE TABLE `turbo_feed_2`.`user_fans_89` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_89)';
+CREATE TABLE `turbo_feed_1`.`user_follow_90` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_90)';
+CREATE TABLE `turbo_feed_1`.`user_fans_90` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_90)';
+CREATE TABLE `turbo_feed_2`.`user_follow_91` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_91)';
+CREATE TABLE `turbo_feed_2`.`user_fans_91` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_91)';
+CREATE TABLE `turbo_feed_1`.`user_follow_92` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_92)';
+CREATE TABLE `turbo_feed_1`.`user_fans_92` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_92)';
+CREATE TABLE `turbo_feed_2`.`user_follow_93` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_93)';
+CREATE TABLE `turbo_feed_2`.`user_fans_93` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_93)';
+CREATE TABLE `turbo_feed_1`.`user_follow_94` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_94)';
+CREATE TABLE `turbo_feed_1`.`user_fans_94` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_94)';
+CREATE TABLE `turbo_feed_2`.`user_follow_95` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_95)';
+CREATE TABLE `turbo_feed_2`.`user_fans_95` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_95)';
+CREATE TABLE `turbo_feed_1`.`user_follow_96` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_96)';
+CREATE TABLE `turbo_feed_1`.`user_fans_96` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_96)';
+CREATE TABLE `turbo_feed_2`.`user_follow_97` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_97)';
+CREATE TABLE `turbo_feed_2`.`user_fans_97` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_97)';
+CREATE TABLE `turbo_feed_1`.`user_follow_98` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_98)';
+CREATE TABLE `turbo_feed_1`.`user_fans_98` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_98)';
+CREATE TABLE `turbo_feed_2`.`user_follow_99` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_99)';
+CREATE TABLE `turbo_feed_2`.`user_fans_99` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_99)';
+CREATE TABLE `turbo_feed_1`.`user_follow_100` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_100)';
+CREATE TABLE `turbo_feed_1`.`user_fans_100` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_100)';
+CREATE TABLE `turbo_feed_2`.`user_follow_101` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_101)';
+CREATE TABLE `turbo_feed_2`.`user_fans_101` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_101)';
+CREATE TABLE `turbo_feed_1`.`user_follow_102` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_102)';
+CREATE TABLE `turbo_feed_1`.`user_fans_102` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_102)';
+CREATE TABLE `turbo_feed_2`.`user_follow_103` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_103)';
+CREATE TABLE `turbo_feed_2`.`user_fans_103` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_103)';
+CREATE TABLE `turbo_feed_1`.`user_follow_104` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_104)';
+CREATE TABLE `turbo_feed_1`.`user_fans_104` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_104)';
+CREATE TABLE `turbo_feed_2`.`user_follow_105` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_105)';
+CREATE TABLE `turbo_feed_2`.`user_fans_105` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_105)';
+CREATE TABLE `turbo_feed_1`.`user_follow_106` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_106)';
+CREATE TABLE `turbo_feed_1`.`user_fans_106` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_106)';
+CREATE TABLE `turbo_feed_2`.`user_follow_107` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_107)';
+CREATE TABLE `turbo_feed_2`.`user_fans_107` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_107)';
+CREATE TABLE `turbo_feed_1`.`user_follow_108` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_108)';
+CREATE TABLE `turbo_feed_1`.`user_fans_108` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_108)';
+CREATE TABLE `turbo_feed_2`.`user_follow_109` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_109)';
+CREATE TABLE `turbo_feed_2`.`user_fans_109` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_109)';
+CREATE TABLE `turbo_feed_1`.`user_follow_110` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_110)';
+CREATE TABLE `turbo_feed_1`.`user_fans_110` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_110)';
+CREATE TABLE `turbo_feed_2`.`user_follow_111` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_111)';
+CREATE TABLE `turbo_feed_2`.`user_fans_111` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_111)';
+CREATE TABLE `turbo_feed_1`.`user_follow_112` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_112)';
+CREATE TABLE `turbo_feed_1`.`user_fans_112` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_112)';
+CREATE TABLE `turbo_feed_2`.`user_follow_113` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_113)';
+CREATE TABLE `turbo_feed_2`.`user_fans_113` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_113)';
+CREATE TABLE `turbo_feed_1`.`user_follow_114` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_114)';
+CREATE TABLE `turbo_feed_1`.`user_fans_114` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_114)';
+CREATE TABLE `turbo_feed_2`.`user_follow_115` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_115)';
+CREATE TABLE `turbo_feed_2`.`user_fans_115` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_115)';
+CREATE TABLE `turbo_feed_1`.`user_follow_116` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_116)';
+CREATE TABLE `turbo_feed_1`.`user_fans_116` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_116)';
+CREATE TABLE `turbo_feed_2`.`user_follow_117` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_117)';
+CREATE TABLE `turbo_feed_2`.`user_fans_117` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_117)';
+CREATE TABLE `turbo_feed_1`.`user_follow_118` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_118)';
+CREATE TABLE `turbo_feed_1`.`user_fans_118` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_118)';
+CREATE TABLE `turbo_feed_2`.`user_follow_119` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_119)';
+CREATE TABLE `turbo_feed_2`.`user_fans_119` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_119)';
+CREATE TABLE `turbo_feed_1`.`user_follow_120` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_120)';
+CREATE TABLE `turbo_feed_1`.`user_fans_120` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_120)';
+CREATE TABLE `turbo_feed_2`.`user_follow_121` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_121)';
+CREATE TABLE `turbo_feed_2`.`user_fans_121` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_121)';
+CREATE TABLE `turbo_feed_1`.`user_follow_122` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_122)';
+CREATE TABLE `turbo_feed_1`.`user_fans_122` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_122)';
+CREATE TABLE `turbo_feed_2`.`user_follow_123` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_123)';
+CREATE TABLE `turbo_feed_2`.`user_fans_123` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_123)';
+CREATE TABLE `turbo_feed_1`.`user_follow_124` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_124)';
+CREATE TABLE `turbo_feed_1`.`user_fans_124` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_124)';
+CREATE TABLE `turbo_feed_2`.`user_follow_125` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_125)';
+CREATE TABLE `turbo_feed_2`.`user_fans_125` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_125)';
+CREATE TABLE `turbo_feed_1`.`user_follow_126` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_1.user_follow_126)';
+CREATE TABLE `turbo_feed_1`.`user_fans_126` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_1.user_fans_126)';
+CREATE TABLE `turbo_feed_2`.`user_follow_127` (
+  `user_id`    BIGINT       NOT NULL                COMMENT '关注者用户ID, 分片键',
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关(对方也关注了我)',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`user_id`, `author_id`),
+  KEY `idx_author` (`author_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='关注关系表(我关注了谁, 物理分片 turbo_feed_2.user_follow_127)';
+CREATE TABLE `turbo_feed_2`.`user_fans_127` (
+  `author_id`  BIGINT       NOT NULL                COMMENT '被关注作者ID, 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '粉丝用户ID',
+  `mutual`     TINYINT      NOT NULL DEFAULT 0      COMMENT '1=互关',
+  `status`     TINYINT      NOT NULL DEFAULT 1      COMMENT '1=关注中 0=已取消(逻辑删除)',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '关注时间',
+  `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`author_id`, `user_id`),
+  KEY `idx_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_127)';

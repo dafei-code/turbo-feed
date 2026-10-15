@@ -1,0 +1,10 @@
+# 构建上下文排除项：减小 docker build 上下文体积、避免把本地无关/敏感文件打进镜像
+.git
+**/target
+**/node_modules
+docs
+turbo-feed-ui
+**/.DS_Store
+**/cp.txt
+**/shardingsphere-config-local.yml
+**/*.iml

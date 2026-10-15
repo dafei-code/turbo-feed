@@ -1,23 +1,89 @@
-# turbo-feed 本地基础设施：RocketMQ NameServer + Broker
-# 用途：让 tf-gateway 的媒体上传事件（turbofeed-media-uploaded）能真正异步落 MQ。
-# 对应 application.yml 的 rocketmq.name-server=127.0.0.1:9876。
+# =============================================================================
+# turbo-feed 全栈编排（开发 / 演示用）
 #
-# 启动： docker compose up -d
-# 停止： docker compose down
-# 日志： docker compose logs -f broker
+# 用法：
+#   1) cp .env.example .env          # 填入密钥（JWT_SECRET / 内部令牌 / MinIO 凭据等），并把 .env 加入 .gitignore
+#   2) docker compose up -d          # 不含 RocketMQ（应用默认 mq.enabled=false，不依赖 MQ）
+#   3) docker compose --profile mq up -d   # 额外拉起 RocketMQ（还需把各服务 TURBOFEED_MQ_ENABLED 改 true 才会真正使用）
 #
-# 说明：
-# - 使用 RocketMQ 5.3.1 官方镜像，兼容 JDK 17 / Spring Boot 3.4.x 的 rocketmq-spring-boot-starter 2.3.5。
-# - autoCreateTopicEnable=true：本地无需预先创建 turbofeed-media-uploaded 主题，
-#   首次发送时由 Broker 自动建主题，省去手动 mqadmin 步骤。
-# - 单机部署（非集群），brokerRole=ASYNC_MASTER + flushDiskType=ASYNC_FLUSH，
-#   本地开发追求吞吐与一键启动，不保证宕机零丢失（生产环境另配 SYNC + 多副本）。
-# - Broker 通过 -c 挂载自定义 broker.conf；namesrv 地址用 namesrv:9876（compose 网络内服务名解析）。
-
+# 设计要点：
+#   - 三服务镜像由本仓库 Dockerfile 多阶段构建（build.args.MODULE 指定子模块）。
+#   - 所有凭据 / 中间件地址经环境变量注入；仓库默认配置不出现任何字面量（与代码纪律一致）。
+#   - 依赖拓扑：tf-gateway → mysql + redis + minio(+minio-init)；tf-feed-engine → redis + tf-gateway；
+#     tf-counter 无外部依赖（H2 内存库，已排除 Redisson）。
+#   - 服务间调用：网关 TURBOFEED_FEED_ENGINE_BASE_URL=http://tf-feed-engine:8083，
+#     引擎 TURBOFEED_GATEWAY_BASE_URL=http://tf-gateway:8080（compose 内 DNS 即服务名）。
+#   - RocketMQ 沿用原独立编排的配置（5.3.1 / container_name tf-rocketmq-* / brokerIP1=127.0.0.1），
+#     仅收入 mq profile，避免无 MQ 时也不影响「克隆即跑」。
+# =============================================================================
 services:
+  mysql:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${TURBOFEED_DB_PASSWORD:-root}
+      MYSQL_DATABASE: turbo_feed_1
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      # 00-create-databases.sql 建逻辑库；01-init-local.sql 灌全量 base schema（全限定建表，无需 USE）
+      - ./deploy/compose/mysql/00-create-databases.sql:/docker-entrypoint-initdb.d/00-create-databases.sql:ro
+      - ./deploy/mysql/init-local.sql:/docker-entrypoint-initdb.d/01-init-local.sql:ro
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${TURBOFEED_DB_PASSWORD:-root}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${TURBOFEED_MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${TURBOFEED_MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # 首次启动为 MinIO 建桶 turbo-feed-media（应用侧写入时也会惰性建桶，这里确保预存在）
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb -p local/turbo-feed-media || true
+      "
+    environment:
+      MINIO_ROOT_USER: ${TURBOFEED_MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${TURBOFEED_MINIO_SECRET_KEY:-minioadmin}
+
+  # ---- 可选消息总线（默认不启用，--profile mq 才拉起；沿用原独立编排配置）----
   namesrv:
     image: apache/rocketmq:5.3.1
     container_name: tf-rocketmq-namesrv
+    profiles: ["mq"]
     command: sh mqnamesrv
     ports:
       - "9876:9876"
@@ -30,6 +96,7 @@ services:
   broker:
     image: apache/rocketmq:5.3.1
     container_name: tf-rocketmq-broker
+    profiles: ["mq"]
     # 不挂载 broker.conf：macOS + D 盘 SMB 挂载时 Docker Desktop 默认不共享 /Volumes，
     # bind mount 会失败。改为命令行参数传关键项，避免文件共享授权麻烦。
     # autoCreateTopicEnable=true：首次发送 turbofeed-media-uploaded 自动建主题。
@@ -51,3 +118,99 @@ services:
       interval: 5s
       timeout: 3s
       retries: 15
+
+  # ---- 三服务 ----
+  tf-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: tf-gateway
+    environment:
+      SERVER_PORT: "8080"
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      TURBOFEED_REDIS_MODE: single
+      TURBOFEED_REDIS_PASSWORD: ${TURBOFEED_REDIS_PASSWORD:-}
+      # ShardingSphere 逻辑库数据源（网关）；副本库指向同一实例，避免无副本时读失败
+      TURBOFEED_DB_0_URL: jdbc:mysql://mysql:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      TURBOFEED_DB_1_URL: jdbc:mysql://mysql:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      TURBOFEED_REPLICA_DB_0_URL: jdbc:mysql://mysql:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      TURBOFEED_REPLICA_DB_1_URL: jdbc:mysql://mysql:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      TURBOFEED_DB_USERNAME: ${TURBOFEED_DB_USERNAME:-root}
+      TURBOFEED_DB_PASSWORD: ${TURBOFEED_DB_PASSWORD:-root}
+      TURBOFEED_JWT_SECRET: ${TURBOFEED_JWT_SECRET}
+      TURBOFEED_SNOWFLAKE_WORKER_ID: ${TURBOFEED_SNOWFLAKE_WORKER_ID:-1}
+      TURBOFEED_SNOWFLAKE_DATACENTER_ID: ${TURBOFEED_SNOWFLAKE_DATACENTER_ID:-1}
+      TURBOFEED_FEED_ENGINE_BASE_URL: http://tf-feed-engine:8083
+      TURBOFEED_FEED_DEGRADED_MODE: empty
+      TURBOFEED_MINIO_ENDPOINT: http://minio:9000
+      TURBOFEED_MINIO_ACCESS_KEY: ${TURBOFEED_MINIO_ACCESS_KEY:-minioadmin}
+      TURBOFEED_MINIO_SECRET_KEY: ${TURBOFEED_MINIO_SECRET_KEY:-minioadmin}
+      TURBOFEED_MEDIA_PUBLIC_URL_BASE: http://minio:9000/turbo-feed-media/
+      TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN}
+      TURBOFEED_MQ_ENABLED: "false"
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+
+  tf-feed-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: tf-feed-engine
+    environment:
+      SERVER_PORT: "8083"
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      TURBOFEED_REDIS_MODE: single
+      TURBOFEED_REDIS_PASSWORD: ${TURBOFEED_REDIS_PASSWORD:-}
+      TURBOFEED_GATEWAY_BASE_URL: http://tf-gateway:8080
+      TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN}
+      TURBOFEED_MQ_ENABLED: "false"
+    ports:
+      - "8083:8083"
+    depends_on:
+      redis:
+        condition: service_healthy
+      tf-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+
+  tf-counter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: tf-counter
+    environment:
+      SERVER_PORT: "8081"
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  mysql-data:
+  minio-data:

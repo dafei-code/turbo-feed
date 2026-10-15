@@ -55,6 +55,12 @@ spring:
 # Redis 就绪前关闭其健康指示器，避免 /actuator/health 整体被拉成 DOWN（克隆即跑）；
 # 本地启动 Redis 后改为 true（或直接删除此段）
 management:
+  # 暴露基础端点 + Prometheus 拉取端点（K8s 探活 / Grafana 指标采集）；
+  # redis 健康指示器已关（见下），整体健康不受本地 Redis 未起影响
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
   health:
     redis:
       enabled: false
@@ -261,6 +267,10 @@ turbofeed:
     window-seconds: 10          # 滑动窗口长度
     hot-threshold: 1000         # 热 Key 判定阈值（窗口内访问次数）
     l1-ttl-seconds: 3           # L1 本地缓存 TTL
+  # 服务间内部接口共享令牌（评审 doc P0-2）：网关↔引擎的 /internal/** 调用须携带 X-Internal-Token。
+  # 两侧共用同一值（由 TURBOFEED_INTERNAL_TOKEN 注入）；未配置则两侧均 fail-open（克隆即跑）。
+  internal:
+    token: ${TURBOFEED_INTERNAL_TOKEN:}
 
 # Sentinel：默认本地 JSON 规则（克隆即跑），可选 Nacos push
 # sentinel:

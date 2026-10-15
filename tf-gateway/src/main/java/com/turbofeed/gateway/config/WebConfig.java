@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.config;
 
+import com.turbofeed.gateway.security.InternalTokenInterceptor;
 import com.turbofeed.gateway.security.PermissionInterceptor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
@@ -37,6 +38,7 @@ public class WebConfig implements WebMvcConfigurer {
 
     private final MediaProperties mediaProperties;
     private final PermissionInterceptor permissionInterceptor;
+    private final InternalTokenInterceptor internalTokenInterceptor;
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
@@ -57,6 +59,10 @@ public class WebConfig implements WebMvcConfigurer {
         // 注意：不再注册 AdminAuthInterceptor（其仅放行 ADMIN，会挡住审核员），鉴权统一收口到 PermissionInterceptor。
         registry.addInterceptor(permissionInterceptor)
                 .addPathPatterns("/api/admin/**");
+        // 服务间内部接口令牌校验（评审 doc P0-2）：守护 /internal/**（当前 /internal/review，
+        // 由 tf-feed-engine 经 GatewayReviewClient 回调）。未配置 turbofeed.internal.token 时 fail-open。
+        registry.addInterceptor(internalTokenInterceptor)
+                .addPathPatterns("/internal/**");
     }
 
     @Override
