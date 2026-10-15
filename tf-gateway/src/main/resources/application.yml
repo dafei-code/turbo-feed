@@ -14,6 +14,17 @@ spring:
     multipart:
       max-file-size: 6MB
       max-request-size: 60MB
+  # ---- P0-3 Flyway schema 版本管理（仅管「单表」，分片表仍走 init-local.sql 模板）----
+  # 必须直连物理库 ds_0(turbo_feed_1)，不能走 ShardingSphere 驱动（DDL 会被路由/拒绝）。
+  # 默认关闭：克隆即跑不受影响；生产/有版本管理诉求的环境用 TURBOFEED_FLYWAY_ENABLED=true 开启。
+  flyway:
+    enabled: ${TURBOFEED_FLYWAY_ENABLED:false}
+    url: jdbc:mysql://localhost:3306/turbo_feed_1
+    user: ${TURBOFEED_DB_USERNAME:root}
+    password: ${TURBOFEED_DB_PASSWORD:root}
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    table: flyway_schema_history_tf
   # Redis（Lettuce，懒连接）：上传用户级限流等轻量 KV；本地未启动 Redis 不影响应用启动，
   # 但 /actuator/health 中 redis 组件会显示 DOWN（整体状态默认不受其拉低，management 如需忽略可排除）
   data:

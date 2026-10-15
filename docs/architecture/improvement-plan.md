@@ -481,7 +481,7 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 | 项 | 状态 | 落地说明 |
 | --- | --- | --- |
 | P0-2 `/internal/**` 服务间鉴权 | ✅ 已落地（#186） | 网关 + 引擎双端 `InternalTokenInterceptor` 校验 `X-Internal-Token`；值来自 `TURBOFEED_INTERNAL_TOKEN`，未配置即 fail-open 放行（克隆即跑），本地 yml 写死 `local-dev-internal-token` 开启校验。e2e 三态（无 / 错 / 正确 token）全绿 |
-| P0-3 Flyway schema 版本管理 | ⏳ 未实施 | 仍 DDL 脚本手写；列为后续待办 |
+| P0-3 Flyway schema 版本管理 | ✅ 已落地 | 仅版本化「单表」(SINGLE 登记的 5 张：sensitive_word/sensitive_whitelist/user_phone_router/outbox_event/review_task)；分片表(540 张)仍走 init-local.sql 模板。Spring Boot 3.4.x 无 spring-boot-starter-flyway(仅 4.x 起)，改用 BOM 托管 flyway-core(10.20.1)+flyway-mysql；默认关闭(TURBOFEED_FLYWAY_ENABLED)，直连物理库 turbo_feed_1 绕过 ShardingSphere。编译通过 + 直连 DB 只读 info 校验(V1 被发现、MySQL 方言加载) 全绿 |
 | P0-4 可观测性 | 🟡 部分（#185） | actuator health/info 已验证可用；Prometheus 端点仍仅 feed-engine 引依赖、两服务未统一暴露 `prometheus`，tracing 未做 |
 | P0-1 自动化测试 | ⏳ 未实施 | 全仓仍 0 测试文件 |
 | P0-5 服务发现 / 配置中心 | ⏳ 未实施 | 仍直连 `base-url`，未引 Nacos |
@@ -490,4 +490,4 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 | P1-4 文档与代码漂移对齐 | ✅ 已落地（#188） | README / overview.md / service-split.md / sharding.md 已对齐代码实际（11 张逻辑表、关注关系、X-Internal-Token、容器化）；本文 §1 表格中「配置已切，文档未更新」「确实裸奔」等已随 #188/#186 失效，以本节状态为准 |
 | 关注关系（follow/fans，P0-2 业务） | ✅ 已落地 | `FollowService`/`SocialController` + `user_follow`/`user_fans`（hashMod128）双写 + Redis ZSET `tf:follow:{uid}` 读源，G6 关注流已接入；属产品功能，非评审原始项 |
 
-**待办（仍未实施，按优先级）**：P0-1 测试、P0-3 Flyway、P0-5 Nacos、P1-2 tf-counter、P1-1 FeedTimelineStore 拆分、P1-5 前端工程化；P2 系列为演进优化。
+**待办（仍未实施，按优先级）**：P0-1 测试、P0-5 Nacos、P1-2 tf-counter、P1-1 FeedTimelineStore 拆分、P1-5 前端工程化；P2 系列为演进优化。

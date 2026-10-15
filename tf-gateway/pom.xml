@@ -50,6 +50,19 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
+        <!-- Flyway schema 版本管理（P0-3）：仅版本化「单表」(SINGLE 规则登记的 5 张)，
+             分片表(540 张)仍由 init-local.sql 模板脚本生成，不纳入 Flyway。
+             默认关闭(spring.flyway.enabled=false)，直连物理库 turbo_feed_1 绕过 ShardingSphere。
+             Spring Boot 3.4.x 无 spring-boot-starter-flyway（仅 4.x 起），改用 BOM 托管的
+             flyway-core(引擎) + flyway-mysql(MySQL 方言)，版本由 spring-boot-dependencies 统一(10.20.1)，无需写 version。 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
         <!-- Sentinel：timeline QPS 限流 + 点赞热点参数限流 + 依赖熔断 + 系统自适应保护 -->
         <dependency>
             <groupId>com.alibaba.cloud</groupId>
