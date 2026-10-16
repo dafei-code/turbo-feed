@@ -3,14 +3,20 @@ package com.turbofeed.gateway.service;
 import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.shared.caption.CaptionTagParser;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
+import com.turbofeed.gateway.repository.ReviewTaskRepository;
 import com.turbofeed.gateway.service.event.MediaEventPublisher;
 import com.turbofeed.gateway.service.event.MediaUploadedEvent;
 import com.turbofeed.gateway.service.idempotency.UploadIdempotency;
+import com.turbofeed.gateway.service.health.AccountHealth;
+import com.turbofeed.gateway.service.health.AccountHealthService;
 import com.turbofeed.gateway.service.presign.UploadReservation;
 import com.turbofeed.gateway.service.presign.UploadReservationStore;
 import com.turbofeed.gateway.service.processing.ImageProcessingChain;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.MediaStatus;
+import com.turbofeed.gateway.service.review.RiskScorer;
+import com.turbofeed.gateway.service.review.ReviewTask;
+import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.storage.MediaStorageClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +58,14 @@ public class MediaUploadFinalizer {
     private final UploadReservationStore reservationStore;
     /** 上传内容去重（#6）：complete 路径只记账——下载字节算指纹、记表供未来上传复用（命中不重插）。 */
     private final ContentDedupService contentDedupService;
+    /** 账号健康分（#8 信号源）。 */
+    private final AccountHealthService accountHealthService;
+    /** 三档风险机审评分器（#8）。 */
+    private final RiskScorer riskScorer;
+    /** 账号信用服务（#8 信号源）。 */
+    private final AccountCreditService accountCreditService;
+    /** 复审任务仓储（#8 落 RISK_TIERED 任务）。 */
+    private final ReviewTaskRepository reviewTaskRepository;
 
     /**
      * 显式构造器（不用 {@code @RequiredArgsConstructor} / {@code @Slf4j}）：本机构建环境 Lombok
@@ -60,7 +74,9 @@ public class MediaUploadFinalizer {
     public MediaUploadFinalizer(MediaProperties properties, MediaStorageClient storageClient,
                                 ImageProcessingChain processingChain, MediaJdbcRepository mediaRepository,
                                 MediaEventPublisher eventPublisher, UploadIdempotency idempotency,
-                                UploadReservationStore reservationStore, ContentDedupService contentDedupService) {
+                                UploadReservationStore reservationStore, ContentDedupService contentDedupService,
+                                AccountHealthService accountHealthService, RiskScorer riskScorer,
+                                AccountCreditService accountCreditService, ReviewTaskRepository reviewTaskRepository) {
         this.properties = properties;
         this.storageClient = storageClient;
         this.processingChain = processingChain;
@@ -69,6 +85,10 @@ public class MediaUploadFinalizer {
         this.idempotency = idempotency;
         this.reservationStore = reservationStore;
         this.contentDedupService = contentDedupService;
+        this.accountHealthService = accountHealthService;
+        this.riskScorer = riskScorer;
+        this.accountCreditService = accountCreditService;
+        this.reviewTaskRepository = reviewTaskRepository;
     }
 
     /**
@@ -94,6 +114,10 @@ public class MediaUploadFinalizer {
             // #6 去重记账：complete 路径对象已由客户端直传到位，无法「跳过存储」，
             // 故仅下载字节算指纹、记表供未来上传复用（命中不重插、fail-open）。
             recordDedup(reservation);
+
+            // #8 三档风险机审：内容安全（caption）已在 presign 通过，再依账号信号算风险分，
+            // 达 MED/HIGH 送人工复审队列（RISK_TIERED）。fail-open 不阻断收尾。
+            riskRoute(Long.parseLong(reservation.userId()), mediaIds.get(0), reservation.caption());
 
             // 整帖一条事件：与「整帖一审」配套，审核侧一次跑完，不做 N 张图的齐备性判断
             eventPublisher.publish(new MediaUploadedEvent(
@@ -189,6 +213,38 @@ public class MediaUploadFinalizer {
                 log.warn("去重记账下载/算哈希失败（跳过该张）: mediaId={}, {}", slot.mediaId(), e.getMessage());
             } catch (Exception e) {
                 log.warn("去重记账异常（跳过该张）: mediaId={}, {}", slot.mediaId(), e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * #8 三档风险机审路由（complete 路径，口径与 {@code MediaUploadService#riskRoute} 一致）。
+     *
+     * <p>异步线程无 JWT 上下文，账号身份从 {@link UploadReservation} 取（presign 阶段已完成越权校验）。
+     * fail-open：读信号/算分/建任务任一异常默认按 MED 送审，绝不阻断收尾。</p>
+     */
+    private void riskRoute(long userId, String representativeMediaId, String caption) {
+        if (!properties.getReview().isRiskEnabled()) {
+            return;
+        }
+        RiskScorer.RiskLevel level;
+        try {
+            AccountHealth health = accountHealthService.getHealth(userId);
+            RiskScorer.RiskResult result = riskScorer.score(userId, caption, health, null);
+            level = result.level();
+        } catch (Exception e) {
+            log.warn("上传风险评分失败（默认按 MED 送审）: userId={}, mediaId={}, {}",
+                    userId, representativeMediaId, e.getMessage());
+            level = RiskScorer.RiskLevel.MED;
+        }
+        if (level != RiskScorer.RiskLevel.LOW) {
+            int tierCode = level == RiskScorer.RiskLevel.HIGH ? 2 : 1;
+            try {
+                reviewTaskRepository.insert(representativeMediaId, userId, ReviewTask.TYPE_RISK_TIERED, tierCode);
+                log.info("上传风险机审送审: userId={}, mediaId={}, level={}", userId, representativeMediaId, level);
+            } catch (Exception e) {
+                log.warn("上传风险机审建任务失败（忽略，不影响收尾）: userId={}, mediaId={}, {}",
+                        userId, representativeMediaId, e.getMessage());
             }
         }
     }

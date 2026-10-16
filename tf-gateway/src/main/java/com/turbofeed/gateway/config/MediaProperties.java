@@ -470,6 +470,31 @@ public class MediaProperties {
         private boolean autoPass = false;
 
         /**
+         * 三档风险机审（#8）：是否启用「按账号信号算风险分、达 MED/HIGH 送人工复审」路由。默认 true。
+         *
+         * <p><b>为什么是第二道闸</b>：内容安全（caption/图片）已在 presign 经 RULE 机审通过；此处是
+         * 基于<b>投稿者</b>信号（账号健康分 / 信用等级 / 历史违规 / 图片分类置信）的<b>风险分层</b>，
+         * 与抖音「高优作者 vs 风险作者区别审」一致——风险作者即使内容「看着没问题」也多一道人审兜底。</p>
+         *
+         * <p>风险分归 [0,1]：低于 {@link #riskLowThreshold} 免审（LOW）；达到 MED 进 RISK_TIERED（tierCode=1）；
+         * 达到/超过 {@link #riskMedThreshold} 视为 HIGH（tierCode=2，优先复审）。整条链 fail-open：
+         * 读信号/算分失败默认按 MED 送审，绝不阻断上传主流程。</p>
+         */
+        private boolean riskEnabled = true;
+
+        /**
+         * 风险分落 LOW 的上界（归一 [0,1]）：低于此值免人工复审。默认 0.3。
+         * 例：健康分高、信用好、无违规的作者风险分低，正常免审放行进 PENDING 排队。
+         */
+        private double riskLowThreshold = 0.3;
+
+        /**
+         * 风险分落 MED 的上界（归一 [0,1]）：达到此值但未达 HIGH 视为 MED（RISK_TIERED，tierCode=1）。默认 0.7。
+         * 达到/超过此值视为 HIGH（tierCode=2，优先复审）。阈值外部化，调参不发黑。
+         */
+        private double riskMedThreshold = 0.7;
+
+        /**
          * 机审策略（可插拔开关）：决定激活哪个 {@link ContentModeration} 实现。
          * 默认 RULE（本地规则引擎，文件名/元数据级 fail-closed，非 AI 视觉）；
          * 视觉语义识别留 CLOUD 接入点（需用户提供云内容安全 API key 后接入）。
@@ -869,6 +894,30 @@ public class MediaProperties {
 
         public void setAutoPass(boolean autoPass) {
             this.autoPass = autoPass;
+        }
+
+        public boolean isRiskEnabled() {
+            return riskEnabled;
+        }
+
+        public void setRiskEnabled(boolean riskEnabled) {
+            this.riskEnabled = riskEnabled;
+        }
+
+        public double getRiskLowThreshold() {
+            return riskLowThreshold;
+        }
+
+        public void setRiskLowThreshold(double riskLowThreshold) {
+            this.riskLowThreshold = riskLowThreshold;
+        }
+
+        public double getRiskMedThreshold() {
+            return riskMedThreshold;
+        }
+
+        public void setRiskMedThreshold(double riskMedThreshold) {
+            this.riskMedThreshold = riskMedThreshold;
         }
 
         public ModerationMode getModerationMode() {

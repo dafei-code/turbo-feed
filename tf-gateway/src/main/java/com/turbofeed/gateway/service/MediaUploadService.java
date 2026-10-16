@@ -18,7 +18,9 @@ import com.turbofeed.gateway.service.idempotency.UploadIdempotency;
 import com.turbofeed.gateway.service.moderation.ContentScene;
 import com.turbofeed.gateway.service.moderation.ContentSecurityService;
 import com.turbofeed.gateway.service.penalty.PenaltyService;
+import com.turbofeed.gateway.service.health.AccountHealth;
 import com.turbofeed.gateway.service.health.AccountHealthService;
+import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.service.presign.PresignRequest;
 import com.turbofeed.gateway.service.presign.PresignResponse;
 import com.turbofeed.gateway.service.presign.UploadAccepted;
@@ -29,6 +31,9 @@ import com.turbofeed.gateway.service.processing.ImageProcessingChain;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
 import com.turbofeed.gateway.service.review.MediaStatus;
+import com.turbofeed.gateway.repository.ReviewTaskRepository;
+import com.turbofeed.gateway.service.review.RiskScorer;
+import com.turbofeed.gateway.service.review.ReviewTask;
 import com.turbofeed.gateway.service.validation.ConcurrentUploadValidator;
 import com.turbofeed.gateway.service.validation.UploadValidation;
 import com.turbofeed.gateway.service.validation.UploadValidationChain;
@@ -112,6 +117,12 @@ public class MediaUploadService {
     private final AccountHealthService accountHealthService;
     /** 上传内容去重（#6 per-user SHA-256）：落库前算指纹，命中跳过对象存储写入省空间。 */
     private final ContentDedupService contentDedupService;
+    /** 三档风险机审评分器（#8）：综合账号信号算风险分，达 MED/HIGH 送 RISK_TIERED 复审队列。 */
+    private final RiskScorer riskScorer;
+    /** 账号信用服务（#8 信号源）。 */
+    private final AccountCreditService accountCreditService;
+    /** 复审任务仓储（#8 落 RISK_TIERED 任务）。 */
+    private final ReviewTaskRepository reviewTaskRepository;
 
     /**
      * 构造器注入（原为 {@code @RequiredArgsConstructor}）。
@@ -138,7 +149,10 @@ public class MediaUploadService {
                               PenaltyService penaltyService,
                               OutboxService outboxService,
                               AccountHealthService accountHealthService,
-                              ContentDedupService contentDedupService) {
+                              ContentDedupService contentDedupService,
+                              RiskScorer riskScorer,
+                              AccountCreditService accountCreditService,
+                              ReviewTaskRepository reviewTaskRepository) {
         this.properties = properties;
         this.storageClient = storageClient;
         this.eventPublisher = eventPublisher;
@@ -157,6 +171,9 @@ public class MediaUploadService {
         this.outboxService = outboxService;
         this.accountHealthService = accountHealthService;
         this.contentDedupService = contentDedupService;
+        this.riskScorer = riskScorer;
+        this.accountCreditService = accountCreditService;
+        this.reviewTaskRepository = reviewTaskRepository;
     }
 
     /** 单条状态缓存前缀（与 MediaReviewService 一致，删除时精确失效） */
@@ -282,6 +299,9 @@ public class MediaUploadService {
             }
             // 整帖落库：N 张图一次 batch（同 user_id 落同片，rewriteBatchedStatements 合并为单批）
             mediaRepository.batchInsert(rows);
+            // #8 三档风险机审：内容安全（caption）已在 requireClean 通过，再依账号信号算风险分，
+            // 达 MED/HIGH 送人工复审队列（RISK_TIERED）。fail-open 不阻断上传受理。
+            riskRoute(uid, mediaIds.get(0), rawCaption);
         } catch (RuntimeException e) {
             // 中途失败：清掉本批已落库的残行与已上传的对象，绝不留半成品帖（见类注释）
             cleanupPartialPost(uid, postId, mediaIds);
@@ -308,6 +328,39 @@ public class MediaUploadService {
                 userId, postId, urls.size(), requestId, rawCaption.length());
         idempotency.store(userId, requestId, post);
         return post;
+    }
+
+    /**
+     * #8 三档风险机审路由（upload 路径，与 {@code MediaUploadFinalizer#riskRoute} 同口径）。
+     *
+     * <p>内容安全已在 {@code requireClean(CAPTION)} 通过，此处是<b>第二道</b>基于账号信号
+     * （健康分 / 信用 / 历史违规 / 图片分类置信）的风险分层。达 MED/HIGH 进 RISK_TIERED 复审队列
+     * （tierCode MED=1 / HIGH=2）。fail-open：读信号 / 算分 / 建任务任一异常默认按 MED 送审。</p>
+     */
+    private void riskRoute(long userId, String representativeMediaId, String caption) {
+        if (!properties.getReview().isRiskEnabled()) {
+            return;
+        }
+        RiskScorer.RiskLevel level;
+        try {
+            AccountHealth health = accountHealthService.getHealth(userId);
+            RiskScorer.RiskResult result = riskScorer.score(userId, caption, health, null);
+            level = result.level();
+        } catch (Exception e) {
+            log.warn("上传风险评分失败（默认按 MED 送审）: userId={}, mediaId={}, {}",
+                    userId, representativeMediaId, e.getMessage());
+            level = RiskScorer.RiskLevel.MED;
+        }
+        if (level != RiskScorer.RiskLevel.LOW) {
+            int tierCode = level == RiskScorer.RiskLevel.HIGH ? 2 : 1;
+            try {
+                reviewTaskRepository.insert(representativeMediaId, userId, ReviewTask.TYPE_RISK_TIERED, tierCode);
+                log.info("上传风险机审送审: userId={}, mediaId={}, level={}", userId, representativeMediaId, level);
+            } catch (Exception e) {
+                log.warn("上传风险机审建任务失败（忽略，不影响上传）: userId={}, mediaId={}, {}",
+                        userId, representativeMediaId, e.getMessage());
+            }
+        }
     }
 
     /**

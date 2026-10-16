@@ -49,4 +49,7 @@ public record ReviewTask(
 
     /** 触发类型：评论区速率/聚集异常（#133 评论区风控）：评论区爆发或单账号刷评时进 REVIEWER 巡查队列，仅标记巡查、不下架内容。 */
     public static final String TYPE_COMMENT_ANOMALY = "COMMENT_ANOMALY";
+
+    /** 触发类型：上传三档风险机审（#8）：依账号健康分/信用/历史违规算风险分，达 MED/HIGH 阈值即进人工复审队列。 */
+    public static final String TYPE_RISK_TIERED = "RISK_TIERED";
 }
