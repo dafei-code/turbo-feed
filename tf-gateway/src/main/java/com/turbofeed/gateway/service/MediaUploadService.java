@@ -110,6 +110,8 @@ public class MediaUploadService {
     private final PenaltyService penaltyService;
     /** 账号健康分（P0-b）：写路径闸门叠加健康分阶梯（限投稿/封禁）。 */
     private final AccountHealthService accountHealthService;
+    /** 上传内容去重（#6 per-user SHA-256）：落库前算指纹，命中跳过对象存储写入省空间。 */
+    private final ContentDedupService contentDedupService;
 
     /**
      * 构造器注入（原为 {@code @RequiredArgsConstructor}）。
@@ -135,7 +137,8 @@ public class MediaUploadService {
                               MediaUploadFinalizer uploadFinalizer,
                               PenaltyService penaltyService,
                               OutboxService outboxService,
-                              AccountHealthService accountHealthService) {
+                              AccountHealthService accountHealthService,
+                              ContentDedupService contentDedupService) {
         this.properties = properties;
         this.storageClient = storageClient;
         this.eventPublisher = eventPublisher;
@@ -153,6 +156,7 @@ public class MediaUploadService {
         this.penaltyService = penaltyService;
         this.outboxService = outboxService;
         this.accountHealthService = accountHealthService;
+        this.contentDedupService = contentDedupService;
     }
 
     /** 单条状态缓存前缀（与 MediaReviewService 一致，删除时精确失效） */
@@ -269,7 +273,7 @@ public class MediaUploadService {
         try {
             context = validationChain.validate(userId, files);
             for (int seq = 0; seq < files.length; seq++) {
-                StoredOne stored = storeOne(userId, files[seq], context.format(seq));
+                StoredOne stored = storeOneWithDedup(userId, files[seq], context.format(seq));
                 mediaIds.add(stored.mediaId());
                 urls.add(stored.url());
                 rows.add(new MediaJdbcRepository.MediaRowSpec(
@@ -530,6 +534,38 @@ public class MediaUploadService {
             log.error("读取上传内容失败: userId={}, size={}", userId, file.getSize(), e);
             throw new BizException(ErrorCode.INTERNAL_ERROR, "读取上传内容失败");
         }
+    }
+
+    /**
+     * 带去重（#6）的单张落库：先算内容指纹，命中则跳过对象存储写入、复用首份 URL（别名 mediaId），
+     * 未命中则正常存储并把指纹记表（供后续复用）。整条链 fail-open：算哈希/查表/记表任一异常
+     * 都退化为「正常存储、不记账」，绝不阻断上传。
+     *
+     * <p><b>别名 mediaId</b>：media 表以 media_id 为主键，不能直接复用 canonical 的 media_id
+     * （会 ON DUPLICATE 覆盖原帖行）。故命中时生成全新别名 id + 复用 canonical URL，
+     * 既省对象存储又保留帖结构（删别名帖只删别名行、不动 canonical 对象）。</p>
+     */
+    private StoredOne storeOneWithDedup(String userId, MultipartFile file, ImageFormat format) {
+        if (!contentDedupService.isEnabled()) {
+            return storeOne(userId, file, format);
+        }
+        String hash;
+        try {
+            hash = contentDedupService.sha256(file.getBytes());
+        } catch (IOException e) {
+            log.warn("上传去重算哈希失败（降级正常存储）: userId={}, {}", userId, e.getMessage());
+            return storeOne(userId, file, format);
+        }
+        Optional<ContentDedupService.DedupHit> hit = contentDedupService.find(Long.parseLong(userId), hash);
+        if (hit.isPresent()) {
+            String aliasId = storageClient.generateMediaId(userId, format);
+            log.info("上传内容去重命中，复用 canonical（跳过存储）: userId={}, hash={}, alias={}, canonical={}",
+                    userId, hash, aliasId, hit.get().canonicalMediaId());
+            return new StoredOne(aliasId, hit.get().canonicalUrl());
+        }
+        StoredOne stored = storeOne(userId, file, format);
+        contentDedupService.record(Long.parseLong(userId), hash, stored.mediaId(), stored.url());
+        return stored;
     }
 
     /**

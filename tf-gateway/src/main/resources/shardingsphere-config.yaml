@@ -217,6 +217,10 @@ rules:
       # 用户兴趣标签持久化（抖音式画像耐久层 + 离线特征源）：单表落 ds_0。
       # 由网关 InterestTagSnapshotJob 定时 SCAN 引擎 Redis 画像键 upsert（引擎无 DataSource）。
       - ds_0.interest_tag
+      # 上传内容去重指纹表（#6 per-user SHA-256 去重）：单表落 ds_0。
+      # 内容指纹(内容哈希)维度，不按用户分片——同一哈希的复用查询（GLOBAL 维度）需单表点查，
+      # 与 outbox_event / review_task 同源「单表聚合队列」取舍；按用户记行仅在 uk_user_hash 内唯一。
+      - ds_0.media_dedup
 
 props:
   # 开发期打印实际落到的物理库/表与 SQL，便于核对路由；生产可关闭

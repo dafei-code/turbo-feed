@@ -82,6 +82,9 @@ public class MediaProperties {
     /** 交互行为事件开关（A1 真双塔训练样本底座）：默认开，fail-open。 */
     private InteractionEvent interactionEvent = new InteractionEvent();
 
+    /** 上传内容去重配置（#6 per-user SHA-256 去重）：开关 + 维度。默认开、per-user。 */
+    private Dedup dedup = new Dedup();
+
     /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
      *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
     private boolean processingEnabled = false;
@@ -444,6 +447,14 @@ public class MediaProperties {
 
     public void setInteractionEvent(InteractionEvent interactionEvent) {
         this.interactionEvent = interactionEvent;
+    }
+
+    public Dedup getDedup() {
+        return dedup;
+    }
+
+    public void setDedup(Dedup dedup) {
+        this.dedup = dedup;
     }
 
     /**
@@ -1188,5 +1199,54 @@ public class MediaProperties {
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
         }
+    }
+
+    /**
+     * 上传内容去重配置（#6 per-user SHA-256 去重）。
+     *
+     * <p><b>为什么做</b>：同一用户反复传同一张图（重试 / 误点 / 多帖引用）会在对象存储里产生
+     * N 份相同字节、N 行 media 记录，浪费存储且后续删除互相牵连。上传主链路在落库前先算内容指纹，
+     * 命中则跳过对象存储写入、复用首份的 URL（新帖用「别名 mediaId」指向它），既省空间又保留帖结构。</p>
+     *
+     * <p><b>维度</b>：{@code PER_USER}（默认）按 (user_id, 内容哈希) 去重——只拦同用户自己的重复，
+     * 避免跨用户对象共享带来的「删 A 图 B 裂」删除耦合；{@code GLOBAL} 跨用户复用（仅靠哈希点查），
+     * 节省更彻底但接受跨用户删除耦合，生产按需开启。</p>
+     *
+     * <p><b>失败方向</b>：整条去重链 fail-open——算哈希/查表/记表任一异常都只告警、退化为「不去重」，
+     * 绝不阻断上传主流程（Storage 才是内容真身，指纹表只是优化）。</p>
+     */
+    public static class Dedup {
+        /** 是否启用上传去重。默认 true。排障可置 false 一键关闭（退化为不复用、不记账）。 */
+        private boolean enabled = true;
+
+        /**
+         * 去重维度：PER_USER（默认，按用户隔离） / GLOBAL（跨用户复用）。
+         * 仅影响「命中查谁」——GLOBAL 下不同用户的相同内容也复用首份对象。
+         */
+        private DedupScope scope = DedupScope.PER_USER;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public DedupScope getScope() {
+            return scope;
+        }
+
+        public void setScope(DedupScope scope) {
+            this.scope = scope;
+        }
+    }
+
+    /** 上传去重维度。 */
+    public enum DedupScope {
+        /** 按 (user_id, 内容哈希) 去重：只拦同用户自己重复，避免跨用户删除耦合（v1 默认）。 */
+        PER_USER,
+        /** 按内容哈希全局去重：跨用户复用首份对象，节省更彻底但接受跨用户删除耦合。 */
+        GLOBAL
     }
 }

@@ -12,11 +12,12 @@ import com.turbofeed.gateway.service.processing.ImageProcessingChain;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.MediaStatus;
 import com.turbofeed.gateway.storage.MediaStorageClient;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -37,10 +38,10 @@ import java.util.List;
  * 与 {@code MediaUploadService#cleanupPartialPost} 同一口径（绝不留「缺代表行 / 张数不齐」
  * 的半成品帖）。清理动作本身失败只告警，不掩盖原始异常。</p>
  */
-@Slf4j
 @Service
-@RequiredArgsConstructor
 public class MediaUploadFinalizer {
+
+    private static final Logger log = LoggerFactory.getLogger(MediaUploadFinalizer.class);
 
     private final MediaProperties properties;
     private final MediaStorageClient storageClient;
@@ -49,6 +50,26 @@ public class MediaUploadFinalizer {
     private final MediaEventPublisher eventPublisher;
     private final UploadIdempotency idempotency;
     private final UploadReservationStore reservationStore;
+    /** 上传内容去重（#6）：complete 路径只记账——下载字节算指纹、记表供未来上传复用（命中不重插）。 */
+    private final ContentDedupService contentDedupService;
+
+    /**
+     * 显式构造器（不用 {@code @RequiredArgsConstructor} / {@code @Slf4j}）：本机构建环境 Lombok
+     * 对「重新编译的文件」处理不可靠，改为显式声明与日志字段（与 MediaUploadService 同口径）。
+     */
+    public MediaUploadFinalizer(MediaProperties properties, MediaStorageClient storageClient,
+                                ImageProcessingChain processingChain, MediaJdbcRepository mediaRepository,
+                                MediaEventPublisher eventPublisher, UploadIdempotency idempotency,
+                                UploadReservationStore reservationStore, ContentDedupService contentDedupService) {
+        this.properties = properties;
+        this.storageClient = storageClient;
+        this.processingChain = processingChain;
+        this.mediaRepository = mediaRepository;
+        this.eventPublisher = eventPublisher;
+        this.idempotency = idempotency;
+        this.reservationStore = reservationStore;
+        this.contentDedupService = contentDedupService;
+    }
 
     /**
      * 异步收尾：可选重编码 → 整帖批量落库（PENDING）→ 发一条帖级事件 → 回写幂等结果。
@@ -69,6 +90,10 @@ public class MediaUploadFinalizer {
                     .map(m -> properties.getPublicUrlBase() + m)
                     .toList();
             mediaRepository.batchInsert(buildRows(reservation, urls));
+
+            // #6 去重记账：complete 路径对象已由客户端直传到位，无法「跳过存储」，
+            // 故仅下载字节算指纹、记表供未来上传复用（命中不重插、fail-open）。
+            recordDedup(reservation);
 
             // 整帖一条事件：与「整帖一审」配套，审核侧一次跑完，不做 N 张图的齐备性判断
             eventPublisher.publish(new MediaUploadedEvent(
@@ -139,6 +164,33 @@ public class MediaUploadFinalizer {
                     r.caption(), r.captionMark(), slot.seq(), r.createdAt(), slot.duration()));
         }
         return rows;
+    }
+
+    /**
+     * #6 去重记账（complete 路径，只记账）：逐张下载对象字节算 SHA-256，记指纹表供未来上传复用。
+     *
+     * <p><b>为什么是「只记账」而非「跳过存储」</b>：直传路径对象已由客户端写入对象存储，无法回退；
+     * 此处只把指纹落到 media_dedup，使后续走网关收字节路径（{@code MediaUploadService#storeOneWithDedup}）
+     * 的相同内容能命中复用、省下新对象。命中（指纹已存在）则 INSERT IGNORE 幂等忽略。</p>
+     *
+     * <p><b>失败方向</b>：整条链 fail-open——下载/算哈希/记表任一异常只告警，绝不影响已落库的帖子。</p>
+     */
+    private void recordDedup(UploadReservation reservation) {
+        if (!contentDedupService.isEnabled()) {
+            return;
+        }
+        long uid = Long.parseLong(reservation.userId());
+        for (UploadReservation.Slot slot : reservation.slots()) {
+            try {
+                byte[] bytes = storageClient.download(slot.mediaId());
+                String hash = contentDedupService.sha256(bytes);
+                contentDedupService.record(uid, hash, slot.mediaId(), properties.getPublicUrlBase() + slot.mediaId());
+            } catch (IOException e) {
+                log.warn("去重记账下载/算哈希失败（跳过该张）: mediaId={}, {}", slot.mediaId(), e.getMessage());
+            } catch (Exception e) {
+                log.warn("去重记账异常（跳过该张）: mediaId={}, {}", slot.mediaId(), e.getMessage());
+            }
+        }
     }
 
     /** 收尾失败的补偿清理：删对象（fail-open）+ 物理删除本批已落库的残行。 */
