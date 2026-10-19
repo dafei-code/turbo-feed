@@ -273,13 +273,17 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 
   * 保留 `FeedTimelineStore` 作为门面，编排上述组件。
 
-#### P1-2 tf-counter 未实现，热点计数仍直写 MySQL
+#### P1-2 tf-counter 已落地为「计数收敛底座」（原「热点计数直写 MySQL」结论已过时）
 
+* **原描述的偏差**：原文称「点赞 / 评论在 gateway 直接 `UPDATE media SET like_count=like_count+1`，高并发下热点行锁竞争」。复核代码后该前提**已不成立**——网关 `MediaLikeService` 现走 Redis 64 槽 Set + `SCARD` 聚合去重计数，`media` 表亦**无 `like_count` 列**（全仓零引用），不存在热点行锁。ADR-003 的原始动因随之消失。
 
+* **本次落地形态（收敛底座，非替代）**：新增独立部署单元 `tf-counter`（默认 8081），只补网关实时计数**不覆盖**的持久侧能力：
+  * 写路径：点赞状态变化时发一条「增量」事件（`postId + 类型 + ±1`）→ 内存缓冲 → 定时批量落 `post_counter`（最终一致）。只带增量、不带绝对值，与 Redis 权威计数彻底解耦，绝不抢写路径上的实时计数；
+  * 读路径：三级读缓存 Caffeine L1 → Redis L2(opt-in) → DB L3，面向管理端 / 批量计数，不替代卡片红心的实时计数；
+  * 传输：HTTP 兜底为主 + RocketMQ 顺序键 `postId`(opt-in)，二者按 `turbofeed.mq.enabled` 互斥，任意部署下只存在一套发布器；
+  * 零回归：`turbofeed.counter.service.enabled=false`（默认）时网关侧发布器 Bean 不创建，`ObjectProvider.ifAvailable` 为空实现，点赞主链路完全不受影响。
 
-* **现象**：点赞 / 评论当前在 gateway 直接 `UPDATE media SET like_count = like_count + 1`（分片到 128 表）。高并发下热点行锁竞争。
-
-* **建议方向**：按 `tf-counter.md` 蓝图落地：Redis 分桶（64 桶）+ MQ 削峰 + 批量落库 + L1 Caffeine 本地缓存。点赞接口只写 Redis，批量异步刷 MySQL。这是推荐排序特征（热度分）的数据来源，P0 优先级其实可以提前。
+* **验证**：三个相关模块 `mvn compile` 全绿；tf-counter 真启动（H2）e2e——批量 incr → 定时落库 → 查询 `likeCount=1→2 / commentCount=1` 聚合正确，未接触过的 key 返回全零且不报错；网关侧 `counter.service.enabled=true` 真启动确认**仅创建一个** HTTP 发布器 Bean（无 MQ 分支歧义）。完整「点赞→计数」联调待本机 Redis 起来后补：网关 `accountStateCacheInvalidationContainer` 在启动期即连 Redis。
 
 #### P1-3 无容器化部署
 
@@ -483,11 +487,11 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 | P0-2 `/internal/**` 服务间鉴权 | ✅ 已落地（#186） | 网关 + 引擎双端 `InternalTokenInterceptor` 校验 `X-Internal-Token`；值来自 `TURBOFEED_INTERNAL_TOKEN`，未配置即 fail-open 放行（克隆即跑），本地 yml 写死 `local-dev-internal-token` 开启校验。e2e 三态（无 / 错 / 正确 token）全绿 |
 | P0-3 Flyway schema 版本管理 | ✅ 已落地 | 仅版本化「单表」(SINGLE 登记的 5 张：sensitive_word/sensitive_whitelist/user_phone_router/outbox_event/review_task)；分片表(540 张)仍走 init-local.sql 模板。Spring Boot 3.4.x 无 spring-boot-starter-flyway(仅 4.x 起)，改用 BOM 托管 flyway-core(10.20.1)+flyway-mysql；默认关闭(TURBOFEED_FLYWAY_ENABLED)，直连物理库 turbo_feed_1 绕过 ShardingSphere。编译通过 + 直连 DB 只读 info 校验(V1 被发现、MySQL 方言加载) 全绿 |
 | P0-4 可观测性 | 🟡 部分（#185） | actuator health/info 已验证可用；Prometheus 端点仍仅 feed-engine 引依赖、两服务未统一暴露 `prometheus`，tracing 未做 |
-| P0-1 自动化测试 | ⏳ 未实施 | 全仓仍 0 测试文件 |
-| P0-5 服务发现 / 配置中心 | ⏳ 未实施 | 仍直连 `base-url`，未引 Nacos |
-| P1-2 tf-counter 计数服务 | ⏳ 未实施 | 点赞 / 评论计数仍直写 MySQL（分片到 128 表） |
+| P0-1 自动化测试 | 🔧 进行中（2026-10-17） | ADR-001 已落（`docs/architecture/adr-001-testing.md`）；4 靶心全就位——①审核 CAS 状态机 `MediaReviewServiceTest`(4) ②时间线 append-remove-promote `FeedTimelineStoreTest`(4) ③outbox 中继 `OutboxRelayTest`(4) ④用户分片路由 `UserJdbcRepositoryRoutingTest`(Testcontainers 真 MySQL，@RequiresDocker 守卫，本地无 Docker 跳过、CI 有 Docker 跑全量)。**本地 `mvn test` 已全绿**：网关 8/8 + 引擎 4/4，集成测因无 Docker 被 skip；CI 门禁 `.github/workflows/ci.yml`(`mvn -B clean test`，ubuntu 自带 Docker) 已加；根 pom 显式带 surefire 3.2.5 + testcontainers-bom。集成测的「真 MySQL 跑通」需 CI/Docker 环境确认（本地沙箱无 Docker，无法执行验证） |
+| P0-5 服务发现 / 配置中心 | 🟡 部分（2026-10-19 第一批已落） | 服务发现(双向 opt-in)+Sentinel 规则 Nacos 数据源(opt-in) 已落：依赖 + `@LoadBalanced RestClient` + `service-name` 切换 + 本地规则让位；`mvn compile` 通过、默认配置(Nacos 全关)真启动零回归。worker-id 集中分配经评审回退 phase-2（雪花 env-var 硬失败已保不撞号，短期够用）。真链路(多实例注册/LB/故障摘除、Sentinel 规则热推)待有 Nacos 的环境确认 |
+| P1-2 tf-counter 计数服务 | ✅ 已落地（收敛底座） | 新增独立部署单元 `tf-counter`：点赞/评论/分享「增量事件」→ 内存缓冲 → 定时批量落 `post_counter`（最终一致）；三级读缓存 Caffeine L1/Redis L2(opt-in)/DB L3。传输 HTTP 兜底 + RocketMQ 顺序键 `postId`(opt-in) 互斥。默认关闭零回归，详见 ADR-003 |
 | P1-3 容器化部署 | ✅ 已落地（#187） | 参数化 `Dockerfile`（多阶段，按 `build.args.MODULE` 选子模块）+ 全栈 `docker-compose.yml`（mysql/redis/minio/三服务，RocketMQ 收进 `mq` profile）+ `.env.example`；所有凭据经环境变量注入，`docker compose config` 通过 |
 | P1-4 文档与代码漂移对齐 | ✅ 已落地（#188） | README / overview.md / service-split.md / sharding.md 已对齐代码实际（11 张逻辑表、关注关系、X-Internal-Token、容器化）；本文 §1 表格中「配置已切，文档未更新」「确实裸奔」等已随 #188/#186 失效，以本节状态为准 |
 | 关注关系（follow/fans，P0-2 业务） | ✅ 已落地 | `FollowService`/`SocialController` + `user_follow`/`user_fans`（hashMod128）双写 + Redis ZSET `tf:follow:{uid}` 读源，G6 关注流已接入；属产品功能，非评审原始项 |
 
-**待办（仍未实施，按优先级）**：P0-1 测试、P0-5 Nacos、P1-2 tf-counter、P1-1 FeedTimelineStore 拆分、P1-5 前端工程化；P2 系列为演进优化。
+**待办（按优先级）**：P0-1 测试🔧（4 靶心单测/集成测全就位，本地 12/12 绿、集成测真 MySQL 跑通待 CI/Docker 确认）、P0-5 Nacos🔧（服务发现+Sentinel→Nacos 已落、worker-id phase-2；真链路待 Nacos 环境验证）、P1-1 FeedTimelineStore 拆分、P1-5 前端工程化；P2 系列为演进优化。

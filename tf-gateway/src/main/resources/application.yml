@@ -288,6 +288,13 @@ turbofeed:
   counter:
     bucket-count: 64            # 热点计数分桶数
     batch-flush-interval-ms: 2000  # 批量落库周期
+    # 外部 tf-counter 聚合底座客户端（P1-2，收敛底座方案；默认关，零回归）
+    service:
+      enabled: ${TURBOFEED_COUNTER_ENABLED:false}   # 开启后点赞才发计数增量给 tf-counter
+      base-url: ${TURBOFEED_COUNTER_BASE_URL:http://localhost:8081}
+      connect-timeout: 500ms
+      read-timeout: 500ms
+      topic: turbofeed-counter-incr                 # MQ 削峰 Topic（与 tf-counter CounterMqConsumer 共用）
   hotspot:
     window-seconds: 10          # 滑动窗口长度
     hot-threshold: 1000         # 热 Key 判定阈值（窗口内访问次数）

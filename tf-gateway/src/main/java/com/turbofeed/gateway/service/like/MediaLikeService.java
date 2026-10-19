@@ -1,6 +1,7 @@
 package com.turbofeed.gateway.service.like;
 
 import com.turbofeed.gateway.exception.BizException;
+import com.turbofeed.gateway.service.counter.CounterEventPublisher;
 import com.turbofeed.gateway.service.feed.BehaviorEventPublisher;
 import com.turbofeed.gateway.service.feed.BehaviorReport;
 import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
@@ -8,6 +9,7 @@ import com.turbofeed.gateway.util.SnowflakeIdGenerator;
 import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.core.RedisCallback;
@@ -36,6 +38,11 @@ import java.util.concurrent.Executor;
  *   <li><b>接推荐赛马</b>：每次<b>实际状态变化</b>（新增赞 / 取消赞）才经 {@link BehaviorEventPublisher}
  *       发一条 {@code LIKE} / {@code UNLIKE} 行为事件给引擎——引擎 {@code PostStatService} 据此
  *       累加/回退实时分与热点榜权重。去重保证「一次状态变化 = 一条事件」，不漂移。</li>
+ *   <li><b>持久聚合底座（P1-2，opt-in）</b>：实际状态变化再经 {@link CounterEventPublisher}
+ *       发一条点赞增量给 tf-counter（聚合底座），由其批量落 {@code post_counter}。该发布器
+ *       由 {@code turbofeed.counter.service.enabled} 闸控——默认关，关时 Bean 不创建、零回归；
+ *       开启后 fail-open，投递失败仅告警，绝不阻断点赞主流程。与 Redis 实时计数解耦，
+ *       不触碰 {@code media_like} 落库与 behavior-event 链路。</li>
  *   <li><b>持久化兜底（异步落库）</b>：状态变化后把 {@code media_like} 的 INSERT/DELETE 提交到
  *       {@code interactionExecutor}（队列 1024、CallerRunsPolicy 背压）异步刷盘，主链路不阻塞 DB 写；
  *       Redis 仍是权威计数源，落库仅为灾备重建用。内部 fail-open：落库异常只告警，不影响主流程。
@@ -68,17 +75,21 @@ public class MediaLikeService {
     private final SnowflakeIdGenerator snowflakeIdGenerator;
     private final Executor interactionExecutor;
     private final UploadRateLimiter rateLimiter;
+    /** 计数增量发布器（opt-in）：{@code turbofeed.counter.service.enabled=false} 时工厂不提供 Bean，恒为空。 */
+    private final ObjectProvider<CounterEventPublisher> counterPublisher;
 
     public MediaLikeService(StringRedisTemplate redisTemplate, BehaviorEventPublisher behaviorPublisher,
                             MediaLikeJdbcRepository likeRepository, SnowflakeIdGenerator snowflakeIdGenerator,
                             @Qualifier("interactionExecutor") Executor interactionExecutor,
-                            UploadRateLimiter rateLimiter) {
+                            UploadRateLimiter rateLimiter,
+                            ObjectProvider<CounterEventPublisher> counterPublisher) {
         this.redisTemplate = redisTemplate;
         this.behaviorPublisher = behaviorPublisher;
         this.likeRepository = likeRepository;
         this.snowflakeIdGenerator = snowflakeIdGenerator;
         this.interactionExecutor = interactionExecutor;
         this.rateLimiter = rateLimiter;
+        this.counterPublisher = counterPublisher;
     }
 
     /** 用户归属的槽号（与分片/计数桶同套散列，保证同一用户始终映射到同一槽）。 */
@@ -113,7 +124,9 @@ public class MediaLikeService {
                 if (added != null && added == 1L) {
                     redisTemplate.expire(key, SET_TTL);
                     publish(postId, userId, "LIKE");
-                    // ② 异步落库（灾备），主链路不阻塞 DB 写
+                    // ② 持久聚合底座（P1-2，opt-in）：实际新增赞才发 +1 增量
+                    notifyCounter(postId, 1);
+                    // ③ 异步落库（灾备），主链路不阻塞 DB 写
                     interactionExecutor.execute(() -> {
                         try {
                             likeRepository.insert(new MediaLike(snowflakeIdGenerator.nextId(), postId, userId, Instant.now()));
@@ -129,6 +142,8 @@ public class MediaLikeService {
                 Long removed = redisTemplate.opsForSet().remove(key, uid);
                 if (removed != null && removed == 1L) {
                     publish(postId, userId, "UNLIKE");
+                    // ② 持久聚合底座（P1-2，opt-in）：实际取消赞才发 -1 增量
+                    notifyCounter(postId, -1);
                     interactionExecutor.execute(() -> {
                         try {
                             likeRepository.delete(postId, userId);
@@ -148,7 +163,7 @@ public class MediaLikeService {
         }
     }
 
-    /** 当前用户是否已赞该内容（仅查其归属槽，O(1)）。 */
+    /** 用户是否已赞该内容（仅查其归属槽，O(1)）。 */
     public boolean isLiked(String postId, long userId) {
         try {
             return Boolean.TRUE.equals(
@@ -191,6 +206,16 @@ public class MediaLikeService {
         } catch (Exception e) {
             log.warn("点赞行为事件投递引擎失败（fail-open，不影响主流程）: postId={}, type={}, {}",
                     postId, type, e.getMessage());
+        }
+    }
+
+    /** 发计数增量给 tf-counter 聚合底座（P1-2，opt-in）。fail-open：失败仅告警，不影响点赞主流程。 */
+    private void notifyCounter(String postId, int delta) {
+        try {
+            counterPublisher.ifAvailable(c -> c.incr(postId, "LIKE", delta));
+        } catch (Exception e) {
+            log.warn("计数增量通知 tf-counter 失败（fail-open，不影响主流程）: postId={}, delta={}, {}",
+                    postId, delta, e.getMessage());
         }
     }
 }

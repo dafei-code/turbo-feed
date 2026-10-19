@@ -1,0 +1,25 @@
+package com.turbofeed.shared.model;
+
+/**
+ * 聚合计数视图（tf-counter 查询返回，三级读缓存 L1/L2/L3 的统一载体）。
+ *
+ * <p>计数来自 tf-counter 自有 {@code post_counter} 表（批量落库的<b>最终一致</b>聚合），
+ * 与网关实时点赞数（Redis 64 槽 SCARD）口径不同：本视图用于持久查询 / 管理端 / 批量计数，
+ * 不替代卡片红心的实时计数。</p>
+ *
+ * <p>JSON 序列化依赖 record 组件名（postId/likeCount/...），与下游字段名一致；
+ * 本模块零第三方依赖，不加 @JsonProperty，由下游 Jackson ParameterNamesModule 通过
+ * -parameters 形参名完成（反）序列化。</p>
+ */
+public record CounterView(String postId, long likeCount, long commentCount, long shareCount) {
+
+    /** 全零计数（帖尚无任何互动时返回）。 */
+    public static CounterView zero(String postId) {
+        return new CounterView(postId, 0L, 0L, 0L);
+    }
+
+    /** 在现有视图上叠加一组增量（内存聚合用，不落库）。 */
+    public CounterView add(long dLike, long dComment, long dShare) {
+        return new CounterView(postId, likeCount + dLike, commentCount + dComment, shareCount + dShare);
+    }
+}

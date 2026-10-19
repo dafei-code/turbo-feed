@@ -2,21 +2,41 @@
 spring:
   application:
     name: tf-counter
-  # Redisson 自动配置暂排除：Redis 环境就绪后删除本段（并补 spring.data.redis.* 连接配置）
-  # 不排除时，starter 默认连 localhost:6379，无 Redis 环境下启动即失败
+  # Redis L2 为 opt-in：turbofeed.counter.redis.enabled=false 时，本服务自带的
+  # CounterRedisConfig / RedisCounterStore 均受 @ConditionalOnProperty 门控而不创建。
+  # 排除 redisson-spring-boot-starter 的自动配置（RedissonAutoConfigurationV2，Boot 3 下
+  # 它是真实自动配置类，会在无 Redis 时启动即连 127.0.0.1:6379 失败）——tf-counter 的
+  # RedissonClient 由 CounterRedisConfig 按 redis.enabled 自行构造，不依赖 starter 自动配置。
+  # 注意：只排除 V2；非 V2 的 RedissonAutoConfiguration 在本 Boot 版本不是自动配置类，
+  # 列进 exclude 反而会让整个排除清单校验失败。
   autoconfigure:
     exclude:
       - org.redisson.spring.starter.RedissonAutoConfigurationV2
-      - org.redisson.spring.starter.RedissonAutoConfiguration
   # H2 兜底（克隆即跑）；生产切 MySQL 8
   datasource:
     url: jdbc:h2:mem:tf-counter;MODE=MySQL
     driver-class-name: org.h2.Driver
     username: sa
     password:
+  # 嵌入式 H2 自动执行 schema.sql 建 post_counter（always 确保本地验证必跑）
+  sql:
+    init:
+      mode: always
 
 server:
   port: 8081
+
+# 计数服务运行参数（绑定 CounterProperties）
+turbofeed:
+  counter:
+    flush-interval-ms: 5000          # 内存增量缓冲定时批量落库间隔
+    redis-enabled: false             # Redis L2 默认关（本地无 Redis 走 DB L3）；启用需补 redis.*
+    redis:
+      addresses: redis://127.0.0.1:6379
+      password:
+# 生产启用 MQ 削峰时取消注释并配置 name-server（CounterMqConsumer 随之激活）：
+# rocketmq:
+#   name-server: 127.0.0.1:9876
 
 # 健康检查仅暴露基础端点（K8s 探活）；接 Prometheus 时再开放 prometheus 端点
 management:
