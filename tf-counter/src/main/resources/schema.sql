@@ -8,3 +8,23 @@ CREATE TABLE IF NOT EXISTS post_counter (
   share_count  BIGINT       NOT NULL DEFAULT 0 COMMENT '分享聚合计数（最终一致）',
   updated_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '最近一次落库时间'
 );
+
+-- flush 幂等去重表：每次 flush 周期生成 batch_id，逐帖登记 (batch_id, post_id)。
+-- 同一批次重放（ShedLock 锁过期续跑 / 进程崩溃重试）时，已登记的帖直接跳过 UPSERT，
+-- 杜绝重复累加。PK 为 (batch_id, post_id)，不同批次的同帖各自合法落库。
+CREATE TABLE IF NOT EXISTS counter_flush_dedup (
+  batch_id  VARCHAR(64)  NOT NULL COMMENT '本次 flush 周期唯一标识（UUID）',
+  post_id   VARCHAR(255) NOT NULL COMMENT '帖子身份',
+  created_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '登记时间（供清理）',
+  PRIMARY KEY (batch_id, post_id)
+);
+
+-- ShedLock 分布式锁表（仅集群模式 redis-buffer.enabled=true 时由 ShedLockConfig 启用）。
+-- 选主保证多 tf-counter 副本中只有一个执行 drain；JdbcLockProvider 复用本服务 DataSource。
+CREATE TABLE IF NOT EXISTS shedlock (
+  name       VARCHAR(64)  NOT NULL,
+  lock_until TIMESTAMP   NOT NULL,
+  locked_at  TIMESTAMP   NULL,
+  locked_by  VARCHAR(255) NULL,
+  PRIMARY KEY (name)
+);

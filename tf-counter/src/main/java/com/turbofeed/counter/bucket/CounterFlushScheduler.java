@@ -1,55 +1,32 @@
 package com.turbofeed.counter.bucket;
 
-import com.turbofeed.counter.cache.CounterReadService;
-import com.turbofeed.counter.persist.PostCounterRepository;
-import com.turbofeed.shared.model.CounterView;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
-
 /**
- * 内存缓冲定时批量落库（最终一致落库层）。
+ * standalone 模式 flush 调度器（<b>默认</b>，{@code redis-buffer.enabled=false} / 缺省时生效）。
  *
- * <p>周期性 {@link CounterBufferService#drain} 取出增量快照 → 逐帖
- * {@link PostCounterRepository#applyDelta} 批量落 {@code post_counter}（低频批量写，无热点行锁）。
- * flush 后按「DB 权威值 + 窗口内新到达的未落库增量」修正 L1/L2，避免读路径短暂欠计数。</p>
+ * <p>此模式下缓冲是各副本各自的进程内 {@code ConcurrentHashMap}（天然分片），每个副本独立 flush
+ * 自己的那一份，<b>不需要也不该加 ShedLock</b>——加锁反而会让非 leader 副本的缓冲永不被 flush。
+ * 因此本调度器只用普通 {@code @Scheduled}，无任何分布式锁。多副本并行 flush 各自的缓冲，
+ * 互不重叠、互不重复，是正确且零开销的。</p>
+ *
+ * <p>切换到集群模式（共享 Redis 缓冲 + 选主）时，本 Bean 因条件不满足而不创建，
+ * 由 {@link ClusteredCounterFlushScheduler} 接管。</p>
  */
 @Component
+@ConditionalOnProperty(name = "turbofeed.counter.redis-buffer.enabled", havingValue = "false", matchIfMissing = true)
 public class CounterFlushScheduler {
 
-    private final CounterBufferService buffer;
-    private final PostCounterRepository repo;
-    private final CounterReadService readService;
+    private final CounterFlushService flushService;
 
-    public CounterFlushScheduler(CounterBufferService buffer, PostCounterRepository repo,
-                                  CounterReadService readService) {
-        this.buffer = buffer;
-        this.repo = repo;
-        this.readService = readService;
+    public CounterFlushScheduler(CounterFlushService flushService) {
+        this.flushService = flushService;
     }
 
     @Scheduled(fixedDelayString = "${turbofeed.counter.flush-interval-ms:5000}")
     public void flush() {
-        Map<String, long[]> snapshot = buffer.drain();
-        if (snapshot.isEmpty()) {
-            return;
-        }
-        for (Map.Entry<String, long[]> e : snapshot.entrySet()) {
-            long[] d = e.getValue();
-            repo.applyDelta(e.getKey(), d[0], d[1], d[2]);
-        }
-        // flush 后修正 L1/L2：DB 权威值叠加窗口内新到达（未 drain）的增量，杜绝短暂欠计数
-        for (String postId : snapshot.keySet()) {
-            CounterView db = repo.get(postId);
-            if (db == null) {
-                db = CounterView.zero(postId);
-            }
-            long[] pending = buffer.get(postId);
-            if (pending != null) {
-                db = db.add(pending[0], pending[1], pending[2]);
-            }
-            readService.refresh(postId, db);
-        }
+        flushService.flush();
     }
 }

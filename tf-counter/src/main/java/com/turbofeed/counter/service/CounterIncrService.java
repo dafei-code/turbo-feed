@@ -1,7 +1,7 @@
 package com.turbofeed.counter.service;
 
 import com.turbofeed.counter.CounterType;
-import com.turbofeed.counter.bucket.CounterBufferService;
+import com.turbofeed.counter.bucket.CounterBuffer;
 import com.turbofeed.counter.cache.CounterReadService;
 import com.turbofeed.shared.model.CounterIncrementEvent;
 import org.springframework.stereotype.Service;
@@ -15,10 +15,10 @@ import org.springframework.stereotype.Service;
 @Service
 public class CounterIncrService {
 
-    private final CounterBufferService buffer;
+    private final CounterBuffer buffer;
     private final CounterReadService readService;
 
-    public CounterIncrService(CounterBufferService buffer, CounterReadService readService) {
+    public CounterIncrService(CounterBuffer buffer, CounterReadService readService) {
         this.buffer = buffer;
         this.readService = readService;
     }

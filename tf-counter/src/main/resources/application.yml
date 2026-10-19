@@ -31,6 +31,10 @@ turbofeed:
   counter:
     flush-interval-ms: 5000          # 内存增量缓冲定时批量落库间隔
     redis-enabled: false             # Redis L2 默认关（本地无 Redis 走 DB L3）；启用需补 redis.*
+    redis-buffer-enabled: false      # 集群模式开关（默认关 = standalone 进程内缓冲）。
+                                     # 设为 true 时【必须同时】把上方 redis-enabled 设为 true
+                                     # （RedisCounterBuffer 依赖 RedissonClient），并会激活
+                                     # ShedLock 选主（多副本仅 leader 落库，不丢不重）。
     redis:
       addresses: redis://127.0.0.1:6379
       password:
