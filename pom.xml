@@ -141,6 +141,15 @@
                 <artifactId>tf-counter</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <!-- Testcontainers BOM：真集成测试（MySQL + Redis）版本统一托管。
+                 仅影响 testcontainers 系 artifact，不污染主依赖；版本固定 1.20.4（兼容 JUnit 5.11 / Boot 3.4.3）。 -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>1.20.4</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -155,12 +164,19 @@
                         <release>${java.version}</release>
                     </configuration>
                 </plugin>
-                <plugin>
-                    <groupId>org.springframework.boot</groupId>
-                    <artifactId>spring-boot-maven-plugin</artifactId>
-                    <version>${spring-boot.version}</version>
-                </plugin>
-            </plugins>
-        </pluginManagement>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>${spring-boot.version}</version>
+            </plugin>
+            <!-- 显式带 surefire（3.2.5）：本父 pom 是普通 BOM 父（非 spring-boot-starter-parent），
+                 不会自动注入 surefire + JUnit5 运行时。3.x 原生支持 JUnit5，配 junit-platform-launcher（模块 test 依赖）即可跑。 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+        </plugins>
+    </pluginManagement>
     </build>
 </project>

@@ -2,6 +2,16 @@
 spring:
   application:
     name: turbo-feed-gateway
+  # ---- P0-5 Nacos 服务发现（ADR-002，严格 opt-in）----
+  # enabled 默认 false → 克隆即跑，启动不连任何 Nacos；server-addr 缺省也不发起连接。
+  # 多实例部署时置 TURBOFEED_NACOS_ENABLED=true 并给 TURBOFEED_NACOS_SERVER_ADDR，
+  # 网关以 spring.application.name=turbo-feed-gateway 注册，引擎侧用 turbofeed.feed.engine.service-name
+  # 寻址（默认空=直连 base-url，与改造前一致）。
+  cloud:
+    nacos:
+      discovery:
+        enabled: ${TURBOFEED_NACOS_ENABLED:false}
+        server-addr: ${TURBOFEED_NACOS_SERVER_ADDR:}
   # 数据源走 ShardingSphere 原生驱动：从 classpath 读取 shardingsphere-config-128.yaml
   # 由该文件定义真实数据源(ds_0/ds_1)与分片规则。URL 携带 placeholder-type=ENVIRONMENT，
   # SS 配置内的环境占位符在加载期由 ShardingSphereURLLoadEngine 从进程环境变量渲染
@@ -103,6 +113,10 @@ turbofeed:
     engine:
       # 当前为直连形态（克隆即跑）；引入 Nacos 服务发现 + LoadBalancer 后，此项退化为兜底/调试用
       base-url: ${TURBOFEED_FEED_ENGINE_BASE_URL:http://localhost:8083}
+      # 引擎服务名（Nacos 注册名，默认空=直连 base-url）。非空 + spring.cloud.nacos.discovery.enabled=true
+      # 时，网关改用 @LoadBalanced RestClient 寻址，多实例自动注册/健康检查/负载均衡/故障摘除（ADR-002）。
+      # 对应引擎侧 spring.application.name=tf-feed-engine。
+      service-name: ${TURBOFEED_FEED_ENGINE_SERVICE_NAME:}
       # 同步调用必须设超时：引擎故障时若无限等待，网关线程池会被慢调用耗尽（雪崩入口）
       connect-timeout: 500ms
       read-timeout: 2s
@@ -282,6 +296,16 @@ turbofeed:
   # 两侧共用同一值（由 TURBOFEED_INTERNAL_TOKEN 注入）；未配置则两侧均 fail-open（克隆即跑）。
   internal:
     token: ${TURBOFEED_INTERNAL_TOKEN:}
+  # ==================== P0-5 Sentinel 规则 Nacos 数据源（ADR-002，opt-in）====================
+  # 默认关闭：关闭时 SentinelRateLimitConfig 仍用本地代码注册上传限流规则（克隆即跑）。
+  # 开启(TURBOFEED_SENTINEL_NACOS_ENABLED=true)后规则改由 Nacos 热推，改阈值无需重启；
+  # 同时 SentinelRateLimitConfig 自动让位（@ConditionalOnProperty），避免两套规则互相覆盖。
+  sentinel:
+    nacos:
+      enabled: ${TURBOFEED_SENTINEL_NACOS_ENABLED:false}
+      server-addr: ${TURBOFEED_SENTINEL_NACOS_SERVER_ADDR:}
+      group: DEFAULT_GROUP
+      data-id: sentinel-flow-rules
 
 # Sentinel：默认本地 JSON 规则（克隆即跑），可选 Nacos push
 # sentinel:

@@ -6,6 +6,7 @@ import com.alibaba.csp.sentinel.slots.block.flow.FlowRuleManager;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Configuration;
 
 import java.util.List;
@@ -37,7 +38,13 @@ import java.util.List;
  * Nginx limit_req + client_max_body_size 兜底，属部署动作不进代码。
  * 集群流控（Token Server）在多实例部署后再评估，单机规则集群下各实例独立计数，当前够用。</p>
  */
+/**
+ * 本地规则注册仅在「未开启 Nacos 数据源」时生效（{@code turbofeed.sentinel.nacos.enabled=false}，
+ * 或该属性缺失即默认）。一旦开启 Nacos 数据源，本配置主动让位，避免两套规则互相覆盖
+ * （见 {@link SentinelNacosDataSourceConfig}）。
+ */
 @Configuration
+@ConditionalOnProperty(name = "turbofeed.sentinel.nacos.enabled", havingValue = "false", matchIfMissing = true)
 public class SentinelRateLimitConfig {
 
     private static final Logger log = LoggerFactory.getLogger(SentinelRateLimitConfig.class);

@@ -95,6 +95,33 @@
             <version>1.18.42</version>
             <optional>true</optional>
         </dependency>
+        <!-- Nacos 服务发现 + Spring Cloud LoadBalancer（P0-5，ADR-002）：引擎→网关晋级回调改用服务名寻址。
+             严格 opt-in：未配 spring.cloud.nacos.discovery.enabled 且 turbofeed.gateway.service-name 为空时，
+             行为与直连 base-url 完全一致（克隆即跑）；地址/服务名缺省不发起任何连接。
+             版本由 spring-cloud-alibaba-dependencies / spring-cloud-dependencies BOM 托管，无需写 version。 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+        </dependency>
+
+        <!-- ============ 测试（P0-1，ADR-001）============ -->
+        <!-- spring-boot-starter-test：JUnit5 + Mockito + AssertJ。FeedTimelineStore 单测走 Mockito（无需 Docker）。
+             版本由 spring-boot-dependencies BOM 托管。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- junit-platform-launcher：surefire 3.x 跑 JUnit5 必需（BOM 父不自动带）。 -->
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

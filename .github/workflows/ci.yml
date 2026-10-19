@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    # GitHub 托管的 Ubuntu runner 自带 Docker，Testcontainers 起真实 MySQL/Redis 可用。
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Build & Test
+        # clean 保证无残留；test 阶段不触发 spring-boot repackage。
+        # 无 Docker 的本地环境只会跑 Mockito 单测（集成测被 @RequiresDocker 跳过）；
+        # CI 有 Docker，跑全量（含 UserJdbcRepository 分片路由集成测）。
+        run: mvn -B clean test

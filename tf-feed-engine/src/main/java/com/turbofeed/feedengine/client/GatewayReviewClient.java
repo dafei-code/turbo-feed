@@ -2,6 +2,7 @@ package com.turbofeed.feedengine.client;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -32,20 +33,35 @@ public class GatewayReviewClient {
 
     private final RestClient restClient;
     private final String baseUrl;
+    /** 网关服务名（Nacos 注册名，空 = 直连 base-url）。见 application.yml turbofeed.gateway.service-name。 */
+    private final String serviceName;
     /** 服务间内部接口共享令牌（评审 doc P0-2）；为空时不为请求附加 X-Internal-Token（fail-open 本地开发）。 */
     private final String internalToken;
 
+    /**
+     * 直连形态（默认）：用 Boot 自动装配的 plain {@link RestClient.Builder} + {@code base-url}。
+     * 服务发现形态：当 {@code serviceName} 非空时改用 {@code @LoadBalanced} builder +
+     * {@code baseUrl("http://" + serviceName)}，由 Nacos 注册表解析真实网关实例。
+     * 注入的两个 builder 由 {@code ServiceDiscoveryRestClientConfig} 提供（共存、按需选用）。
+     */
     public GatewayReviewClient(@Value("${turbofeed.gateway.base-url:http://localhost:8080}") String baseUrl,
+                               @Value("${turbofeed.gateway.service-name:}") String serviceName,
                                @Value("${turbofeed.gateway.connect-timeout-ms:500}") int connectTimeoutMs,
                                @Value("${turbofeed.gateway.read-timeout-ms:2000}") int readTimeoutMs,
-                               @Value("${turbofeed.internal.token:}") String internalToken) {
+                               @Value("${turbofeed.internal.token:}") String internalToken,
+                               RestClient.Builder restClientBuilder,
+                               @LoadBalanced RestClient.Builder lbRestClientBuilder) {
         this.baseUrl = baseUrl;
+        this.serviceName = serviceName == null ? "" : serviceName;
         this.internalToken = internalToken == null ? "" : internalToken;
+        boolean useDiscovery = !this.serviceName.isBlank();
+        RestClient.Builder chosenBuilder = useDiscovery ? lbRestClientBuilder : restClientBuilder;
+        String resolvedBaseUrl = useDiscovery ? "http://" + this.serviceName : baseUrl;
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(connectTimeoutMs);
         requestFactory.setReadTimeout(readTimeoutMs);
-        this.restClient = RestClient.builder()
-                .baseUrl(baseUrl)
+        this.restClient = chosenBuilder.clone()
+                .baseUrl(resolvedBaseUrl)
                 .requestFactory(requestFactory)
                 // 服务间内部接口鉴权（评审 doc P0-2）：配置令牌时为回调网关 /internal/review/** 加 X-Internal-Token，
                 // 与网关侧 InternalTokenInterceptor 共享同一密钥。未配置令牌则不加（fail-open 本地开发）。
@@ -55,8 +71,9 @@ public class GatewayReviewClient {
                     }
                 })
                 .build();
-        log.info("网关回调客户端初始化: baseUrl={}, connectTimeoutMs={}, readTimeoutMs={}, internalToken={}",
-                baseUrl, connectTimeoutMs, readTimeoutMs, this.internalToken.isBlank() ? "未配置(fail-open)" : "已配置");
+        log.info("网关回调客户端初始化: mode={}, baseUrl={}, connectTimeoutMs={}, readTimeoutMs={}, internalToken={}",
+                useDiscovery ? "服务发现(Nacos)" : "直连", resolvedBaseUrl,
+                connectTimeoutMs, readTimeoutMs, this.internalToken.isBlank() ? "未配置(fail-open)" : "已配置");
     }
 
     /**

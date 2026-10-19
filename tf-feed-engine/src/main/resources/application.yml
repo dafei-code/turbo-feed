@@ -2,6 +2,16 @@
 spring:
   application:
     name: tf-feed-engine
+  # ---- P0-5 Nacos 服务发现（ADR-002，严格 opt-in）----
+  # enabled 默认 false → 克隆即跑，启动不连任何 Nacos；server-addr 缺省也不发起连接。
+  # 多实例部署时置 TURBOFEED_NACOS_ENABLED=true 并给 TURBOFEED_NACOS_SERVER_ADDR，
+  # 引擎以 spring.application.name=tf-feed-engine 注册，网关侧用 turbofeed.feed.engine.service-name
+  # 寻址；引擎→网关晋级回调则通过下方 turbofeed.gateway.service-name 寻址（默认空=直连 base-url）。
+  cloud:
+    nacos:
+      discovery:
+        enabled: ${TURBOFEED_NACOS_ENABLED:false}
+        server-addr: ${TURBOFEED_NACOS_SERVER_ADDR:}
 
   # Redis（Lettuce，懒连接）：Feed 时间线读模型与推荐流旁路缓存的宿主
   #   · tf:feed:tl:{pool}:{yyyyMMdd}  —— 公域时间线分桶 ZSET（score = 入流时刻毫秒）
@@ -160,6 +170,9 @@ turbofeed:
   # 引入 Nacos 服务发现 + LoadBalancer 后，此项退化兜底/调试用（与 turbofeed.feed.engine 同构）。
   gateway:
     base-url: ${TURBOFEED_GATEWAY_BASE_URL:http://localhost:8080}
+    # 网关服务名（Nacos 注册名，默认空=直连 base-url）。非空 + spring.cloud.nacos.discovery.enabled=true
+    # 时，引擎晋级回调改用 @LoadBalanced RestClient 寻址（ADR-002）。对应网关 spring.application.name=turbo-feed-gateway。
+    service-name: ${TURBOFEED_GATEWAY_SERVICE_NAME:}
     # 同步调用必须设超时（毫秒）：网关故障时若无限等待，扫描线程会被慢调用拖垮（雪崩入口）
     connect-timeout-ms: 500
     read-timeout-ms: 2000

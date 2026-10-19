@@ -52,6 +52,20 @@ public class FeedEngineProperties {
         /** 引擎基址，如 http://localhost:8083（默认端口见 service-split.md §3）。 */
         private String baseUrl = "http://localhost:8083";
 
+        /**
+         * 引擎服务名（Nacos 注册名，默认空 = 直连 {@link #baseUrl}）。
+         *
+         * <p><b>非空即走服务发现</b>：网关改用 {@code @LoadBalanced RestClient} +
+         * {@code baseUrl("http://" + serviceName)}，由 Nacos 注册表解析真实实例
+         * （健康检查 + 负载均衡 + 故障摘除），多实例真正扩得动。
+         * 空串（默认）= 直连 {@code baseUrl}，与改造前逐字节一致（克隆即跑）。</p>
+         *
+         * <p>对应引擎侧 {@code spring.application.name=tf-feed-engine}；opt-in：
+         * 仅当同时开启 {@code spring.cloud.nacos.discovery.enabled=true} 且本项非空时
+         * 才真正向注册表寻址，否则即使填了服务名也退化为直连（避免半开配置静默连不上）。</p>
+         */
+        private String serviceName = "";
+
         /** 连接超时：建连失败要快速失败，避免网关线程被慢引擎拖住。 */
         private Duration connectTimeout = Duration.ofMillis(500);
 
@@ -64,6 +78,14 @@ public class FeedEngineProperties {
 
         public void setBaseUrl(String baseUrl) {
             this.baseUrl = baseUrl;
+        }
+
+        public String getServiceName() {
+            return serviceName;
+        }
+
+        public void setServiceName(String serviceName) {
+            this.serviceName = serviceName;
         }
 
         public Duration getConnectTimeout() {

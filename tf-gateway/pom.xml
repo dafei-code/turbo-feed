@@ -68,6 +68,28 @@
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
         </dependency>
+        <!-- Nacos 服务发现 + Spring Cloud LoadBalancer（P0-5，ADR-002）：网关→引擎改用服务名寻址，
+             多实例自动注册/健康检查/负载均衡/故障摘除。严格 opt-in：未配 spring.cloud.nacos.discovery.enabled
+             且 turbofeed.feed.engine.service-name 为空时，行为与直连 base-url 完全一致（克隆即跑）；
+             Nacos 地址/服务名缺省不发起任何连接。版本由 spring-cloud-alibaba-dependencies(2023.0.3.4)
+             / spring-cloud-dependencies(2024.0.2) BOM 托管，无需写 version。 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+        </dependency>
+        <!-- Sentinel 规则 Nacos 数据源（P0-5，ADR-002）：限流规则从本地代码注册切到 Nacos 热推，
+             改规则无需重启。opt-in：turbofeed.sentinel.nacos.enabled=true 才激活，关闭时仍走现有
+             SentinelRateLimitConfig 本地规则。解析用 Jackson converter 避 fastjson（见 SentinelNacosDataSourceConfig）。
+             注意 GAV 是 com.alibaba.csp（原生 Sentinel 扩展，由 SCA BOM 的 ${sentinel.version} 托管），
+             不是 com.alibaba.cloud；版本由 spring-cloud-alibaba-dependencies BOM 托管，无需写 version。 -->
+        <dependency>
+            <groupId>com.alibaba.csp</groupId>
+            <artifactId>sentinel-datasource-nacos</artifactId>
+        </dependency>
         <!-- Redis（Lettuce）：上传接口用户级限流等轻量 KV 用途（版本由 Boot BOM 托管）。
              与 tf-counter / tf-feed-engine 的 Redisson 是不同选型：网关只需 RedisTemplate 级
              原子命令（INCR/EXPIRE），不需要分布式锁与丰富数据结构，避免重依赖。
@@ -221,6 +243,41 @@
             <groupId>io.minio</groupId>
             <artifactId>minio</artifactId>
             <version>8.5.7</version>
+        </dependency>
+
+        <!-- ============ 测试（P0-1，ADR-001）============ -->
+        <!-- spring-boot-starter-test：JUnit5 + Mockito + AssertJ。版本由 spring-boot-dependencies BOM 托管。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- junit-platform-launcher：surefire 3.x 跑 JUnit5 必需（BOM 父不自动带）。 -->
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Testcontainers：真集成测试（UserJdbcRepository 分片路由需真实 MySQL）。
+             版本由根 pom 的 testcontainers-bom 托管。集成测用 @RequiresDocker 守卫：无 Docker 时跳过而非失败。 -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mysql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- testcontainers 核心（@Testcontainers / MySQLContainer 的传递底座，显式声明锁定版本；
+             版本由根 pom testcontainers-bom 托管。注意：@RequiresDocker 守卫已改为不依赖
+             testcontainers 内部 DockerClientFactory，改用轻量 DockerEnvironment 探测，
+             因此本依赖仅为集成测的容器本身服务）。 -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

@@ -10,6 +10,7 @@ import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.model.PlayableView;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -72,10 +73,16 @@ public class FeedEngineClient {
      * 它与应用共享同一套消息转换器与 {@code ObjectMapper}——这一点是必需的，
      * 契约里的 {@code createdAt} 是 {@code Instant}，只有应用级 mapper 才注册了 JSR-310 模块，
      * 否则日期字段会以时间戳数组形式写出、引擎侧解析失败。
+     *
+     * <p><b>服务发现切换</b>：当 {@code engine.serviceName} 非空时改用 {@code @LoadBalanced}
+     * builder + {@code baseUrl("http://" + serviceName)}，由 Nacos 注册表解析真实实例
+     * （健康检查 + 负载均衡 + 故障摘除）；为空时走 plain builder 直连 {@code baseUrl}，与改造前一致。
+     * 见 {@code ServiceDiscoveryRestClientConfig}。</p>
      */
     public FeedEngineClient(FeedEngineProperties properties,
                             ObjectMapper objectMapper,
                             RestClient.Builder restClientBuilder,
+                            @LoadBalanced RestClient.Builder lbRestClientBuilder,
                             FeedDeliveryHealth health,
                             @Value("${turbofeed.internal.token:}") String internalToken) {
         this.properties = properties;
@@ -83,11 +90,14 @@ public class FeedEngineClient {
         this.health = health;
         this.internalToken = internalToken == null ? "" : internalToken;
         FeedEngineProperties.Engine engine = properties.getEngine();
+        boolean useDiscovery = !engine.getServiceName().isBlank();
+        RestClient.Builder chosenBuilder = useDiscovery ? lbRestClientBuilder : restClientBuilder;
+        String baseUrl = useDiscovery ? "http://" + engine.getServiceName() : engine.getBaseUrl();
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout((int) engine.getConnectTimeout().toMillis());
         requestFactory.setReadTimeout((int) engine.getReadTimeout().toMillis());
-        this.restClient = restClientBuilder.clone()
-                .baseUrl(engine.getBaseUrl())
+        this.restClient = chosenBuilder.clone()
+                .baseUrl(baseUrl)
                 .requestFactory(requestFactory)
                 // 服务间内部接口鉴权（评审 doc P0-2）：配置令牌时为所有 /internal/feed/** 请求加 X-Internal-Token，
                 // 与引擎侧 InternalTokenInterceptor 共享同一密钥。未配置令牌则不加（fail-open 本地开发）。
@@ -97,9 +107,10 @@ public class FeedEngineClient {
                     }
                 })
                 .build();
-        log.info("Feed 引擎客户端初始化: baseUrl={}, connectTimeout={}, readTimeout={}, degradedMode={}, internalToken={}",
-                engine.getBaseUrl(), engine.getConnectTimeout(), engine.getReadTimeout(),
-                properties.getDegradedMode(), this.internalToken.isBlank() ? "未配置(fail-open)" : "已配置");
+        log.info("Feed 引擎客户端初始化: mode={}, baseUrl={}, connectTimeout={}, readTimeout={}, degradedMode={}, internalToken={}",
+                useDiscovery ? "服务发现(Nacos)" : "直连", baseUrl, engine.getConnectTimeout(),
+                engine.getReadTimeout(), properties.getDegradedMode(),
+                this.internalToken.isBlank() ? "未配置(fail-open)" : "已配置");
     }
 
     /**
