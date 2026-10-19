@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -14,11 +15,18 @@ import java.util.Optional;
  *
  * <p><b>分片路由</b>：{@code comment} 表分片键为 {@code media_id}（独立于 media 按 user_id
  * 分片），保证「读某条内容下所有评论」单分片命中；回复列表按 {@code root_id} 过滤，
- * {@code idx_media_root_created(media_id, root_id, created_at)} 覆盖顶层与楼中楼两种查询。</p>
+ * {@code idx_media_root_created(media_id, root_id, created_at, comment_id)} 覆盖顶层与楼中楼两种查询。</p>
+ *
+ * <p><b>深分页</b>：列表改为 keyset 游标（{@code (created_at, comment_id)} 范围查询），替代
+ * {@code OFFSET}——{@code OFFSET 100000} 需先扫描丢弃前 10 万行，数据量大时随深度线性退化；
+ * keyset 每次只从游标之后取 {@code LIMIT} 行，复杂度恒定为 O(LIMIT)，与翻页深度无关。</p>
  *
  * <p><b>commentId 生成</b>：应用层 {@link com.turbofeed.gateway.util.SnowflakeIdGenerator}，
  * 与 {@code UserService.userId} 同源（worker=1, datacenter=1）。ShardingSphere 的
  * {@code keyGenerateStrategy} 仅在 INSERT 不含 comment_id 时兜底，本路径始终显式带值。</p>
+ *
+ * <p><b>点赞计数</b>：不再在 DB 做 {@code like_count+1} 热行更新（高并发写放大 + 行锁），改由
+ * {@link CommentLikeService} 的 Redis 64 槽 Set 权威计数，DB {@code like_count} 仅作灾备冗余列。</p>
  */
 @Repository
 @RequiredArgsConstructor
@@ -49,30 +57,77 @@ public class CommentJdbcRepository {
     }
 
     /**
-     * 顶层评论列表（{@code rootId = 0}）。按 {@code created_at} 倒序，分页。
+     * 顶层评论列表（{@code rootId = 0}）最新一页（无游标，按 {@code created_at} 倒序）。
+     * 走索引 {@code idx_media_root_created} 的有序前缀，仅读 {@code LIMIT} 行，无深扫。
      */
-    public List<Comment> listTopLevel(String mediaId, int limit, long offset) {
+    public List<Comment> listTopLevelFresh(String mediaId, int limit) {
         return jdbcTemplate.query(
                 "SELECT " + COLUMNS + " FROM comment "
                         + "WHERE media_id = ? AND root_id = 0 AND status = ? "
-                        + "ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                MAPPER, mediaId, CommentStatus.APPROVED.code(), limit, offset);
+                        + "ORDER BY created_at DESC, comment_id DESC LIMIT ?",
+                MAPPER, mediaId, CommentStatus.APPROVED.code(), limit);
     }
 
     /**
-     * 某根评论下的全部回复（{@code root_id = R}）。按 {@code created_at} 正序（楼中楼时间线）。
+     * 顶层评论列表 keyset 游标页（{@code created_at, comment_id} 严格早于游标，倒序）。
+     * 复杂度 O(LIMIT)，与翻页深度无关。
      */
-    public List<Comment> listReplies(String mediaId, long rootId, int limit, long offset) {
+    public List<Comment> listTopLevelKeyset(String mediaId, int limit, Instant cursorCreatedAt, long cursorCommentId) {
+        return jdbcTemplate.query(
+                "SELECT " + COLUMNS + " FROM comment "
+                        + "WHERE media_id = ? AND root_id = 0 AND status = ? "
+                        + "AND (created_at < ? OR (created_at = ? AND comment_id < ?)) "
+                        + "ORDER BY created_at DESC, comment_id DESC LIMIT ?",
+                MAPPER, mediaId, CommentStatus.APPROVED.code(),
+                Timestamp.from(cursorCreatedAt), Timestamp.from(cursorCreatedAt), cursorCommentId, limit);
+    }
+
+    /**
+     * 某根评论下的全部回复（{@code root_id = R}）最新一页（无游标，按 {@code created_at} 正序，楼中楼时间线）。
+     */
+    public List<Comment> listRepliesFresh(String mediaId, long rootId, int limit) {
         return jdbcTemplate.query(
                 "SELECT " + COLUMNS + " FROM comment "
                         + "WHERE media_id = ? AND root_id = ? AND status = ? "
-                        + "ORDER BY created_at ASC LIMIT ? OFFSET ?",
-                MAPPER, mediaId, rootId, CommentStatus.APPROVED.code(), limit, offset);
+                        + "ORDER BY created_at ASC, comment_id ASC LIMIT ?",
+                MAPPER, mediaId, rootId, CommentStatus.APPROVED.code(), limit);
     }
 
-    public long countTopLevel(String mediaId) {
+    /**
+     * 某根评论下的回复 keyset 游标页（{@code created_at, comment_id} 严格晚于游标，正序）。
+     */
+    public List<Comment> listRepliesKeyset(String mediaId, long rootId, int limit, Instant cursorCreatedAt, long cursorCommentId) {
+        return jdbcTemplate.query(
+                "SELECT " + COLUMNS + " FROM comment "
+                        + "WHERE media_id = ? AND root_id = ? AND status = ? "
+                        + "AND (created_at > ? OR (created_at = ? AND comment_id > ?)) "
+                        + "ORDER BY created_at ASC, comment_id ASC LIMIT ?",
+                MAPPER, mediaId, rootId, CommentStatus.APPROVED.code(),
+                Timestamp.from(cursorCreatedAt), Timestamp.from(cursorCreatedAt), cursorCommentId, limit);
+    }
+
+    /**
+     * 按 commentId 批量取正文（热头 ZSET 桥接用）。带 {@code media_id} 分片键，单分片命中
+     * （{@code WHERE media_id=? AND comment_id IN(...)} 由 media_id 决定分片，IN 在该分片内做本地索引扫描，非广播）。
+     */
+    public List<Comment> listByIds(String mediaId, List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        String placeholders = ids.stream().map(i -> "?").collect(java.util.stream.Collectors.joining(",", "(", ")"));
+        String sql = "SELECT " + COLUMNS + " FROM comment WHERE media_id = ? AND comment_id IN " + placeholders;
+        Object[] args = new Object[ids.size() + 1];
+        args[0] = mediaId;
+        for (int i = 0; i < ids.size(); i++) {
+            args[i + 1] = ids.get(i);
+        }
+        return jdbcTemplate.query(sql, MAPPER, args);
+    }
+
+    /** 某内容下评论总数（顶层 + 回复，含 APPROVED）。冷启动 / Redis 缺失时由 {@link CommentCountService} 调用。 */
+    public long countAll(String mediaId) {
         Long c = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM comment WHERE media_id = ? AND root_id = 0 AND status = ?",
+                "SELECT COUNT(*) FROM comment WHERE media_id = ? AND status = ?",
                 Long.class, mediaId, CommentStatus.APPROVED.code());
         return c == null ? 0L : c;
     }
@@ -89,16 +144,6 @@ public class CommentJdbcRepository {
                 (rs, rn) -> new ParentLocation(rs.getLong("comment_id"), rs.getLong("root_id")),
                 parentId, mediaId);
         return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
-    }
-
-    /**
-     * 点赞 +1（用户维度去重留作扩展点：当前每次调用 +1，骨架阶段不维护「已点」集合）。
-     * 带 {@code media_id} 分片键，仅本人评论可被点赞（用户身份校验由 controller 负责）。
-     */
-    public int incrementLike(String mediaId, long commentId) {
-        return jdbcTemplate.update(
-                "UPDATE comment SET like_count = like_count + 1 WHERE comment_id = ? AND media_id = ?",
-                commentId, mediaId);
     }
 
     /** 父评论的位置（commentId + rootId），用于派生新回复的 rootId。 */

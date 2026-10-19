@@ -2837,7 +2837,7 @@ CREATE TABLE `turbo_feed_1`.`comment_0` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_0)';
 
@@ -2853,7 +2853,7 @@ CREATE TABLE `turbo_feed_2`.`comment_1` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_1)';
 
@@ -2869,7 +2869,7 @@ CREATE TABLE `turbo_feed_1`.`comment_2` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_2)';
 
@@ -2885,7 +2885,7 @@ CREATE TABLE `turbo_feed_2`.`comment_3` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_3)';
 
@@ -2901,7 +2901,7 @@ CREATE TABLE `turbo_feed_1`.`comment_4` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_4)';
 
@@ -2917,7 +2917,7 @@ CREATE TABLE `turbo_feed_2`.`comment_5` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_5)';
 
@@ -2933,7 +2933,7 @@ CREATE TABLE `turbo_feed_1`.`comment_6` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_6)';
 
@@ -2949,7 +2949,7 @@ CREATE TABLE `turbo_feed_2`.`comment_7` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_7)';
 
@@ -2965,7 +2965,7 @@ CREATE TABLE `turbo_feed_1`.`comment_8` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_8)';
 
@@ -2981,7 +2981,7 @@ CREATE TABLE `turbo_feed_2`.`comment_9` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_9)';
 
@@ -2997,7 +2997,7 @@ CREATE TABLE `turbo_feed_1`.`comment_10` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_10)';
 
@@ -3013,7 +3013,7 @@ CREATE TABLE `turbo_feed_2`.`comment_11` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_11)';
 
@@ -3029,7 +3029,7 @@ CREATE TABLE `turbo_feed_1`.`comment_12` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_12)';
 
@@ -3045,7 +3045,7 @@ CREATE TABLE `turbo_feed_2`.`comment_13` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_13)';
 
@@ -3061,7 +3061,7 @@ CREATE TABLE `turbo_feed_1`.`comment_14` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_14)';
 
@@ -3077,7 +3077,7 @@ CREATE TABLE `turbo_feed_2`.`comment_15` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_15)';
 
@@ -3093,7 +3093,7 @@ CREATE TABLE `turbo_feed_1`.`comment_16` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_16)';
 
@@ -3109,7 +3109,7 @@ CREATE TABLE `turbo_feed_2`.`comment_17` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_17)';
 
@@ -3125,7 +3125,7 @@ CREATE TABLE `turbo_feed_1`.`comment_18` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_18)';
 
@@ -3141,7 +3141,7 @@ CREATE TABLE `turbo_feed_2`.`comment_19` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_19)';
 
@@ -3157,7 +3157,7 @@ CREATE TABLE `turbo_feed_1`.`comment_20` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_20)';
 
@@ -3173,7 +3173,7 @@ CREATE TABLE `turbo_feed_2`.`comment_21` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_21)';
 
@@ -3189,7 +3189,7 @@ CREATE TABLE `turbo_feed_1`.`comment_22` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_22)';
 
@@ -3205,7 +3205,7 @@ CREATE TABLE `turbo_feed_2`.`comment_23` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_23)';
 
@@ -3221,7 +3221,7 @@ CREATE TABLE `turbo_feed_1`.`comment_24` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_24)';
 
@@ -3237,7 +3237,7 @@ CREATE TABLE `turbo_feed_2`.`comment_25` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_25)';
 
@@ -3253,7 +3253,7 @@ CREATE TABLE `turbo_feed_1`.`comment_26` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_26)';
 
@@ -3269,7 +3269,7 @@ CREATE TABLE `turbo_feed_2`.`comment_27` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_27)';
 
@@ -3285,7 +3285,7 @@ CREATE TABLE `turbo_feed_1`.`comment_28` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_28)';
 
@@ -3301,7 +3301,7 @@ CREATE TABLE `turbo_feed_2`.`comment_29` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_29)';
 
@@ -3317,7 +3317,7 @@ CREATE TABLE `turbo_feed_1`.`comment_30` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_30)';
 
@@ -3333,7 +3333,7 @@ CREATE TABLE `turbo_feed_2`.`comment_31` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_31)';
 
@@ -3349,7 +3349,7 @@ CREATE TABLE `turbo_feed_1`.`comment_32` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_32)';
 
@@ -3365,7 +3365,7 @@ CREATE TABLE `turbo_feed_2`.`comment_33` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_33)';
 
@@ -3381,7 +3381,7 @@ CREATE TABLE `turbo_feed_1`.`comment_34` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_34)';
 
@@ -3397,7 +3397,7 @@ CREATE TABLE `turbo_feed_2`.`comment_35` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_35)';
 
@@ -3413,7 +3413,7 @@ CREATE TABLE `turbo_feed_1`.`comment_36` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_36)';
 
@@ -3429,7 +3429,7 @@ CREATE TABLE `turbo_feed_2`.`comment_37` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_37)';
 
@@ -3445,7 +3445,7 @@ CREATE TABLE `turbo_feed_1`.`comment_38` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_38)';
 
@@ -3461,7 +3461,7 @@ CREATE TABLE `turbo_feed_2`.`comment_39` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_39)';
 
@@ -3477,7 +3477,7 @@ CREATE TABLE `turbo_feed_1`.`comment_40` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_40)';
 
@@ -3493,7 +3493,7 @@ CREATE TABLE `turbo_feed_2`.`comment_41` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_41)';
 
@@ -3509,7 +3509,7 @@ CREATE TABLE `turbo_feed_1`.`comment_42` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_42)';
 
@@ -3525,7 +3525,7 @@ CREATE TABLE `turbo_feed_2`.`comment_43` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_43)';
 
@@ -3541,7 +3541,7 @@ CREATE TABLE `turbo_feed_1`.`comment_44` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_44)';
 
@@ -3557,7 +3557,7 @@ CREATE TABLE `turbo_feed_2`.`comment_45` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_45)';
 
@@ -3573,7 +3573,7 @@ CREATE TABLE `turbo_feed_1`.`comment_46` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_46)';
 
@@ -3589,7 +3589,7 @@ CREATE TABLE `turbo_feed_2`.`comment_47` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_47)';
 
@@ -3605,7 +3605,7 @@ CREATE TABLE `turbo_feed_1`.`comment_48` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_48)';
 
@@ -3621,7 +3621,7 @@ CREATE TABLE `turbo_feed_2`.`comment_49` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_49)';
 
@@ -3637,7 +3637,7 @@ CREATE TABLE `turbo_feed_1`.`comment_50` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_50)';
 
@@ -3653,7 +3653,7 @@ CREATE TABLE `turbo_feed_2`.`comment_51` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_51)';
 
@@ -3669,7 +3669,7 @@ CREATE TABLE `turbo_feed_1`.`comment_52` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_52)';
 
@@ -3685,7 +3685,7 @@ CREATE TABLE `turbo_feed_2`.`comment_53` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_53)';
 
@@ -3701,7 +3701,7 @@ CREATE TABLE `turbo_feed_1`.`comment_54` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_54)';
 
@@ -3717,7 +3717,7 @@ CREATE TABLE `turbo_feed_2`.`comment_55` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_55)';
 
@@ -3733,7 +3733,7 @@ CREATE TABLE `turbo_feed_1`.`comment_56` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_56)';
 
@@ -3749,7 +3749,7 @@ CREATE TABLE `turbo_feed_2`.`comment_57` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_57)';
 
@@ -3765,7 +3765,7 @@ CREATE TABLE `turbo_feed_1`.`comment_58` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_58)';
 
@@ -3781,7 +3781,7 @@ CREATE TABLE `turbo_feed_2`.`comment_59` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_59)';
 
@@ -3797,7 +3797,7 @@ CREATE TABLE `turbo_feed_1`.`comment_60` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_60)';
 
@@ -3813,7 +3813,7 @@ CREATE TABLE `turbo_feed_2`.`comment_61` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_61)';
 
@@ -3829,7 +3829,7 @@ CREATE TABLE `turbo_feed_1`.`comment_62` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_62)';
 
@@ -3845,7 +3845,7 @@ CREATE TABLE `turbo_feed_2`.`comment_63` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_63)';
 
@@ -3861,7 +3861,7 @@ CREATE TABLE `turbo_feed_1`.`comment_64` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_64)';
 
@@ -3877,7 +3877,7 @@ CREATE TABLE `turbo_feed_2`.`comment_65` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_65)';
 
@@ -3893,7 +3893,7 @@ CREATE TABLE `turbo_feed_1`.`comment_66` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_66)';
 
@@ -3909,7 +3909,7 @@ CREATE TABLE `turbo_feed_2`.`comment_67` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_67)';
 
@@ -3925,7 +3925,7 @@ CREATE TABLE `turbo_feed_1`.`comment_68` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_68)';
 
@@ -3941,7 +3941,7 @@ CREATE TABLE `turbo_feed_2`.`comment_69` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_69)';
 
@@ -3957,7 +3957,7 @@ CREATE TABLE `turbo_feed_1`.`comment_70` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_70)';
 
@@ -3973,7 +3973,7 @@ CREATE TABLE `turbo_feed_2`.`comment_71` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_71)';
 
@@ -3989,7 +3989,7 @@ CREATE TABLE `turbo_feed_1`.`comment_72` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_72)';
 
@@ -4005,7 +4005,7 @@ CREATE TABLE `turbo_feed_2`.`comment_73` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_73)';
 
@@ -4021,7 +4021,7 @@ CREATE TABLE `turbo_feed_1`.`comment_74` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_74)';
 
@@ -4037,7 +4037,7 @@ CREATE TABLE `turbo_feed_2`.`comment_75` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_75)';
 
@@ -4053,7 +4053,7 @@ CREATE TABLE `turbo_feed_1`.`comment_76` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_76)';
 
@@ -4069,7 +4069,7 @@ CREATE TABLE `turbo_feed_2`.`comment_77` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_77)';
 
@@ -4085,7 +4085,7 @@ CREATE TABLE `turbo_feed_1`.`comment_78` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_78)';
 
@@ -4101,7 +4101,7 @@ CREATE TABLE `turbo_feed_2`.`comment_79` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_79)';
 
@@ -4117,7 +4117,7 @@ CREATE TABLE `turbo_feed_1`.`comment_80` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_80)';
 
@@ -4133,7 +4133,7 @@ CREATE TABLE `turbo_feed_2`.`comment_81` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_81)';
 
@@ -4149,7 +4149,7 @@ CREATE TABLE `turbo_feed_1`.`comment_82` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_82)';
 
@@ -4165,7 +4165,7 @@ CREATE TABLE `turbo_feed_2`.`comment_83` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_83)';
 
@@ -4181,7 +4181,7 @@ CREATE TABLE `turbo_feed_1`.`comment_84` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_84)';
 
@@ -4197,7 +4197,7 @@ CREATE TABLE `turbo_feed_2`.`comment_85` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_85)';
 
@@ -4213,7 +4213,7 @@ CREATE TABLE `turbo_feed_1`.`comment_86` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_86)';
 
@@ -4229,7 +4229,7 @@ CREATE TABLE `turbo_feed_2`.`comment_87` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_87)';
 
@@ -4245,7 +4245,7 @@ CREATE TABLE `turbo_feed_1`.`comment_88` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_88)';
 
@@ -4261,7 +4261,7 @@ CREATE TABLE `turbo_feed_2`.`comment_89` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_89)';
 
@@ -4277,7 +4277,7 @@ CREATE TABLE `turbo_feed_1`.`comment_90` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_90)';
 
@@ -4293,7 +4293,7 @@ CREATE TABLE `turbo_feed_2`.`comment_91` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_91)';
 
@@ -4309,7 +4309,7 @@ CREATE TABLE `turbo_feed_1`.`comment_92` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_92)';
 
@@ -4325,7 +4325,7 @@ CREATE TABLE `turbo_feed_2`.`comment_93` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_93)';
 
@@ -4341,7 +4341,7 @@ CREATE TABLE `turbo_feed_1`.`comment_94` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_94)';
 
@@ -4357,7 +4357,7 @@ CREATE TABLE `turbo_feed_2`.`comment_95` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_95)';
 
@@ -4373,7 +4373,7 @@ CREATE TABLE `turbo_feed_1`.`comment_96` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_96)';
 
@@ -4389,7 +4389,7 @@ CREATE TABLE `turbo_feed_2`.`comment_97` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_97)';
 
@@ -4405,7 +4405,7 @@ CREATE TABLE `turbo_feed_1`.`comment_98` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_98)';
 
@@ -4421,7 +4421,7 @@ CREATE TABLE `turbo_feed_2`.`comment_99` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_99)';
 
@@ -4437,7 +4437,7 @@ CREATE TABLE `turbo_feed_1`.`comment_100` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_100)';
 
@@ -4453,7 +4453,7 @@ CREATE TABLE `turbo_feed_2`.`comment_101` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_101)';
 
@@ -4469,7 +4469,7 @@ CREATE TABLE `turbo_feed_1`.`comment_102` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_102)';
 
@@ -4485,7 +4485,7 @@ CREATE TABLE `turbo_feed_2`.`comment_103` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_103)';
 
@@ -4501,7 +4501,7 @@ CREATE TABLE `turbo_feed_1`.`comment_104` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_104)';
 
@@ -4517,7 +4517,7 @@ CREATE TABLE `turbo_feed_2`.`comment_105` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_105)';
 
@@ -4533,7 +4533,7 @@ CREATE TABLE `turbo_feed_1`.`comment_106` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_106)';
 
@@ -4549,7 +4549,7 @@ CREATE TABLE `turbo_feed_2`.`comment_107` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_107)';
 
@@ -4565,7 +4565,7 @@ CREATE TABLE `turbo_feed_1`.`comment_108` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_108)';
 
@@ -4581,7 +4581,7 @@ CREATE TABLE `turbo_feed_2`.`comment_109` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_109)';
 
@@ -4597,7 +4597,7 @@ CREATE TABLE `turbo_feed_1`.`comment_110` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_110)';
 
@@ -4613,7 +4613,7 @@ CREATE TABLE `turbo_feed_2`.`comment_111` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_111)';
 
@@ -4629,7 +4629,7 @@ CREATE TABLE `turbo_feed_1`.`comment_112` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_112)';
 
@@ -4645,7 +4645,7 @@ CREATE TABLE `turbo_feed_2`.`comment_113` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_113)';
 
@@ -4661,7 +4661,7 @@ CREATE TABLE `turbo_feed_1`.`comment_114` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_114)';
 
@@ -4677,7 +4677,7 @@ CREATE TABLE `turbo_feed_2`.`comment_115` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_115)';
 
@@ -4693,7 +4693,7 @@ CREATE TABLE `turbo_feed_1`.`comment_116` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_116)';
 
@@ -4709,7 +4709,7 @@ CREATE TABLE `turbo_feed_2`.`comment_117` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_117)';
 
@@ -4725,7 +4725,7 @@ CREATE TABLE `turbo_feed_1`.`comment_118` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_118)';
 
@@ -4741,7 +4741,7 @@ CREATE TABLE `turbo_feed_2`.`comment_119` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_119)';
 
@@ -4757,7 +4757,7 @@ CREATE TABLE `turbo_feed_1`.`comment_120` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_120)';
 
@@ -4773,7 +4773,7 @@ CREATE TABLE `turbo_feed_2`.`comment_121` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_121)';
 
@@ -4789,7 +4789,7 @@ CREATE TABLE `turbo_feed_1`.`comment_122` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_122)';
 
@@ -4805,7 +4805,7 @@ CREATE TABLE `turbo_feed_2`.`comment_123` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_123)';
 
@@ -4821,7 +4821,7 @@ CREATE TABLE `turbo_feed_1`.`comment_124` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_124)';
 
@@ -4837,7 +4837,7 @@ CREATE TABLE `turbo_feed_2`.`comment_125` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_125)';
 
@@ -4853,7 +4853,7 @@ CREATE TABLE `turbo_feed_1`.`comment_126` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_1.comment_126)';
 
@@ -4869,7 +4869,7 @@ CREATE TABLE `turbo_feed_2`.`comment_127` (
   `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '创建时间',
   `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`comment_id`),
-  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`),
+  KEY `idx_media_root_created` (`media_id`, `root_id`, `created_at`, `comment_id`),
   KEY `idx_user_created` (`user_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='comment(物理分片 turbo_feed_2.comment_127)';
 

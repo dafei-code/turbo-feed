@@ -152,6 +152,20 @@ rules:
         keyGenerateStrategy:
           column: id
           keyGeneratorName: snowflake
+      # 逻辑表 comment_like：评论点赞持久化（抖音式 per-user 去重兜底，与 media 点赞镜像）。
+      # 分片键 media_id（与 comment 表同维度，保证「读某条内容下所有点赞」单分片命中），
+      # hashMod128 与 comment 同策略（④ 扩容 4->128）；物理表 comment_like_0..127 由 SS autoTables
+      # 依 HASH_MOD(128) 推断（偶数下标 ds_0=turbo_feed_1、奇数 ds_1=turbo_feed_2）。
+      # Redis 64 槽 Set tf:comment:liked:{commentId} 为去重权威，本表为持久化兜底（Redis 重启可据表重建）。
+      comment_like:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: media_id
+            shardingAlgorithmName: hashMod128
+        keyGenerateStrategy:
+          column: id
+          keyGeneratorName: snowflake
       # 逻辑表 user_follow：关注关系(我关注了谁)，分片键 user_id，hashMod128 与 media 同规模（④ 同款扩容）。
       # 偶数下标落 ds_0(turbo_feed_1)、奇数落 ds_1(turbo_feed_2)；Redis ZSET tf:follow:{userId} 为读源(供 G6 关注流)，本表为持久化兜底。
       user_follow:
