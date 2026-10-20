@@ -1257,6 +1257,46 @@ public class FeedTimelineStore {
     }
 
     /**
+     * 取某内容的<b>入流排序位</b>（{@code approvedAt} 的 epoch 毫秒，即它在时间线桶里的 score）。
+     *
+     * <p><b>为什么需要这个读口</b>：标签倒排的 SET 版本与 ZSET 版本是分批上线的——先有 SET，
+     * ZSET 是搜索上线时才补的。于是<b>存量内容只有 SET 成员、没有 ZSET 分数</b>：搜索结果
+     * {@code ZREVRANGEBYSCORE} 读不到它们，表现为「老帖搜不到」。回填时唯一的权威分数来源
+     * 就是这里——反查索引 {@code tf:feed:idx:{timelineKey}} 指出所在桶与成员串，再
+     * {@code ZSCORE} 取回入流时刻。</p>
+     *
+     * <p><b>为什么不用 {@code FeedItemView} 里的时间字段</b>：入流时间由 {@code appendStrict}
+     * 用 {@code Instant.now()} 生成，<b>不来自条目本身</b>；条目上的创建时间与入流时间可能
+     * 相差一次审核往返。回填必须与线上写入口径完全一致，否则同一话题下新旧内容的相对顺序会错。</p>
+     *
+     * @param timelineKey 内容身份（postId，历史数据回退 mediaId）
+     * @return 入流时刻毫秒；未入流 / 索引已过期 / 反查索引损坏时返回 {@code null}
+     *         （调用方据此跳过该成员——它本来也不在可服务窗口内）
+     */
+    public Long inflowScoreOf(String timelineKey) {
+        if (timelineKey == null || timelineKey.isBlank()) {
+            return null;
+        }
+        try {
+            String location = redisTemplate.opsForValue().get(IDX_PREFIX + timelineKey);
+            if (location == null) {
+                return null;
+            }
+            int sep = location.indexOf(IDX_SEP);
+            if (sep <= 0) {
+                return null;
+            }
+            String bucketKey = location.substring(0, sep);
+            String member = location.substring(sep + IDX_SEP.length());
+            Double score = redisTemplate.opsForZSet().score(bucketKey, member);
+            return score == null ? null : score.longValue();
+        } catch (Exception e) {
+            log.warn("读入流排序位失败（回填时跳过该条）: timelineKey={}, {}", timelineKey, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * 按反查索引把内容从原桶摘除，并按需删除索引本身。
      *
      * <p>{@code append} 内部复用它做「先摘旧位置」——此时传 {@code null} 只摘除、保留索引，
