@@ -2,6 +2,7 @@ package com.turbofeed.gateway.service.counter;
 
 import com.turbofeed.gateway.config.CounterProperties;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -30,7 +31,7 @@ public class CounterPublisherConfig {
         static class HttpBranch {
             @Bean
             public HttpCounterEventPublisher httpCounterEventPublisher(CounterProperties props,
-                                                                        RestClient.Builder restClientBuilder,
+                                                                        @Qualifier("directRestClientBuilder") RestClient.Builder restClientBuilder,
                                                                         @Value("${turbofeed.internal.token:}") String internalToken) {
                 return new HttpCounterEventPublisher(props, restClientBuilder, internalToken);
             }

@@ -9,6 +9,7 @@ import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.model.PlayableView;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.http.HttpHeaders;
@@ -69,19 +70,25 @@ public class FeedEngineClient {
     private final String internalToken;
 
     /**
-     * 使用 Spring Boot 自动装配的 {@link RestClient.Builder}（prototype 作用域，故 clone 后使用）：
-     * 它与应用共享同一套消息转换器与 {@code ObjectMapper}——这一点是必需的，
+     * 直连分支用 {@code directRestClientBuilder}（{@code ServiceDiscoveryRestClientConfig}
+     * 显式声明的直连 builder）：它与应用共享同一套消息转换器与 {@code ObjectMapper}——这一点是必需的，
      * 契约里的 {@code createdAt} 是 {@code Instant}，只有应用级 mapper 才注册了 JSR-310 模块，
      * 否则日期字段会以时间戳数组形式写出、引擎侧解析失败。
      *
+     * <p><b>为什么必须显式限定</b>：Boot 的 plain builder 因本工程自定义了
+     * {@code RestClient.Builder} Bean 而 {@code @ConditionalOnMissingBean} 退避，
+     * 上下文中 builder 候选只剩/仅有显式声明的两个——不加限定符会因双候选歧义启动失败，
+     * 误注入 {@code @LoadBalanced} 版则直连模式被 LB 拦截
+     * （{@code No instances available for host}）。</p>
+     *
      * <p><b>服务发现切换</b>：当 {@code engine.serviceName} 非空时改用 {@code @LoadBalanced}
      * builder + {@code baseUrl("http://" + serviceName)}，由 Nacos 注册表解析真实实例
-     * （健康检查 + 负载均衡 + 故障摘除）；为空时走 plain builder 直连 {@code baseUrl}，与改造前一致。
+     * （健康检查 + 负载均衡 + 故障摘除）；为空时走直连 builder 直连 {@code baseUrl}。
      * 见 {@code ServiceDiscoveryRestClientConfig}。</p>
      */
     public FeedEngineClient(FeedEngineProperties properties,
                             ObjectMapper objectMapper,
-                            RestClient.Builder restClientBuilder,
+                            @Qualifier("directRestClientBuilder") RestClient.Builder restClientBuilder,
                             @LoadBalanced RestClient.Builder lbRestClientBuilder,
                             FeedDeliveryHealth health,
                             @Value("${turbofeed.internal.token:}") String internalToken) {

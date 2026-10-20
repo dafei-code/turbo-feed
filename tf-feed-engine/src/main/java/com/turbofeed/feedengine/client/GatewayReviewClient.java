@@ -1,6 +1,7 @@
 package com.turbofeed.feedengine.client;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.http.HttpHeaders;
@@ -39,17 +40,22 @@ public class GatewayReviewClient {
     private final String internalToken;
 
     /**
-     * 直连形态（默认）：用 Boot 自动装配的 plain {@link RestClient.Builder} + {@code base-url}。
+     * 直连形态（默认）：用 {@code directRestClientBuilder}（{@code ServiceDiscoveryRestClientConfig}
+     * 显式声明的直连 builder）+ {@code base-url}。
      * 服务发现形态：当 {@code serviceName} 非空时改用 {@code @LoadBalanced} builder +
      * {@code baseUrl("http://" + serviceName)}，由 Nacos 注册表解析真实网关实例。
      * 注入的两个 builder 由 {@code ServiceDiscoveryRestClientConfig} 提供（共存、按需选用）。
+     * <p><b>为什么必须显式限定</b>：Boot 的 plain builder 因本工程自定义了
+     * {@code RestClient.Builder} Bean 而 {@code @ConditionalOnMissingBean} 退避，
+     * 上下文中 builder 候选只剩显式声明的两个——不加限定符会因双候选歧义启动失败，
+     * 误注入 {@code @LoadBalanced} 版则直连模式被 LB 拦截。</p>
      */
     public GatewayReviewClient(@Value("${turbofeed.gateway.base-url:http://localhost:8080}") String baseUrl,
                                @Value("${turbofeed.gateway.service-name:}") String serviceName,
                                @Value("${turbofeed.gateway.connect-timeout-ms:500}") int connectTimeoutMs,
                                @Value("${turbofeed.gateway.read-timeout-ms:2000}") int readTimeoutMs,
                                @Value("${turbofeed.internal.token:}") String internalToken,
-                               RestClient.Builder restClientBuilder,
+                               @Qualifier("directRestClientBuilder") RestClient.Builder restClientBuilder,
                                @LoadBalanced RestClient.Builder lbRestClientBuilder) {
         this.baseUrl = baseUrl;
         this.serviceName = serviceName == null ? "" : serviceName;
