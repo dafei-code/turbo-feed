@@ -385,8 +385,14 @@ public class SearchService {
         }
     }
 
-    /** 归一化话题：去 {@code #}、去空白、转小写（与 {@code CaptionTagParser} 的写入口径一致）。 */
-    static String normalizeTag(String raw) {
+    /**
+     * 归一化话题：去 {@code #}、去空白、转小写（与 {@code CaptionTagParser} 的写入口径一致）。
+     *
+     * <p>{@code public} 是为了让 {@code HotSearchService} 复用<b>同一份</b>归一化实现：
+     * 热搜榜的 key 与倒排索引的 key 必须逐字一致，若各写一份，改口径时必然有一边漏改，
+     * 表现为「榜上有词、点进去搜不到」。</p>
+     */
+    public static String normalizeTag(String raw) {
         if (raw == null) {
             return "";
         }
