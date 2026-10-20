@@ -8,6 +8,7 @@ import com.turbofeed.gateway.service.search.SearchService;
 import com.turbofeed.gateway.service.search.SuggestResult;
 import com.turbofeed.shared.result.Result;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -15,13 +16,14 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 搜索接口（对外 {@code /api/**}）。
  *
- * <p><b>鉴权</b>：匿名可读——与评论列表同款。搜索是浏览行为的前置，强制登录会挡住内容发现；
+ * <p><b>鉴权</b>：匿名可读/可上报——与评论列表同款。搜索是浏览行为的前置，强制登录会挡住内容发现；
  * 但结果<b>必然经过审核过滤</b>（见 {@link SearchService}），不存在「匿名就能搜到违规内容」的路径。</p>
  *
- * <p><b>四个端点</b>（S1–S4）：{@code /tag} 话题搜索、{@code /user} 用户搜索、
- * {@code /suggest} 前缀联想、{@code /hot} 热搜榜。前三个读索引，第四个读统计。</p>
+ * <p><b>五个端点</b>（S1–S4）：{@code /tag} 话题搜索、{@code /user} 用户搜索、
+ * {@code /suggest} 前缀联想、{@code /hot} 热搜榜、{@code /hit} 搜索结果点击上报。
+ * 前三个读索引，后两个是统计链路。</p>
  *
- * <p><b>热搜埋点为什么放在 Controller 而不是 Service</b>：计入与否取决于「这一页到底有没有结果」
+ * <p><b>埋点为什么放在 Controller 而不是 Service</b>：计入与否取决于「这一页到底有没有结果」
  * ——那是接口层的判定（{@code total > 0}）。若下沉进 {@link SearchService}，搜索服务就得同时
  * 承担「读索引」和「记统计」两种职责，且单测要为一个旁路统计额外 mock 一套 Redis 键。
  * 埋点失败在这里是纯 fail-open（{@link HotSearchService} 内部吞异常），不影响返回。</p>
@@ -85,7 +87,7 @@ public class SearchController {
     }
 
     /**
-     * 热搜榜（S4）：最近 7 天合并，按累计搜索次数降序。
+     * 热搜榜（S4）：最近 7 天合并，按「搜索次数 + 点击次数 × 权重」降序。
      *
      * <p>匿名可读。榜单为空是正常状态（新部署 / 窗口内无搜索），不是错误。</p>
      *
@@ -94,6 +96,27 @@ public class SearchController {
     @GetMapping("/hot")
     public Result<HotSearchResult> hot(@RequestParam(value = "limit", defaultValue = "10") int limit) {
         return Result.ok(hotSearchService.top(limit));
+    }
+
+    /**
+     * 搜索结果点击上报（S4）：客户端在用户从搜索结果页点进内容时调用。
+     *
+     * <p><b>为什么必须走接口而不是客户端直接写 Redis</b>：① 需要服务端校验这个词
+     * {@link SearchService#tagExists(String)} 真的有内容，否则任何人都能凭空造词刷榜；
+     * ② 需要服务端做同人同词去重；③ Redis 不该对客户端可写。</p>
+     *
+     * <p><b>幂等与容错</b>：重复上报被 60s 去重吃掉；任何异常都在
+     * {@link HotSearchService} 内部吞掉，本接口恒返回成功——统计上报失败不该让用户看到报错。</p>
+     *
+     * @param tag 被点击的搜索词（可带 {@code #}，大小写不敏感）
+     */
+    @PostMapping("/hit")
+    public Result<Void> hit(@RequestParam(value = "tag", defaultValue = "") String tag) {
+        // 准入：词必须真的有内容。这是点击上报唯一的真实性保障，不能省
+        if (searchService.tagExists(tag)) {
+            hotSearchService.recordClick(currentUserKey(), tag);
+        }
+        return Result.ok();
     }
 
     /**

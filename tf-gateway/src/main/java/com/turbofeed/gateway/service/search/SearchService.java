@@ -228,6 +228,33 @@ public class SearchService {
         }
     }
 
+    /**
+     * 该话题在有序倒排里是否<b>真的有内容</b>（只问「有没有」，不取内容）。
+     *
+     * <p><b>用途：热搜点击上报的准入校验。</b>点击是客户端上报的，若不做校验，
+     * 任何人都能凭空造一个词反复上报，把它顶上榜首——榜单上会出现点进去什么都没有的幽灵词。
+     * 有了这条校验，能进榜的词<b>必然是索引里真实存在的话题</b>。</p>
+     *
+     * <p><b>fail-close</b>：读不到索引时按「不存在」处理。统计少记一次无损失，
+     * 放一个可疑词进榜才是麻烦。</p>
+     *
+     * @param rawTag 话题词（可带 {@code #}，大小写不敏感）
+     * @return 索引里有至少一条内容才返回 {@code true}
+     */
+    public boolean tagExists(String rawTag) {
+        String tag = normalizeTag(rawTag);
+        if (tag.isEmpty()) {
+            return false;
+        }
+        try {
+            Long n = redis.opsForZSet().zCard(ORDERED_KEY_PREFIX + tag);
+            return n != null && n > 0;
+        } catch (Exception e) {
+            log.warn("话题存在性校验失败（按无内容处理）: tag={}, {}", tag, e.getMessage());
+            return false;
+        }
+    }
+
     /** 在 {@code {type}:{prefix}} 区间做字典序范围取（上限 {@code \uffff} 覆盖全部常见字符）。 */
     private void collectLex(String typePrefix, String prefix, int limit, String type,
                             List<SuggestResult.Item> out) {
