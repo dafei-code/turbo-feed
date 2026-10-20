@@ -95,7 +95,7 @@ public class SearchRebuildService {
                     "SELECT DISTINCT tag FROM media_tag LIMIT " + cap, String.class);
         } catch (RuntimeException e) {
             log.warn("重建话题词典失败（读 media_tag 出错）: {}", e.getMessage());
-            return new RebuildReport("tag-lexicon", dryRun, 0, 0, 0, 0,
+            return new RebuildReport("tag-lexicon", dryRun, 0, 0, 0, 0, 0,
                     System.currentTimeMillis() - start, "读 media_tag 失败：" + e.getMessage());
         }
         int scanned = 0;
@@ -118,7 +118,7 @@ public class SearchRebuildService {
                 log.warn("写话题词典失败（跳过该词）: tag={}, {}", tag, e.getMessage());
             }
         }
-        return new RebuildReport("tag-lexicon", dryRun, scanned, written, skipped, 0,
+        return new RebuildReport("tag-lexicon", dryRun, scanned, written, skipped, 0, 0,
                 System.currentTimeMillis() - start, null);
     }
 
@@ -138,7 +138,7 @@ public class SearchRebuildService {
                             + "AND nickname IS NOT NULL AND nickname <> '' LIMIT " + cap);
         } catch (RuntimeException e) {
             log.warn("重建用户索引失败（读 user 出错）: {}", e.getMessage());
-            return new RebuildReport("user-index", dryRun, 0, 0, 0, 0,
+            return new RebuildReport("user-index", dryRun, 0, 0, 0, 0, 0,
                     System.currentTimeMillis() - start, "读 user 失败：" + e.getMessage());
         }
         int scanned = 0;
@@ -164,7 +164,7 @@ public class SearchRebuildService {
             indexWriter.indexUser(id.longValue(), nickname);
             written++;
         }
-        return new RebuildReport("user-index", dryRun, scanned, written, skipped, 0,
+        return new RebuildReport("user-index", dryRun, scanned, written, skipped, 0, 0,
                 System.currentTimeMillis() - start, null);
     }
 
@@ -192,7 +192,7 @@ public class SearchRebuildService {
                                 + "ORDER BY created_at DESC LIMIT " + PAGE, cursor);
             } catch (RuntimeException e) {
                 log.warn("重建标签倒排中断（已写入部分不回滚）: {}", e.getMessage());
-                return new RebuildReport("tag-index", dryRun, scanned, written, skipped, 0,
+                return new RebuildReport("tag-index", dryRun, scanned, written, skipped, 0, 0,
                         System.currentTimeMillis() - start, "读 media_tag 中断：" + e.getMessage());
             }
             if (rows.isEmpty()) {
@@ -256,7 +256,7 @@ public class SearchRebuildService {
             }
         }
         return new RebuildReport("tag-index", dryRun, scanned, written, skipped,
-                touched.size(), System.currentTimeMillis() - start, null);
+                touched.size(), 0, System.currentTimeMillis() - start, null);
     }
 
     /** 统一空值处理：DB 的 {@code VARCHAR} 取出来可能是 null。 */
@@ -277,8 +277,9 @@ public class SearchRebuildService {
      * @param written   实际写入的条数
      * @param skipped   因数据不合法跳过的条数
      * @param keys      涉及到的 Redis 键数（tag-index 为标签数）
+     * @param shards    完成的分片数（仅 {@code tag-index-sharded} 有效，其余为 0）
      * @param elapsedMs 耗时
-     * @param note      异常说明；正常为 {@code null}
+     * @param note      异常说明 / 总结；正常为 {@code null}
      */
     public record RebuildReport(String scope,
                                 boolean dryRun,
@@ -286,6 +287,7 @@ public class SearchRebuildService {
                                 int written,
                                 int skipped,
                                 int keys,
+                                int shards,
                                 long elapsedMs,
                                 String note) {
     }

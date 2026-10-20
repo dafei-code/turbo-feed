@@ -3,6 +3,7 @@ package com.turbofeed.gateway.controller;
 import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
 import com.turbofeed.gateway.service.search.SearchRebuildService;
+import com.turbofeed.gateway.service.search.SearchShardRebuildService;
 import com.turbofeed.shared.result.Result;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,7 +17,7 @@ import java.util.List;
  * 搜索索引运维接口（后台，需 {@link Permission#SYSTEM_CONFIG}，当前仅 ADMIN 持有）。
  *
  * <p><b>为什么必须挂在 {@code /api/admin/**} 而不是跟搜索接口放一起</b>：这里的每条重建都会
- * 对 128 张物理分片做<b>广播全表扫描</b>。它绝不能出现在用户请求路径上——一次误触发就是
+ * 对 128 张物理分片做<b>全表扫描</b>。它绝不能出现在用户请求路径上——一次误触发就是
  * 一次全库扫描。{@code /api/admin/**} 由 {@code PermissionInterceptor} 按注解鉴权，
  * 天然把外部请求挡在门外。</p>
  *
@@ -28,37 +29,48 @@ import java.util.List;
 public class SearchAdminController {
 
     private final SearchRebuildService rebuildService;
+    private final SearchShardRebuildService shardRebuildService;
 
-    public SearchAdminController(SearchRebuildService rebuildService) {
+    public SearchAdminController(SearchRebuildService rebuildService,
+                                 SearchShardRebuildService shardRebuildService) {
         this.rebuildService = rebuildService;
+        this.shardRebuildService = shardRebuildService;
     }
 
     /**
      * 重建搜索索引。
      *
-     * @param scope   重建范围：
-     *                <ul>
-     *                  <li>{@code tag-lexicon} —— 话题联想词典（{@code media_tag} 去重标签）；</li>
-     *                  <li>{@code user-index} —— 用户昵称索引 + 用户联想词（{@code user} 表）；</li>
-     *                  <li>{@code tag-index} —— 标签有序倒排（让 7 天外的老内容重新可搜）；</li>
-     *                  <li>{@code all} —— 三者依次执行。</li>
-     *                </ul>
-     * @param dryRun  只统计不写入（默认 {@code true}）
-     * @param maxRows 单次最多处理的行数（默认 5000，防一次跑太久）
-     * @return 各范围的重建报告；{@code all} 时返回第一条为汇总、其余按顺序排列的列表
+     * @param scope       重建范围：
+     *                    <ul>
+     *                      <li>{@code tag-lexicon} —— 话题联想词典（{@code media_tag} 去重标签）；</li>
+     *                      <li>{@code user-index} —— 用户昵称索引 + 用户联想词（{@code user} 表）；</li>
+     *                      <li>{@code tag-index} —— 标签有序倒排（让 7 天外的老内容重新可搜），逻辑表广播版；</li>
+     *                      <li>{@code tag-index-sharded} —— 同上，但按 128 个物理分片并行、主键游标、可断点续跑；</li>
+     *                      <li>{@code all} —— 前三个依次执行（不含分片版）。</li>
+     *                    </ul>
+     * @param dryRun      只统计不写入（默认 {@code true}）
+     * @param maxRows     单次最多处理的行数（默认 5000，防一次跑太久）
+     * @param parallelism 分片并发度，仅 {@code tag-index-sharded} 生效（默认 4，上限 16）
+     * @param resume      从上次断点续跑，仅 {@code tag-index-sharded} 生效（默认 {@code false}）
+     * @return 各范围的重建报告；{@code all} 时返回三条按顺序排列的列表
      */
     @PostMapping("/rebuild")
     @RequirePermission(Permission.SYSTEM_CONFIG)
     public Result<List<SearchRebuildService.RebuildReport>> rebuild(
             @RequestParam(value = "scope", defaultValue = "tag-lexicon") String scope,
             @RequestParam(value = "dryRun", defaultValue = "true") boolean dryRun,
-            @RequestParam(value = "maxRows", defaultValue = "5000") int maxRows) {
+            @RequestParam(value = "maxRows", defaultValue = "5000") int maxRows,
+            @RequestParam(value = "parallelism", defaultValue = "4") int parallelism,
+            @RequestParam(value = "resume", defaultValue = "false") boolean resume) {
         List<SearchRebuildService.RebuildReport> reports = new ArrayList<>(3);
         String s = scope == null ? "" : scope.trim().toLowerCase();
         switch (s) {
             case "tag-lexicon" -> reports.add(rebuildService.rebuildTagLexicon(dryRun, maxRows));
             case "user-index" -> reports.add(rebuildService.rebuildUserIndex(dryRun, maxRows));
             case "tag-index" -> reports.add(rebuildService.rebuildTagIndex(dryRun, maxRows));
+            // 分片版复用同一 scope 口径的返回结构，但走直连物理库的并行通道；
+            // 未配置离线数据源时它自己会返回带 note 的空报告，提示回退 tag-index。
+            case "tag-index-sharded" -> reports.add(shardRebuildService.rebuild(dryRun, parallelism, resume));
             case "all" -> {
                 reports.add(rebuildService.rebuildTagLexicon(dryRun, maxRows));
                 reports.add(rebuildService.rebuildUserIndex(dryRun, maxRows));
