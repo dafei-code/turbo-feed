@@ -61,7 +61,7 @@ public class CounterFlushService {
             }
             long[] pending = buffer.get(postId);
             if (pending != null) {
-                db = db.add(pending[0], pending[1], pending[2]);
+                db = db.add(pending[0], pending[1], pending[2], pending[3]);
             }
             readService.refresh(postId, db);
         }

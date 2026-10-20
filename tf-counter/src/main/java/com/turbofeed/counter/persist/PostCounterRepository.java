@@ -44,22 +44,27 @@ public class PostCounterRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    /** 批量 UPSERT（MySQL 8 与 H2 MySQL 模式均支持 ON DUPLICATE KEY UPDATE）。 */
+    /** 批量 UPSERT（MySQL 8 与 H2 MySQL 模式均支持 ON DUPLICATE KEY UPDATE）。
+     *  列顺序与 {@code CounterType} 序号一致：like / comment / share / comment_like。 */
     private static final String UPSERT_SQL =
-            "INSERT INTO post_counter (post_id, like_count, comment_count, share_count, updated_at) "
-          + "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) "
+            "INSERT INTO post_counter (post_id, like_count, comment_count, share_count, comment_like_count, updated_at) "
+          + "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
           + "ON DUPLICATE KEY UPDATE like_count = like_count + VALUES(like_count), "
           + "comment_count = comment_count + VALUES(comment_count), "
-          + "share_count = share_count + VALUES(share_count), updated_at = CURRENT_TIMESTAMP";
+          + "share_count = share_count + VALUES(share_count), "
+          + "comment_like_count = comment_like_count + VALUES(comment_like_count), "
+          + "updated_at = CURRENT_TIMESTAMP";
 
     /** 去重登记（PK = (batch_id, post_id)）。 */
     private static final String DEDUP_SQL =
             "INSERT INTO counter_flush_dedup (batch_id, post_id, created_at) VALUES (?, ?, ?)";
 
+    private static final String COLUMNS = "post_id, like_count, comment_count, share_count, comment_like_count";
+
     /**
      * 整批叠加计数增量（批量落库 + 幂等闸门）。
      *
-     * @param snapshot 某次 drain 的 post_id -> [likeDelta, commentDelta, shareDelta]
+     * @param snapshot 某次 drain 的 post_id -> [likeDelta, commentDelta, shareDelta, commentLikeDelta]
      * @param batchId  本 flush 周期唯一标识（UUID），用于去重与重放保护
      */
     public void applyBatch(Map<String, long[]> snapshot, String batchId) {
@@ -98,6 +103,7 @@ public class PostCounterRepository {
                 ps.setLong(2, d[0]);
                 ps.setLong(3, d[1]);
                 ps.setLong(4, d[2]);
+                ps.setLong(5, d[3]);
             }
 
             @Override
@@ -114,7 +120,7 @@ public class PostCounterRepository {
         } catch (DuplicateKeyException e) {
             return; // 该 (batch, post) 已落，跳过
         }
-        jdbcTemplate.update(UPSERT_SQL, postId, d[0], d[1], d[2]);
+        jdbcTemplate.update(UPSERT_SQL, postId, d[0], d[1], d[2], d[3]);
     }
 
     /** 批量回读聚合计数（1 次 IN 查询），供 flush 后修正 L1/L2。空集合返回空 Map。 */
@@ -123,11 +129,12 @@ public class PostCounterRepository {
             return Map.of();
         }
         String placeholders = postIds.stream().map(p -> "?").collect(Collectors.joining(","));
-        String sql = "SELECT post_id, like_count, comment_count, share_count FROM post_counter "
+        String sql = "SELECT " + COLUMNS + " FROM post_counter "
                 + "WHERE post_id IN (" + placeholders + ")";
         List<CounterView> list = jdbcTemplate.query(sql, (rs, i) -> new CounterView(
                 rs.getString("post_id"), rs.getLong("like_count"),
-                rs.getLong("comment_count"), rs.getLong("share_count")), postIds.toArray());
+                rs.getLong("comment_count"), rs.getLong("share_count"),
+                rs.getLong("comment_like_count")), postIds.toArray());
         return list.stream().collect(Collectors.toMap(CounterView::postId, Function.identity()));
     }
 
@@ -135,9 +142,10 @@ public class PostCounterRepository {
     public CounterView get(String postId) {
         try {
             return jdbcTemplate.queryForObject(
-                    "SELECT post_id, like_count, comment_count, share_count FROM post_counter WHERE post_id = ?",
+                    "SELECT " + COLUMNS + " FROM post_counter WHERE post_id = ?",
                     (rs, i) -> new CounterView(rs.getString("post_id"), rs.getLong("like_count"),
-                            rs.getLong("comment_count"), rs.getLong("share_count")),
+                            rs.getLong("comment_count"), rs.getLong("share_count"),
+                            rs.getLong("comment_like_count")),
                     postId);
         } catch (org.springframework.dao.EmptyResultDataAccessException e) {
             return null;

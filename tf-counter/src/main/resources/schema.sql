@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS post_counter (
   like_count   BIGINT       NOT NULL DEFAULT 0 COMMENT '点赞聚合计数（最终一致）',
   comment_count BIGINT      NOT NULL DEFAULT 0 COMMENT '评论聚合计数（最终一致）',
   share_count  BIGINT       NOT NULL DEFAULT 0 COMMENT '分享聚合计数（最终一致）',
+  comment_like_count BIGINT NOT NULL DEFAULT 0 COMMENT '评论点赞聚合计数（最终一致，网关 CommentLikeService 发 COMMENT_LIKE 增量）',
   updated_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '最近一次落库时间'
 );
 

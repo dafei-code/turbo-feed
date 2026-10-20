@@ -10,7 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 计数增量<b>进程内</b>缓冲（削峰层，standalone 默认实现）。
  *
- * <p>网关每条点赞状态变化 → {@link #add} 计入内存（按 post_id 聚合到 {@code long[3]}，
+ * <p>网关每条点赞状态变化 → {@link #add} 计入内存（按 post_id 聚合到数组，
  * 下标对应 {@link CounterType} 序号）。{@link com.turbofeed.counter.bucket.CounterFlushScheduler}
  * 周期性 {@link #drain} 取出快照并清空，批量落 {@code post_counter}，把高频写转成低频批量写，
  * 消除「每行一写」的 DB 压力与潜在热点。</p>
@@ -25,15 +25,18 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class CounterBufferService implements CounterBuffer {
 
-    /** post_id -> [likeDelta, commentDelta, shareDelta]。 */
+    /** post_id -> [likeDelta, commentDelta, shareDelta, commentLikeDelta]（下标 = CounterType 序号）。 */
     private final ConcurrentHashMap<String, long[]> buffer = new ConcurrentHashMap<>();
+
+    /** 数组长度随 {@link CounterType} 维度数自动伸缩：新增维度无需改本类，避免新增类型后下标越界。 */
+    private static final int DIM = CounterType.values().length;
 
     /** 累加某帖某维度增量。 */
     public void add(String postId, CounterType type, long delta) {
         if (postId == null || type == null || delta == 0) {
             return;
         }
-        buffer.computeIfAbsent(postId, k -> new long[3])[type.ordinal()] += delta;
+        buffer.computeIfAbsent(postId, k -> new long[DIM])[type.ordinal()] += delta;
     }
 
     /** 取出当前全部增量快照并清空（原子交接给 flush 线程）。 */

@@ -57,8 +57,8 @@ public class PostCounterRepositoryH2Test {
     @Test
     void applyBatch_idempotent_sameBatchId_noDoubleCount() {
         Map<String, long[]> snap = Map.of(
-                "p1", new long[]{5, 0, 0},
-                "p2", new long[]{0, 3, 1});
+                "p1", new long[]{5, 0, 0, 0},
+                "p2", new long[]{0, 3, 1, 0});
         repo.applyBatch(snap, "batch-1");
         // 重放同一 batch_id（模拟 ShedLock 锁过期续跑 / 进程崩溃重试）
         repo.applyBatch(snap, "batch-1");
@@ -66,12 +66,13 @@ public class PostCounterRepositoryH2Test {
         assertEquals(5L, repo.get("p1").likeCount());
         assertEquals(3L, repo.get("p2").commentCount());
         assertEquals(1L, repo.get("p2").shareCount());
+        assertEquals(0L, repo.get("p2").commentLikeCount());
     }
 
     @Test
     void applyBatch_differentBatchId_bothApplied() {
-        repo.applyBatch(Map.of("p1", new long[]{2, 0, 0}), "b1");
-        repo.applyBatch(Map.of("p1", new long[]{3, 0, 0}), "b2");
+        repo.applyBatch(Map.of("p1", new long[]{2, 0, 0, 0}), "b1");
+        repo.applyBatch(Map.of("p1", new long[]{3, 0, 0, 0}), "b2");
 
         assertEquals(5L, repo.get("p1").likeCount());
     }
@@ -79,14 +80,15 @@ public class PostCounterRepositoryH2Test {
     @Test
     void getMany_returnsAll() {
         repo.applyBatch(Map.of(
-                "p1", new long[]{1, 1, 1},
-                "p2", new long[]{2, 2, 2}), "b");
+                "p1", new long[]{1, 1, 1, 1},
+                "p2", new long[]{2, 2, 2, 2}), "b");
         Map<String, com.turbofeed.shared.model.CounterView> m =
                 repo.getMany(Set.of("p1", "p2", "pX"));
 
         assertEquals(2, m.size());
         assertNotNull(m.get("p1"));
         assertNull(m.get("pX"));
+        assertEquals(1L, m.get("p1").commentLikeCount());
     }
 
     @Test

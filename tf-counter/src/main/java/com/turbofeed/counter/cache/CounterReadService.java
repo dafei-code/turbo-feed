@@ -61,10 +61,10 @@ public class CounterReadService {
     }
 
     /** 增量到达时乐观更新 L1，使同实例内读立即可见（flush 后再由 DB 权威值修正）。 */
-    public void applyLiveDelta(String postId, long dLike, long dComment, long dShare) {
+    public void applyLiveDelta(String postId, long dLike, long dComment, long dShare, long dCommentLike) {
         CounterView cur = l1.getIfPresent(postId);
         if (cur != null) {
-            l1.put(postId, cur.add(dLike, dComment, dShare));
+            l1.put(postId, cur.add(dLike, dComment, dShare, dCommentLike));
         }
     }
 

@@ -37,6 +37,7 @@ public class CounterIncrService {
         readService.applyLiveDelta(e.postId(),
                 t == CounterType.LIKE ? d : 0,
                 t == CounterType.COMMENT ? d : 0,
-                t == CounterType.SHARE ? d : 0);
+                t == CounterType.SHARE ? d : 0,
+                t == CounterType.COMMENT_LIKE ? d : 0);
     }
 }
