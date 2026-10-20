@@ -39,6 +39,15 @@ public class TagIndexService {
 
     /** 标签 → 内容集合。 */
     private static final String TAG_TO_MEDIA = "tf:tag:media:";
+    /**
+     * 标签 → 内容<b>有序</b>集合（ZSET，score = 入流时间戳毫秒）。
+     *
+     * <p><b>为什么在 SET 之外再建一个 ZSET</b>：SET 无 score，按时间翻页只能 {@code SMEMBERS}
+     * 全量拉回再排序——大话题（十万级）一次往返就打爆。ZSET 的 {@code ZREVRANGEBYSCORE}
+     * 天然支持「按时间倒序 + 游标翻页」，是搜索（S1）的读路径主索引。
+     * 两者<b>同源双写</b>：SET 供既有兴趣召回读，ZSET 供搜索翻页读；灰度完成后再收敛为单写。</p>
+     */
+    private static final String TAG_TO_MEDIA_ORDERED = "tf:tag:media:z:";
     /** 内容 → 标签集合（兴趣累积时按 liked 内容反查）。 */
     private static final String MEDIA_TO_TAGS = "tf:media:tags:";
     /** 与发现流分桶 TTL 对齐，避免标签索引比内容本身活得更久造成脏数据。 */
@@ -55,14 +64,20 @@ public class TagIndexService {
      * @param tags        标签列表（小写、去重）；空/{} 忽略
      */
     public void index(String timelineKey, List<String> tags) {
-        if (timelineKey == null || tags == null || tags.isEmpty()) {
+        // 空白键也拦截：否则会写出 tf:tag:media:z:{tag} → "  " 这类永远读不回来的脏成员
+        if (timelineKey == null || timelineKey.isBlank() || tags == null || tags.isEmpty()) {
             return;
         }
         try {
             String contentKey = MEDIA_TO_TAGS + timelineKey;
+            // 同一帖的多个标签共用一个时间戳：翻页时同帖内容不会因毫秒差被打散
+            long score = System.currentTimeMillis();
             for (String tag : tags) {
                 redisTemplate.opsForSet().add(TAG_TO_MEDIA + tag, timelineKey);
+                // 有序倒排（搜索读路径）：缺它则搜索只能 SMEMBERS 全量拉回再排序
+                redisTemplate.opsForZSet().add(TAG_TO_MEDIA_ORDERED + tag, timelineKey, score);
                 redisTemplate.expire(TAG_TO_MEDIA + tag, TTL);
+                redisTemplate.expire(TAG_TO_MEDIA_ORDERED + tag, TTL);
             }
             redisTemplate.opsForSet().add(contentKey, tags.toArray(new String[0]));
             redisTemplate.expire(contentKey, TTL);
@@ -79,7 +94,7 @@ public class TagIndexService {
      * @param timelineKey 内容身份（须与 {@link #index} 同键，否则反查不到、索引滞留，由 TTL 兜底清理）
      */
     public void remove(String timelineKey) {
-        if (timelineKey == null) {
+        if (timelineKey == null || timelineKey.isBlank()) {
             return;
         }
         try {
@@ -88,6 +103,8 @@ public class TagIndexService {
             if (tags != null) {
                 for (String tag : tags) {
                     redisTemplate.opsForSet().remove(TAG_TO_MEDIA + tag, timelineKey);
+                    // 有序倒排必须同步摘除，否则已下架内容仍能被搜索命中
+                    redisTemplate.opsForZSet().remove(TAG_TO_MEDIA_ORDERED + tag, timelineKey);
                 }
             }
             redisTemplate.delete(contentKey);
