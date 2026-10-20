@@ -7,6 +7,8 @@ import com.turbofeed.gateway.service.signal.ModerationSignalService;
 import com.turbofeed.gateway.service.signal.ModerationSignalView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.connection.Limit;
+import org.springframework.data.redis.connection.RedisZSetCommands.Range;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
@@ -156,6 +158,93 @@ public class SearchService {
             next = encodeCursor(candidates.get(lastAccepted).score);
         }
         return new SearchPage(items, next, hasMore && !next.isEmpty(), zCard(key));
+    }
+
+    /**
+     * 按昵称搜索用户（S2，归一化后<b>精确匹配</b>）。
+     *
+     * @param rawQuery 昵称（大小写不敏感、忽略首尾空白）
+     * @param size     最多返回条数（默认 20，上限 50）
+     */
+    public SearchPage.UserPage searchUser(String rawQuery, int size) {
+        String norm = SearchIndexWriter.normalize(rawQuery);
+        if (norm.isEmpty()) {
+            return SearchPage.UserPage.empty();
+        }
+        int limit = size <= 0 ? DEFAULT_SIZE : Math.min(size, MAX_SIZE);
+        String key = SearchIndexWriter.USER_INDEX_PREFIX + norm;
+        try {
+            Set<String> members = redis.opsForZSet().reverseRange(key, 0, limit - 1);
+            if (members == null || members.isEmpty()) {
+                return SearchPage.UserPage.empty();
+            }
+            List<SearchPage.UserItem> items = new ArrayList<>(members.size());
+            for (String m : members) {
+                int sep = m.indexOf('\u0000');
+                String idPart = sep > 0 ? m.substring(0, sep) : m;
+                String nick = sep > 0 ? m.substring(sep + 1) : "";
+                try {
+                    items.add(new SearchPage.UserItem(Long.parseLong(idPart), nick));
+                } catch (NumberFormatException ignore) {
+                    // 脏成员跳过，不影响其余
+                }
+            }
+            Long total = redis.opsForZSet().zCard(key);
+            return new SearchPage.UserPage(items, total == null ? items.size() : total);
+        } catch (Exception e) {
+            log.warn("用户索引读取失败（降级为空页）: q={}, {}", norm, e.getMessage());
+            return SearchPage.UserPage.empty();
+        }
+    }
+
+    /**
+     * 搜索联想（S3）：按前缀从词典 {@code tf:search:lex} 取话题 + 用户。
+     *
+     * <p>词典成员带类型前缀（{@code tag:} / {@code user:}），因此要<b>分别</b>在两个前缀区间
+     * 做 lex 范围取，再按类型合并。返回的是「已经存在的词」而非内容——
+     * 点进去后由 {@link #searchByTag} / {@link #searchUser} 承接。</p>
+     *
+     * @param rawQuery 前缀（可带 {@code #}）
+     * @param size     最多返回条数（默认 10，上限 20）
+     */
+    public SuggestResult suggest(String rawQuery, int size) {
+        String q = normalizeTag(rawQuery);
+        if (q.isEmpty()) {
+            return SuggestResult.empty();
+        }
+        int limit = size <= 0 ? 10 : Math.min(size, 20);
+        int perType = Math.min(limit, 20);
+        try {
+            List<SuggestResult.Item> out = new ArrayList<>(limit);
+            collectLex(SearchIndexWriter.LEX_TAG, q, perType, "tag", out);
+            collectLex(SearchIndexWriter.LEX_USER, q, perType, "user", out);
+            if (out.size() > limit) {
+                return new SuggestResult(new ArrayList<>(out.subList(0, limit)));
+            }
+            return new SuggestResult(out);
+        } catch (Exception e) {
+            log.warn("联想词典读取失败（降级为空）: q={}, {}", q, e.getMessage());
+            return SuggestResult.empty();
+        }
+    }
+
+    /** 在 {@code {type}:{prefix}} 区间做字典序范围取（上限 {@code \uffff} 覆盖全部常见字符）。 */
+    private void collectLex(String typePrefix, String prefix, int limit, String type,
+                            List<SuggestResult.Item> out) {
+        Range range = new Range()
+                .gte(typePrefix + prefix)
+                .lte(typePrefix + prefix + "\uffff");
+        Set<String> members = redis.opsForZSet()
+                .rangeByLex(SearchIndexWriter.LEX_KEY, range, Limit.limit().count(limit));
+        if (members == null) {
+            return;
+        }
+        for (String m : members) {
+            if (m.length() <= typePrefix.length()) {
+                continue;
+            }
+            out.add(new SuggestResult.Item(type, m.substring(typePrefix.length())));
+        }
     }
 
     // ------------------------------------------------------------------

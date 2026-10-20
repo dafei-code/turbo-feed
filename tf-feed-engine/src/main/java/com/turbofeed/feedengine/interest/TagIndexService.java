@@ -48,6 +48,15 @@ public class TagIndexService {
      * 两者<b>同源双写</b>：SET 供既有兴趣召回读，ZSET 供搜索翻页读；灰度完成后再收敛为单写。</p>
      */
     private static final String TAG_TO_MEDIA_ORDERED = "tf:tag:media:z:";
+    /**
+     * 联想词典（全局唯一一个键，member 恒 score=0 才能用 {@code ZRANGEBYLEX} 做前缀扫描）。
+     *
+     * <p>成员格式 {@code tag:{tag}}；网关侧 {@code SearchIndexWriter} 往同一个键写
+     * {@code user:{nickname}}。两侧共享同一 Redis 键，<b>改名必须同步改网关</b>。</p>
+     */
+    private static final String SEARCH_LEX = "tf:search:lex";
+    /** 词典里话题成员的类型前缀（与网关 {@code SearchIndexWriter#LEX_TAG} 对齐）。 */
+    private static final String LEX_TAG_PREFIX = "tag:";
     /** 内容 → 标签集合（兴趣累积时按 liked 内容反查）。 */
     private static final String MEDIA_TO_TAGS = "tf:media:tags:";
     /** 与发现流分桶 TTL 对齐，避免标签索引比内容本身活得更久造成脏数据。 */
@@ -76,6 +85,8 @@ public class TagIndexService {
                 redisTemplate.opsForSet().add(TAG_TO_MEDIA + tag, timelineKey);
                 // 有序倒排（搜索读路径）：缺它则搜索只能 SMEMBERS 全量拉回再排序
                 redisTemplate.opsForZSet().add(TAG_TO_MEDIA_ORDERED + tag, timelineKey, score);
+                // 联想词典：score 恒 0（ZRANGEBYLEX 的前提）；词典是全局词表，不设 TTL
+                redisTemplate.opsForZSet().add(SEARCH_LEX, LEX_TAG_PREFIX + tag, 0d);
                 redisTemplate.expire(TAG_TO_MEDIA + tag, TTL);
                 redisTemplate.expire(TAG_TO_MEDIA_ORDERED + tag, TTL);
             }

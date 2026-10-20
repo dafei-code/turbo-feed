@@ -47,4 +47,33 @@ public record SearchPage(
             @JsonProperty("tags") List<String> tags,
             @JsonProperty("authorId") String authorId) {
     }
+
+    /**
+     * 单个用户搜索结果。
+     *
+     * <p>{@code userId} 与 {@code nickname} 一起返回——昵称随索引成员物化，无需回表
+     * （{@code UserJdbcRepository#findById} 不返回 nickname）。</p>
+     */
+    public record UserItem(
+            @JsonProperty("userId") long userId,
+            @JsonProperty("nickname") String nickname) {
+    }
+
+    /**
+     * 用户搜索结果页。
+     *
+     * <p>不做游标翻页：昵称是<b>精确匹配</b>（归一化后），同名词条量级极小
+     * （个位数到几十），一次取够即可；真正的模糊/前缀能力由 S3 的联想接口承担。</p>
+     *
+     * @param items 命中的用户
+     * @param total 索引里的同名词条总数
+     */
+    public record UserPage(
+            @JsonProperty("items") List<UserItem> items,
+            @JsonProperty("total") long total) {
+
+        public static UserPage empty() {
+            return new UserPage(List.of(), 0L);
+        }
+    }
 }

@@ -6,6 +6,7 @@ import com.turbofeed.gateway.repository.UserJdbcRepository;
 import com.turbofeed.gateway.repository.UserPhoneRouterRepository;
 import com.turbofeed.gateway.service.moderation.ContentScene;
 import com.turbofeed.gateway.service.moderation.ContentSecurityService;
+import com.turbofeed.gateway.service.search.SearchIndexWriter;
 import com.turbofeed.gateway.util.SnowflakeIdGenerator;
 import com.turbofeed.shared.result.ErrorCode;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -36,17 +37,21 @@ public class UserService {
     /** 雪花 ID 生成器由 {@code SnowflakeConfig} 装配（workerId/datacenterId 必须逐实例区分）。 */
     private final SnowflakeIdGenerator snowflakeIdGenerator;
     private final ContentSecurityService contentSecurityService;
+    /** 搜索索引：昵称精确索引 + 联想词典（S2/S3，fail-open，写失败不影响注册）。 */
+    private final SearchIndexWriter searchIndexWriter;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     /** 显式构造器（不用 {@code @RequiredArgsConstructor}：本机构建环境对被修改文件的 Lombok 注解处理不生效）。 */
     public UserService(UserJdbcRepository userJdbcRepository,
                        UserPhoneRouterRepository phoneRouter,
                        SnowflakeIdGenerator snowflakeIdGenerator,
-                       ContentSecurityService contentSecurityService) {
+                       ContentSecurityService contentSecurityService,
+                       SearchIndexWriter searchIndexWriter) {
         this.userJdbcRepository = userJdbcRepository;
         this.phoneRouter = phoneRouter;
         this.snowflakeIdGenerator = snowflakeIdGenerator;
         this.contentSecurityService = contentSecurityService;
+        this.searchIndexWriter = searchIndexWriter;
     }
 
     public Map<String, Object> register(String phone, String password, String nickname) {
@@ -88,6 +93,9 @@ public class UserService {
             phoneRouter.unbind(phone, id);
             throw e;
         }
+        // 建搜索索引（昵称精确索引 + 联想词典）。放在用户行落库之后、且内部 fail-open：
+        // 索引是搜索的加速副本，写失败不该把已经成功的注册打回去。
+        searchIndexWriter.indexUser(id, name);
         return Map.of(
                 "id", id,
                 "phone", phone,
