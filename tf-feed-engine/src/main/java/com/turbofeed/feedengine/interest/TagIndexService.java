@@ -23,6 +23,14 @@ import java.util.Set;
  * 属后续增强，不在 MVP 热路径读取，故不阻塞本期。</p>
  *
  * <p><b>fail-open</b>：任一 Redis 异常只告警不抛——标签索引是推荐优化项，绝不能让入流/下架主流程失败。</p>
+ *
+ * <p><b>⚠️ 调用方纪律：本索引不归 {@code FeedTimelineStore} 维护，两条投递路径必须各自显式调用。</b>
+ * <ul>
+ *   <li>HTTP 兜底路径：{@code FeedTimelineController#append} / {@code #remove}；</li>
+ *   <li>RocketMQ 顺序消息路径：{@code FeedTimelineConsumer#onMessage}。</li>
+ * </ul>
+ * 历史上消费者漏调过——{@code mq.enabled=true} 时索引既不建也不摘，且<b>无任何报错</b>：
+ * 表现为「兴趣召回召回不到、搜索搜不到」以及「已下架内容仍留在倒排链」。新增投递路径时务必对齐。</p>
  */
 @Service
 public class TagIndexService {

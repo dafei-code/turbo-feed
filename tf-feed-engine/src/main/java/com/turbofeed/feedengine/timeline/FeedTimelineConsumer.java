@@ -1,5 +1,6 @@
 package com.turbofeed.feedengine.timeline;
 
+import com.turbofeed.feedengine.interest.TagIndexService;
 import com.turbofeed.shared.model.FeedTimelineEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +40,7 @@ import org.springframework.stereotype.Component;
 public class FeedTimelineConsumer implements RocketMQListener<FeedTimelineEvent> {
 
     private final FeedTimelineStore feedTimelineStore;
+    private final TagIndexService tagIndexService;
 
     @Override
     public void onMessage(FeedTimelineEvent event) {
@@ -46,8 +48,16 @@ public class FeedTimelineConsumer implements RocketMQListener<FeedTimelineEvent>
             if (FeedTimelineEvent.ACTION_APPEND.equals(event.action())) {
                 int pool = event.poolLevel() == null ? 1 : event.poolLevel();
                 feedTimelineStore.appendStrict(event.item(), pool);
+                // 同步维护标签反向索引（与 HTTP 兜底路径 FeedTimelineController#append 对齐）。
+                // FeedTimelineStore 自身不维护该索引，两条投递路径必须各自显式调用，否则
+                // 开 MQ 后 tf:tag:media 整条索引会静默失效（兴趣召回/搜索都读它）。
+                // TagIndexService 内部 fail-open（异常只告警），不会破坏本消费者的严格语义。
+                tagIndexService.index(event.item().timelineKey(), event.item().tags());
             } else if (FeedTimelineEvent.ACTION_REMOVE.equals(event.action())) {
                 feedTimelineStore.removeStrict(event.timelineKey());
+                // 摘除标签索引：键与 append 同口径（timelineKey = postId ?: mediaId）。
+                // 漏摘 → 已下架内容仍留在倒排链里，7d TTL 到期前都可被标签召回/搜到。
+                tagIndexService.remove(event.timelineKey());
             } else {
                 // 未知 action（action 为 null / 两侧版本不一致 / 消息损坏）。
                 // 【绝不能走 else 兜底当成 REMOVE】—— 那会让一条坏消息把内容下架，是反方向的安全事故。
