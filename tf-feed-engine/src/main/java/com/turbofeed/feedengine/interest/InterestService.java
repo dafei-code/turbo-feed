@@ -181,6 +181,21 @@ public class InterestService {
     /** 旧端二进制完播事件 {@code PLAY_COMPLETE} 的权重（发即代表看完，等同看完档）。 */
     @Value("${turbofeed.feed.interest.play-complete-weight:0.3}")
     private double playCompleteWeight = 0.3;
+
+    /**
+     * <b>搜索词</b>计入画像的权重（默认 0.2）。
+     *
+     * <p><b>为什么是 0.2</b>：比「看一半」({@code 0.1}) 高、比「看完」({@code 0.3}) 低。
+     * 搜索是<b>用户主动敲出来的意图</b>，信息量高于被动刷到时看了一半；但它只证明「想看」，
+     * 还没证明「看完了」，所以不该等同于完播。位置摆在这里是刻意的：
+     * 高于被动弱信号、低于真实消费强信号。</p>
+     *
+     * <p><b>只记「搜了什么」，不记「点了哪条」</b>：点进结果之后的观看/点赞/评论本来就有
+     * WATCH / LIKE 埋点，会带着该内容的真实标签进画像。再补一路「点击搜索结果」等于
+     * 同一个行为记两次，画像会被主动搜索场景过度加权。</p>
+     */
+    @Value("${turbofeed.feed.interest.search-weight:0.2}")
+    private double searchWeight = 0.2;
     /** 完播判定阈值，与 {@code PostStatService} 保持一致（0.7）。 */
     private static final double COMPLETE_RATIO = 0.7;
 
@@ -330,6 +345,44 @@ public class InterestService {
             org.slf4j.LoggerFactory.getLogger(InterestService.class)
                     .warn("兴趣画像累积失败（不影响主流程）: userId={}, type={}, {}",
                             event.userId(), event.type(), e.getMessage());
+        }
+    }
+
+    /**
+     * 搜索信号入画像：<b>按标签直接累加</b>，不需要内容身份（这是它与 {@link #accumulateFromEvent} 的关键差别）。
+     *
+     * <p><b>为什么需要单独一个口子</b>：{@code accumulateFromEvent} 依赖
+     * {@code tagIndexService.tagsOf(timelineKey)}——先要有"用户互动了哪条内容"，才能反查标签。
+     * 而搜索发生在<b>内容之前</b>：用户敲下一个词，此刻还没有任何 timelineKey。
+     * 硬塞进那条链路就得凭空造一个事件，反而把「内容互动」和「查询意图」两种语义搅在一起。</p>
+     *
+     * <p><b>为什么搜索值得进画像</b>：它是推荐系统里少数几个<b>显式意图</b>信号。
+     * 信息流里的行为（看了多久、点不点赞）都是隐式推断，用户搜"篮球"是直接告诉你他要什么。
+     * 不接这一路，用户主动表达的兴趣就被浪费了。</p>
+     *
+     * <p><b>衰减语义与行为事件完全一致</b>：走同一个 {@link #accumulate}（先整体衰减 → 再加权 → 续 TTL），
+     * 长期层与短期层都写——搜索是典型的"当下想要"，短期层正是为它准备的。</p>
+     *
+     * @param userId 用户 ID（匿名无画像，直接忽略）
+     * @param tags   搜索命中的话题标签（已归一化、去重）；空则不写
+     */
+    public void accumulateSearchTags(String userId, List<String> tags) {
+        if (userId == null || userId.isBlank() || tags == null || tags.isEmpty()) {
+            return;
+        }
+        if (searchWeight == 0.0) {
+            return; // 配置为 0 = 显式关闭搜索入画像
+        }
+        try {
+            long now = System.currentTimeMillis();
+            accumulate(INTEREST_PREFIX + userId, tags, searchWeight, now, halfLifeMs(), TTL);
+            if (shortTermEnabled) {
+                accumulate(SHORT_PREFIX + userId, tags, searchWeight, now, shortHalfLifeMs(), SHORT_TTL);
+            }
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(InterestService.class)
+                    .warn("搜索兴趣入画像失败（不影响搜索结果）: userId={}, tags={}, {}",
+                            userId, tags, e.getMessage());
         }
     }
 

@@ -60,6 +60,7 @@ public class FeedEngineClient {
     private static final String PATH_TIMELINE_REMOVE = "/internal/feed/timeline/remove";
     private static final String PATH_BEHAVIOR = "/internal/feed/behavior";
     private static final String PATH_PLAYABLE = "/internal/feed/playable";
+    private static final String PATH_INTEREST_SEARCH = "/internal/feed/interest/search";
 
     private final FeedEngineProperties properties;
     private final ObjectMapper objectMapper;
@@ -268,6 +269,39 @@ public class FeedEngineClient {
      *
      * @param events 行为事件列表（已转成跨服务契约 {@link FeedBehaviorEvent}）
      */
+    /**
+     * 搜索兴趣入画像（引擎侧 {@code InterestService#accumulateSearchTags}）。
+     *
+     * <p><b>为什么归这个客户端</b>：画像键 {@code tf:user:interest:{userId}} 的衰减语义
+     * （先整体衰减 → 再加权 → 续 TTL）是引擎用 Lua 实现并持有的。网关若直写 Redis，
+     * 就等于把同一份衰减逻辑抄第二遍——两边一旦漂移，画像行为会随调用路径不同而不同，
+     * 这种 bug 几乎不可能在测试里发现。所以哪怕只是加一个权重，也必须走引擎。</p>
+     *
+     * <p><b>fail-open 且静默</b>：画像少记一次不影响搜索结果，日志留痕即可，
+     * 不返回布尔值给调用方加压（调用方本来也不会重试这种旁路信号）。</p>
+     *
+     * @param userId 登录用户 ID；匿名（null/空）直接跳过，画像按人归属
+     * @param tags   搜索命中的话题标签
+     */
+    public void recordSearchInterest(String userId, List<String> tags) {
+        if (userId == null || userId.isBlank() || tags == null || tags.isEmpty()) {
+            return;
+        }
+        try {
+            restClient.post()
+                    .uri(uri -> uri.path(PATH_INTEREST_SEARCH)
+                            .queryParam("userId", userId)
+                            .queryParam("tags", tags.toArray(new String[0]))
+                            .build())
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (Exception e) {
+            // 旁路信号：失败只告警，绝不回传失败给搜索链路
+            log.warn("搜索兴趣入画像失败（忽略，不影响搜索结果）: userId={}, tags={}, {}",
+                    userId, tags, e.getMessage());
+        }
+    }
+
     public void reportBehavior(List<FeedBehaviorEvent> events) {
         if (events == null || events.isEmpty()) {
             return;

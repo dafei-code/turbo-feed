@@ -120,6 +120,27 @@ public class FeedTimelineController {
     }
 
     /**
+     * 搜索兴趣入画像：把「用户搜了什么」累进 {@code tf:user:interest:{userId}}。
+     *
+     * <p><b>为什么单独开一个接口，而不是并入 {@code /behavior}</b>：行为事件的模型是
+     * 「谁对哪条内容做了什么」，必须有 {@code timelineKey}；而搜索发生在内容之前，
+     * 此刻没有任何内容身份。硬塞进行为链路就得伪造一个事件，把「内容互动」和「查询意图」
+     * 两种语义搅在一起。显式意图值得有自己的通道。</p>
+     *
+     * <p><b>fail-open</b>：画像写入失败只影响个性化，绝不能让搜索接口报错——
+     * 用户搜东西是要拿到结果的，不是来帮我们写画像的。</p>
+     *
+     * @param userId 用户 ID（网关由登录态注入；匿名搜索不调用本接口）
+     * @param tags   搜索命中的话题标签（逗号分隔，已归一化）
+     */
+    @PostMapping("/interest/search")
+    public Result<Void> searchInterest(@RequestParam("userId") String userId,
+                                       @RequestParam("tags") List<String> tags) {
+        interestService.accumulateSearchTags(userId, tags);
+        return Result.ok();
+    }
+
+    /**
      * 行为埋点接收（网关同步 HTTP 兜底路径 / 测试直连）。
      *
      * <p>与 RocketMQ 消费者 {@link FeedBehaviorConsumer} 共用同一统计写入逻辑：{@code WATCH} 走
