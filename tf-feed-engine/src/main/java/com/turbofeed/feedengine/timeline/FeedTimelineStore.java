@@ -552,9 +552,10 @@ public class FeedTimelineStore {
         int[] alloc = allocateSlots(remainingSlots, weights, parsed);
         long pageNum = Math.max(page, 0);
         List<FeedItemView> result = new ArrayList<>(limit);
-        // 整页级去重：按 timelineKey 记录已入流内容，避免关注/兴趣/向量/热点 与 流量池/冷启动 命中同一内容时
-        // 在同一页内重复出现（如关注作者内容同时落入关注位与流量池位）；G9 全局占比统计亦因此不被重复计数。
-        Set<String> seen = new HashSet<>();
+        // 整页级去重（G6）：抽取到 TimelineDedup，按 timelineKey 记录已入流内容，避免关注/兴趣/向量/热点
+        // 与 流量池/冷启动 命中同一内容时在同一页内重复出现（如关注作者内容同时落入关注位与流量池位）；
+        // G9 全局占比统计亦因此不被重复计数。与 isModerationBlocked 正交（见 TimelineDedup 类注释）。
+        TimelineDedup dedup = new TimelineDedup();
 
         // 流量池部分先全量收集，最后统一走一次"同类不连刷"重排——在<b>整页范围</b>内打散，
         // 而不是每个池各自打散：否则相邻两池的交界处仍会连着刷同一个话题。
@@ -629,7 +630,7 @@ public class FeedTimelineStore {
         // 热点槽位<b>固定钉在最前</b>（先过召回过滤）：它是召回策略刻意给的探索位，不参与后续打散，
         // 否则"热门内容靠前"的策略语义会被重排层抹掉。
         for (FeedItemView it : hotItems) {
-            if (isModerationBlocked(it, blockedPosts, blockedAuthors) || !seen.add(it.timelineKey())) {
+            if (isModerationBlocked(it, blockedPosts, blockedAuthors) || !dedup.accept(it)) {
                 continue;
             }
             result.add(it);
@@ -637,7 +638,7 @@ public class FeedTimelineStore {
         // 关注流位紧随热门之后（同为强信号位）：热点是"全站探索"、关注是"社交分发"，都先于兴趣/向量/流量池。
         // 单列于召回层、不参与后续打散——再交给重排层会把"关注优先"的语义抹掉。
         for (ScoredItem s : followPart) {
-            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !seen.add(s.item().timelineKey())) {
+            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !dedup.accept(s.item())) {
                 continue;
             }
             result.add(s.item());
@@ -645,21 +646,21 @@ public class FeedTimelineStore {
         // 兴趣召回位紧随热点之后：热点是"全站探索"，兴趣是"个性化兑现"，都先于流量池的通用排序。
         // 不参与后续打散——召回层已按多标签轮转保证覆盖，再交给打散层重排会抹掉"兴趣优先"的语义。
         for (ScoredItem s : interestPart) {
-            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !seen.add(s.item().timelineKey())) {
+            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !dedup.accept(s.item())) {
                 continue;
             }
             result.add(s.item());
         }
         // 向量召回位紧随兴趣之后（同为个性化位）：热点=全站探索、兴趣/向量=个性化兑现，都先于流量池。
         for (ScoredItem s : vectorPart) {
-            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !seen.add(s.item().timelineKey())) {
+            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !dedup.accept(s.item())) {
                 continue;
             }
             result.add(s.item());
         }
         // 流量池部分（已打散）入流。
         for (ScoredItem s : poolPart) {
-            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !seen.add(s.item().timelineKey())) {
+            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !dedup.accept(s.item())) {
                 continue;
             }
             result.add(s.item());
@@ -670,7 +671,7 @@ public class FeedTimelineStore {
             for (FeedItemView it : coldPart) {
                 // 关注作者内容不在冷启动位重复刷（跨页去重）：只在首屏关注位曝光一次。
                 if (isModerationBlocked(it, blockedPosts, blockedAuthors) || followeeAuthors.contains(authorIdOf(it))
-                        || !seen.add(it.timelineKey())) {
+                        || !dedup.accept(it)) {
                     continue;
                 }
                 result.add(it);
