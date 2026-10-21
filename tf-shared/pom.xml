@@ -16,6 +16,22 @@
 
     <!-- 纯模型与 SPI 模块，零第三方依赖，保证被所有模块引用时不引入传递依赖 -->
 
+    <dependencies>
+        <!-- 测试运行时（test scope，不向引用方传递，不破坏「零第三方依赖」定位）：
+             JUnit5 + Mockito + AssertJ 版本由 spring-boot-dependencies BOM 托管。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- surefire 3.x 跑 JUnit5 必需（BOM 父不自动带 junit-platform-launcher）。 -->
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
     <build>
         <plugins>
             <!-- 开启 -parameters：契约 record（如 FeedItemView）的 JSON 反序列化依赖「类文件中
