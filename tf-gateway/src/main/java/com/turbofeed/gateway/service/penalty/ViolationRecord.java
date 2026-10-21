@@ -23,7 +23,7 @@ public record ViolationRecord(
         ViolationSeverity severity,
         ViolationSource source,
         PenaltyAction actionTaken,
-        Long relatedMediaId,
+        String relatedMediaId,
         String reason,
         String operator,
         Instant createdAt) {

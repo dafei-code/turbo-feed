@@ -69,7 +69,7 @@ public class PenaltyService {
                                           ViolationCategory category,
                                           ViolationSeverity severity,
                                           ViolationSource source,
-                                          Long relatedMediaId,
+                                          String relatedMediaId,
                                           String operator,
                                           String reason) {
         Instant now = Instant.now();

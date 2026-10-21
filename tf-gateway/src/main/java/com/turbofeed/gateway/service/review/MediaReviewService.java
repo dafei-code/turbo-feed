@@ -761,7 +761,7 @@ public class MediaReviewService {
             accountCreditService.onViolationConfirmed(authorId);
             // penalty 集成缝：确认违规 → 落处罚（与信用扣分同触发点，CAS 保证单次）。
             penaltyService.recordViolation(authorId, ViolationCategory.OTHER, severity,
-                    source, null, operator, reason);
+                    source, mediaId, operator, reason);
         }
         return rows;
     }
