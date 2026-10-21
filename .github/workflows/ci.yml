@@ -6,10 +6,33 @@ on:
   pull_request:
     branches: [ main ]
 
+# 取消同一分支上仍在运行的旧流水线，节省资源
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  build-test:
+  build:
     runs-on: ubuntu-latest
-    # GitHub 托管的 Ubuntu runner 自带 Docker，Testcontainers 起真实 MySQL/Redis 可用。
+
+    # Redis 服务容器：覆盖依赖本地 Redis 的集成测试（默认 localhost:6379）。
+    # MySQL 类集成测由 Testcontainers 在本 runner 内自起容器，无需额外 service。
+    # GitHub 托管的 Ubuntu runner 自带 Docker，故 @RequiresDocker 守卫的集成测会真实跑全量
+    # （含 UserJdbcRepository 分片路由集成测）；无 Docker 的环境则自动跳过。
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,8 +44,9 @@ jobs:
           java-version: '17'
           cache: maven
 
-      - name: Build & Test
-        # clean 保证无残留；test 阶段不触发 spring-boot repackage。
-        # 无 Docker 的本地环境只会跑 Mockito 单测（集成测被 @RequiresDocker 跳过）；
-        # CI 有 Docker，跑全量（含 UserJdbcRepository 分片路由集成测）。
-        run: mvn -B clean test
+      - name: Build & verify
+        # clean 保证无残留；verify = test(22 单测 + @RequiresDocker 集成测) + package(repackage 出 fat jar) + verify。
+        # 本地 D 盘构建才需 `mvn -Plocal package`（跳过 repackage，见根 pom 的 local profile，因 APFS protect 卷
+        # 对 mmap 打开的 jar 执行 renameTo 会失败）；本 CI 在 Linux 上跑完整 repackage，验证可执行 jar 可构建。
+        # -DfailIfNoTests=false：允许个别库模块零测试（如 tf-shared/tf-redis）不报错。
+        run: mvn -B clean verify -DfailIfNoTests=false
