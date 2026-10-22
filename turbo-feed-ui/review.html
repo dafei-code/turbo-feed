@@ -131,6 +131,7 @@
   code.id { font-family: ui-monospace, Menlo, monospace; color: var(--text-dim); font-size: 11px; word-break: break-all; }
 </style>
 </head>
+  <script src="sanitize.js"></script>
 <body>
   <div class="topbar">
     <div class="mark">TF</div>
@@ -236,7 +237,7 @@
           var thumb = '<div class="thumb-strip">' +
             imgs.slice(0, 3).map(function (u) {
               return '<div class="thumb" title="点击查看原图">' +
-                '<img src="' + u + '" alt="" onclick="window.open(\'' + u + '\', \'_blank\')">' +
+                '<img src="' + safeUrl(u) + '" alt="" onclick="safeOpen(' + jsLit(u) + ')">' +
               '</div>';
             }).join('') +
             (imgs.length > 3 ? '<div class="thumb more">+' + (imgs.length - 3) + '</div>' : '') +
@@ -244,19 +245,19 @@
           var time = it.createdAt ? new Date(it.createdAt).toLocaleString() : '-';
           var key = it.postId || it.mediaId;
           tr.innerHTML = '<td>' + thumb + '</td>'
-            + '<td><code class="id">' + key + '</code>'
+            + '<td><code class="id">' + esc(key) + '</code>'
             + (imgs.length > 1 ? '<div class="mid">整帖 ' + imgs.length + ' 张图</div>' : '') + '</td>'
-            + '<td class="mid">' + time + '</td>'
+            + '<td class="mid">' + esc(time) + '</td>'
             + '<td><span class="hot-tag tag-warm">待人工审核</span></td>'
             + '<td>'
-            + '<button class="mini-btn ok" onclick="reviewMedia(\'' + it.mediaId + '\', true, this)">通过</button> '
-            + '<button class="mini-btn bad" onclick="reviewMedia(\'' + it.mediaId + '\', false, this)">驳回</button>'
+            + '<button class="mini-btn ok" onclick="reviewMedia(' + jsLit(it.mediaId) + ', true, this)">通过</button> '
+            + '<button class="mini-btn bad" onclick="reviewMedia(' + jsLit(it.mediaId) + ', false, this)">驳回</button>'
             + '</td>';
           body.appendChild(tr);
         });
       })
       .catch(function (e) {
-        body.innerHTML = '<tr><td colspan="5" class="err">加载失败：' + e.message + '</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" class="err">加载失败：' + esc(e.message) + '</td></tr>';
       });
   }
 

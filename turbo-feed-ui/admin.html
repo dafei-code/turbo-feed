@@ -425,6 +425,7 @@
   }
 </style>
 </head>
+  <script src="sanitize.js"></script>
 <body data-page-node-id="VSv5fZOdIo7OcvAYu6fDqb">
 
 <!-- ================= 侧边栏 ================= -->
@@ -710,7 +711,7 @@
           var thumb = '<div class="thumb-strip">' +
             imgs.slice(0, 3).map(function (u) {
               return '<div class="thumb" style="flex:0 0 auto">' +
-                '<img src="' + u + '" alt="" style="cursor:zoom-in" onclick="window.open(\'' + u + '\', \'_blank\')">' +
+                '<img src="' + safeUrl(u) + '" alt="" style="cursor:zoom-in" onclick="safeOpen(' + jsLit(u) + ')">' +
               '</div>';
             }).join('') +
             (imgs.length > 3 ? '<span style="font-size:11px;color:var(--text-dim);align-self:center">+' + (imgs.length - 3) + '</span>' : '') +
@@ -718,20 +719,20 @@
           var time = it.createdAt ? new Date(it.createdAt).toLocaleString() : '-';
           var key = it.postId || it.mediaId;
           tr.innerHTML = '<td>' + thumb + '</td>'
-            + '<td style="word-break:break-all">' + key
+            + '<td style="word-break:break-all">' + esc(key)
             + (imgs.length > 1 ? '<div style="font-size:11px;color:var(--text-dim)">整帖 ' + imgs.length + ' 张图</div>' : '') + '</td>'
-            + '<td>' + time + '</td>'
+            + '<td>' + esc(time) + '</td>'
             + '<td><span class="hot-tag tag-warm">待审核</span></td>'
             + '<td>'
-            + '<button class="mini-btn ok" onclick="reviewMedia(\'' + it.mediaId + '\', true)">通过</button> '
-            + '<button class="mini-btn bad" onclick="reviewMedia(\'' + it.mediaId + '\', false)">驳回</button>'
+            + '<button class="mini-btn ok" onclick="reviewMedia(' + jsLit(it.mediaId) + ', true)">通过</button> '
+            + '<button class="mini-btn bad" onclick="reviewMedia(' + jsLit(it.mediaId) + ', false)">驳回</button>'
             + '</td>';
           body.appendChild(tr);
         });
       })
       .catch(function (e) {
         var body = document.getElementById('reviewBody');
-        body.innerHTML = '<tr><td colspan="5" style="color:var(--brand)">加载失败：' + e.message + '</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" style="color:var(--brand)">加载失败：' + esc(e.message) + '</td></tr>';
       });
   }
 

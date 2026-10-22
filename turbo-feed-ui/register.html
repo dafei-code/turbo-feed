@@ -188,6 +188,7 @@
   .footer span { color: #6b7a94; }
 </style>
 </head>
+  <script src="sanitize.js"></script>
 <body data-page-node-id="1niiseyhrVXLbvOAnZYOC6">
 
 <div class="bg-stream" aria-hidden="true" data-page-node-id="6521lH7rcDJWKvAX39dBSn">
@@ -290,8 +291,8 @@
       }
       // 注册成功：展示账号信息，引导去登录换取 JWT（上传链路需令牌）。
       var ok = document.getElementById('okBox');
-      ok.innerHTML = '<b>注册成功！</b><br>账号：' + result.data.phone
-        + '<br>昵称：' + result.data.nickname
+      ok.innerHTML = '<b>注册成功！</b><br>账号：' + esc(result.data.phone)
+        + '<br>昵称：' + esc(result.data.nickname)
         + '<br><br><a href="login.html" style="color:var(--accent)">去登录 ›</a>';
       ok.classList.add('show');
       document.getElementById('msg').classList.remove('show');

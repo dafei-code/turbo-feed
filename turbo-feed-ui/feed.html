@@ -446,6 +446,7 @@
   }
 </style>
 </head>
+  <script src="sanitize.js"></script>
 <body data-page-node-id="Ax6LENLAQutQI0qFnRZ92A">
 
 <div class="app" data-page-node-id="z1Y3tcB2nhy2DFV5aEKSaD">
@@ -758,7 +759,7 @@
       var multi = images.length > 1;
       // 每张图一个滑片；用 background-image 而非 <img>，省一层布局且天然 cover 裁切
       var slides = images.map(function (u) {
-        var bg = u ? "background-image:url('" + u + "');" : 'background:#1f4e79;';
+        var bg = u ? "background-image:url(" + JSON.stringify(safeUrl(u) || '#') + ");" : 'background:#1f4e79;';
         return '<div class="img-slide" style="' + bg + '"></div>';
       }).join('');
       var dots = multi
@@ -1017,10 +1018,10 @@
       const div = document.createElement('div');
       div.className = 'cm-item';
       div.innerHTML = `
-        <div class="cm-avatar">${c.name.charAt(0).toUpperCase()}</div>
+        <div class="cm-avatar">${esc(c.name.charAt(0).toUpperCase())}</div>
         <div class="cm-body">
-          <div class="cm-user">${c.name}</div>
-          <div class="cm-text">${c.text}</div>
+          <div class="cm-user">${esc(c.name)}</div>
+          <div class="cm-text">${esc(c.text)}</div>
           <div class="cm-actions"><span>回复</span><span>赞 ${fmt(c.like)}</span><span>举报</span></div>
         </div>
       `;
@@ -1049,14 +1050,14 @@
     const list = document.getElementById('cmList');
     const div = document.createElement('div');
     div.className = 'cm-item';
-    div.innerHTML = `
-      <div class="cm-avatar">A</div>
-      <div class="cm-body">
-        <div class="cm-user">admin</div>
-        <div class="cm-text">${txt}</div>
-        <div class="cm-actions"><span>删除</span><span>赞 0</span></div>
-      </div>
-    `;
+      div.innerHTML = `
+        <div class="cm-avatar">A</div>
+        <div class="cm-body">
+          <div class="cm-user">admin</div>
+          <div class="cm-text">${esc(txt)}</div>
+          <div class="cm-actions"><span>删除</span><span>赞 0</span></div>
+        </div>
+      `;
     list.insertBefore(div, list.firstChild);
     input.value = '';
     toast('评论已发送');

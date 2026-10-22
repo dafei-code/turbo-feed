@@ -612,6 +612,7 @@
   }
 </style>
 </head>
+  <script src="sanitize.js"></script>
 <body data-page-node-id="FlveMXe5jlI3UFXbQmGdr0">
 
 <!-- 未登录时显示 -->
@@ -847,7 +848,7 @@
     .then(function (r) { return r.json(); })
     .then(function (res) {
       if (res.code !== 0) {
-        grid.innerHTML = '<div class="empty-state">加载失败：' + (res.message || '未知错误') + '</div>';
+        grid.innerHTML = '<div class="empty-state">加载失败：' + esc(res.message || '未知错误') + '</div>';
         showToast('加载失败：' + (res.message || '未知错误'), 'error');
         return;
       }
@@ -957,11 +958,11 @@
       if (!n) {
         thumb = '<div class="empty-img">无预览</div>';
       } else if (n === 1) {
-        thumb = '<img src="' + p.images[0] + '" alt="">';
+        thumb = '<img src="' + safeUrl(p.images[0]) + '" alt="">';
       } else {
         thumb =
           '<div class="mini-slider" data-slider>' +
-            p.images.map(function (u) { return '<img src="' + u + '" alt="">'; }).join('') +
+            p.images.map(function (u) { return '<img src="' + safeUrl(u) + '" alt="">'; }).join('') +
           '</div>' +
           '<div class="mini-dots">' +
             p.images.map(function (_, i) { return '<i class="' + (i === 0 ? 'on' : '') + '"></i>'; }).join('') +
@@ -976,12 +977,12 @@
           '<span class="status ' + stCls + '">' + stTxt + '</span>' +
         '</div>' +
         '<div class="info">' +
-          '<div class="id" title="' + (p.postId || p.mediaId || '') + '">' + shortId(p.postId || p.mediaId) + '</div>' +
-          '<div class="time">' + fmtTime(p.createdAt) + (n > 1 ? ' · ' + n + ' 张图' : '') + '</div>' +
+          '<div class="id" title="' + esc(p.postId || p.mediaId || '') + '">' + esc(shortId(p.postId || p.mediaId)) + '</div>' +
+          '<div class="time">' + esc(fmtTime(p.createdAt)) + (n > 1 ? ' · ' + n + ' 张图' : '') + '</div>' +
           '<div class="actions">' +
-            '<button onclick="openImage(\'' + (p.images[0] || '') + '\')">查看</button>' +
-            '<button onclick="copyUrl(\'' + (p.images[0] || '') + '\')">复制链接</button>' +
-            '<button class="danger" onclick="deleteMedia(\'' + (p.mediaId || '') + '\')">删除</button>' +
+            '<button onclick="openImage(' + jsLit(p.images[0] || '') + ')">查看</button>' +
+            '<button onclick="copyUrl(' + jsLit(p.images[0] || '') + ')">复制链接</button>' +
+            '<button class="danger" onclick="deleteMedia(' + jsLit(p.mediaId || '') + ')">删除</button>' +
           '</div>' +
         '</div>';
       grid.appendChild(card);
@@ -1006,19 +1007,23 @@
 
   function openImage(url) {
     if (!url) return showToast('链接为空', 'error');
-    window.open(url, '_blank');
+    var s = safeUrl(url);
+    if (!s) return showToast('链接不合法（仅允许 http/https）', 'error');
+    window.open(s, '_blank');
   }
 
   function copyUrl(url) {
     if (!url) return showToast('链接为空', 'error');
+    var s = safeUrl(url);
+    if (!s) return showToast('链接不合法（仅允许 http/https）', 'error');
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(function () {
+      navigator.clipboard.writeText(s).then(function () {
         showToast('链接已复制', 'ok');
       }, function () {
-        fallbackCopy(url);
+        fallbackCopy(s);
       });
     } else {
-      fallbackCopy(url);
+      fallbackCopy(s);
     }
   }
   function fallbackCopy(text) {
@@ -1117,7 +1122,7 @@
       previewUrls.push(url);
       html +=
         '<div class="upload-thumb">' +
-          '<img src="' + url + '" alt="" title="' + f.name + '">' +
+          '<img src="' + url + '" alt="" title="' + esc(f.name) + '">' +
           '<button type="button" class="del" title="移除这张" onclick="removeSelected(' + i + ')">×</button>' +
           '<span class="seq">' + (i + 1) + '</span>' +
         '</div>';
