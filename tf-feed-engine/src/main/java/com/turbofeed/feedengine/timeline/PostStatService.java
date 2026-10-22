@@ -238,6 +238,19 @@ public class PostStatService {
         return new ArrayList<>(keys).subList(0, Math.min(n, keys.size()));
     }
 
+    /**
+     * 读取热度 Top-{@code cap} 的内容身份（缓存加载用，不切片）。
+     *
+     * <p>与 {@link #hotTimelineKeys} 同源（读当天 + 昨日兜底），仅不按请求 {@code n} 切片——
+     * 供 {@link HotTimelineKeyCache} 的 loader 加载「全局 Top-CAP」，由缓存层按各请求的 {@code n} 切片。</p>
+     *
+     * @param cap 加载条数上限（≤0 视为 0）
+     * @return timelineKey 列表（按热度降序）；无数据/异常返回空列表
+     */
+    public List<String> rawHotTimelineKeys(int cap) {
+        return hotTimelineKeys(cap);
+    }
+
     private static String today() {
         return LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
     }

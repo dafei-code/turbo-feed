@@ -89,6 +89,12 @@ turbofeed:
     interest-recall-ratio: ${TURBOFEED_FEED_INTEREST_RECALL_RATIO:0.15}
     # 关注流召回占每页槽位比例（抖音式「关注流 / 社交分发」G6）：关注作者近期已审内容混入发现流
     follow-recall-ratio: ${TURBOFEED_FEED_FOLLOW_RECALL_RATIO:0.1}
+    # 热点榜 L1 本地缓存（复用 tf-hotspot LocalCacheWithBroadcast，P2-6 第二消费者）：
+    # 热点榜 ZSET 在每次行为事件都更新，照搬「每次变更广播」会淹没 pub/sub，
+    # 故按设计关闭广播、仅用短 TTL 失效——热点榜 5s 延迟对「热门」召回通道完全可接受。
+    hotkey-cache:
+      ttl-seconds: ${TURBOFEED_FEED_HOTKEY_CACHE_TTL_SECONDS:5}
+      broadcast-enabled: false
     # 向量召回（抖音式双塔/ANN 的本地可运行版）：
     #   mode=hash  → 标签哈希占位（默认，零回归，无需任何训练）
     #   mode=model → 走 Redis KV 中由 TagCooccurrenceTrainer 训练/写入的共现向量

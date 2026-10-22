@@ -38,7 +38,13 @@ P2-6 指出：这套模式应抽成 `tf-hotspot` SDK 复用，供时间线热 Ke
 | 只抽接口不抽实现 | **否决** | P2-6 明确要抽「整套模式」（含广播/脏窗口/退化） |
 | SDK + 重构 + 接入时间线热 Key 一步到位 | **递延** | 先证明模式再扩展，避免一次性改动热读路径、放大风险 |
 
-## 5. 后续（Follow-ups）
+## 5. 第二消费者已落地（HotTimelineKeyCache，2026-10-22）
 
-- 时间线热 Key（如 `FeedTimelineStore` 的 `hotTimelineKeys` 读路径）接入 `LocalCacheWithBroadcast` L1，复用同一广播频道族。
-- 真启动 e2e：起 gateway + Redis 集群，验证多实例间账号状态失效（SDK 单测已用双实例模拟覆盖，e2e 为加固项）。
+- 引擎侧新增 `HotTimelineKeyCache`（包 `com.turbofeed.feedengine.timeline`），复用 `LocalCacheWithBroadcast` 做全局热点榜 L1：把 `FeedTimelineStore` 每请求读的 `PostStatService.hotTimelineKeys`（热点 ZSET `ZREVRANGE`，且跨零点读两天 = 两次 Redis 往返）缓存为进程内 L1，多实例各自缓存、零协调开销。
+- **按设计关闭广播、仅用 TTL 失效**：热点榜写源是行为事件（每次点赞/评论/分享/完播都 `ZINCRBY`），照搬网关「每次变更广播」会淹没 pub/sub，对一个「热门」召回通道毫无必要；热点榜本就是近似信号，5s TTL 延迟完全可接受。`broadcast-enabled=false`（默认），失效只靠 TTL 兜底，不引入广播基础设施。
+- `PostStatService` 新增 `rawHotTimelineKeys(cap)` 供缓存 loader 加载「全局 Top-CAP」；`HotTimelineKeyCache.getHotKeys(n, loader)` 按请求 `n` 切片；`FeedTimelineStore` 热点召回改走缓存（行为零变更，单测回归全绿）。
+- `HotTimelineKeyCacheTest` 4 单测覆盖缓存 / 切片 / 不同 n 复用 / TTL 过期。
+
+## 6. 后续（Follow-ups）
+
+- 真启动 e2e：起 gateway + 引擎 + Redis 集群，验证多实例间账号状态失效（SDK 单测已用双实例模拟覆盖，e2e 为加固项）；热点榜 L1 多实例一致性已由 TTL 保证，无需广播。

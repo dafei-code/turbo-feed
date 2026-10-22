@@ -90,6 +90,8 @@ public class FeedTimelineStore {
     /** 参与排序的 session 序列取最近 N 条（窗口大小；与画像 TopN 解耦）。 */
     private static final int SESSION_TOP_N = 20;
     private final PostStatService postStatService;
+    /** 热点榜 L1 本地缓存（P2-6 第二消费者，复用 tf-hotspot LocalCacheWithBroadcast）。 */
+    private final HotTimelineKeyCache hotTimelineKeyCache;
     private final InterestService interestService;
     /** session 级行为序列（最近互动），用于精排的"跟手"信号（见 {@link SessionSequenceService}）。 */
     private final SessionSequenceService sessionSequenceService;
@@ -369,7 +371,8 @@ public class FeedTimelineStore {
         List<FeedItemView> hotItems = new ArrayList<>();
         Set<String> hotKeys = new LinkedHashSet<>();
         if (hotSlots > 0) {
-            for (String tk : postStatService.hotTimelineKeys(hotSlots)) {
+            for (String tk : hotTimelineKeyCache.getHotKeys(hotSlots,
+                    () -> postStatService.rawHotTimelineKeys(HotTimelineKeyCache.CAP))) {
                 FeedItemView hot = memberOf(tk);
                 // 关注作者内容只在首屏关注位曝光，热点通道不再重复刷（跨页去重）。
                 if (hot != null && !followeeAuthors.contains(authorIdOf(hot)) && hotKeys.add(tk)) {

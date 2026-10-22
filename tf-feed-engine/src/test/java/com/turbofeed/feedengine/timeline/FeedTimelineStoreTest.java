@@ -27,6 +27,7 @@ import org.springframework.data.redis.core.ZSetOperations;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -44,6 +45,7 @@ class FeedTimelineStoreTest {
 
     @Mock StringRedisTemplate redisTemplate;
     @Mock PostStatService postStatService;
+    @Mock HotTimelineKeyCache hotTimelineKeyCache;
     @Mock InterestService interestService;
     @Mock SessionSequenceService sessionSequenceService;
     @Mock RankingModel rankingModel;
@@ -67,8 +69,10 @@ class FeedTimelineStoreTest {
         // lenient：store() 每次都 stub 两个 ops，部分用例只用其一，严格模式会报 UnnecessaryStubbing。
         lenient().when(redisTemplate.opsForZSet()).thenReturn(zSet);
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        return new FeedTimelineStore(redisTemplate, objectMapper, postStatService, interestService,
-                sessionSequenceService, rankingModel, reviewSignalClient, moderationProperties,
+        // 热点榜 L1 在测试里不命中（无真实热点数据），返回空，热点召回贡献为空（与原行为一致）。
+        lenient().when(hotTimelineKeyCache.getHotKeys(anyInt(), any())).thenReturn(List.of());
+        return new FeedTimelineStore(redisTemplate, objectMapper, postStatService, hotTimelineKeyCache,
+                interestService, sessionSequenceService, rankingModel, reviewSignalClient, moderationProperties,
                 vectorRecallChannel, realtimeFeatureService, preRankFilter, diversityRerankProperties,
                 diversityRerankService, coldStartService, followService, ecosystemRegulationService);
     }
