@@ -193,8 +193,21 @@ public class MediaProperties {
         private String bucket = "turbo-feed-media";
 
         /** 桶匿名可读（本地/演示用）：true 时启动预检把桶策略设为公开读，
-         * 使返回的 publicUrlBase+key 可被浏览器直接加载。生产应改 false 并用预签名 URL。 */
-        private boolean publicRead = true;
+         * 使返回的 publicUrlBase+key 可被浏览器直接加载。
+         * <b>默认 false（安全优先）</b>：私有桶下读取改走预签名 URL（见 {@code MinioStorageClient#presignedGetUrl}）；
+         * prod 环境若被显式置 true，{@code MinioStorageClient} 启动即抛异常，杜绝对象公网裸奔。 */
+        private boolean publicRead = false;
+
+        /** 读取预签名 URL 有效期（秒）：私有桶下返回给客户端的 GET 直链有效期，过期后需重新获取。默认 900（15 分钟）。 */
+        private int urlExpirySeconds = 900;
+
+        public int getUrlExpirySeconds() {
+            return urlExpirySeconds;
+        }
+
+        public void setUrlExpirySeconds(int urlExpirySeconds) {
+            this.urlExpirySeconds = urlExpirySeconds;
+        }
 
         public String getEndpoint() {
             return endpoint;

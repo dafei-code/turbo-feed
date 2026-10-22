@@ -93,6 +93,19 @@ public interface MediaStorageClient {
     }
 
     /**
+     * 签发一个「限定对象名 + GET 方法 + 有效期」的预签名读取 URL（私有桶下替代匿名直链）。
+     *
+     * <p>仅 {@code minio} 实现真正支持；本地磁盘 / 占位实现继承 default 直接抛
+     * {@link UnsupportedOperationException}（它们本就直接用公网基址拼接，无需预签名）。</p>
+     *
+     * @param mediaId 对象名（即存储 key）
+     * @param expiry  凭证有效期
+     */
+    default String presignedGetUrl(String mediaId, java.time.Duration expiry) {
+        throw presignUnsupported();
+    }
+
+    /**
      * 存储结果。
      *
      * @param mediaId 内容唯一标识（形如 media/{userId}/{uuid}.{ext}），审核与查询的主键

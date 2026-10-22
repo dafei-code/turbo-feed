@@ -15,6 +15,7 @@ import com.turbofeed.gateway.service.health.AccountHealthService;
 import com.turbofeed.gateway.service.signal.ModerationSignalService;
 import com.turbofeed.gateway.service.behavior.BehaviorLogService;
 import com.turbofeed.gateway.service.review.ModerationPolicy;
+import com.turbofeed.gateway.storage.MediaStorageClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -53,12 +54,13 @@ class MediaReviewServiceTest {
     @Mock ModerationSignalService moderationSignalService;
     @Mock BehaviorLogService behaviorLogService;
     @Mock ModerationPolicy moderationPolicy;
+    @Mock MediaStorageClient storageClient;
 
     private MediaReviewService service() {
         return new MediaReviewService(mediaRepository, mediaTagRepository, redisTemplate, contentModeration,
                 properties, accountCreditService, reportRepository, appealRepository, reviewTaskRepository,
                 outboxService, penaltyService, dispositionPolicy, accountHealthService, reporterCreditService,
-                reviewWaterLevelService, moderationSignalService, behaviorLogService, moderationPolicy);
+                reviewWaterLevelService, moderationSignalService, behaviorLogService, storageClient, moderationPolicy);
     }
 
     @Test

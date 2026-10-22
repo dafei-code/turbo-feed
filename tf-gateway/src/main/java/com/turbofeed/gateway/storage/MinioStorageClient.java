@@ -18,6 +18,8 @@ import io.minio.http.Method;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -58,11 +60,13 @@ import java.util.concurrent.TimeUnit;
 public class MinioStorageClient implements MediaStorageClient, InitializingBean {
 
     private final MediaProperties properties;
+    private final boolean prodProfile;
     private volatile MinioClient client;
     private volatile boolean initialized = false;
 
-    public MinioStorageClient(MediaProperties properties) {
+    public MinioStorageClient(MediaProperties properties, Environment env) {
         this.properties = properties;
+        this.prodProfile = env.acceptsProfiles(Profiles.of("prod"));
     }
 
     /**
@@ -72,6 +76,12 @@ public class MinioStorageClient implements MediaStorageClient, InitializingBean 
      */
     @Override
     public void afterPropertiesSet() {
+        // prod 严禁匿名可读：显式置 true 直接启动失败，杜绝对象公网裸奔（publicRead 代码默认已为 false）
+        if (prodProfile && properties.getMinio().isPublicRead()) {
+            throw new IllegalStateException(
+                    "MinIO 桶被配置为匿名可读（publicRead=true），但当前为 prod 环境："
+                            + "对象将公网裸奔，启动失败。请将 turbofeed.media.minio.public-read 置 false 并改用预签名 URL。");
+        }
         client();
     }
 
@@ -184,7 +194,10 @@ public class MinioStorageClient implements MediaStorageClient, InitializingBean 
             log.error("MinIO 写入失败: mediaId={}", mediaId, e);
             throw new BizException(ErrorCode.INTERNAL_ERROR, "文件写入对象存储失败");
         }
-        return new StoredMedia(mediaId, properties.getPublicUrlBase() + mediaId);
+        // 私有桶下不再返回公网直链（会被 403），改为返回预签名 GET URL（有效期 urlExpirySeconds）。
+        // 读取侧按 mediaId 重新签名，避免匿名可读导致对象公网裸奔。
+        return new StoredMedia(mediaId,
+                presignedGetUrl(mediaId, Duration.ofSeconds(properties.getMinio().getUrlExpirySeconds())));
     }
 
     /**
@@ -233,6 +246,21 @@ public class MinioStorageClient implements MediaStorageClient, InitializingBean 
         } catch (Exception e) {
             log.error("生成预签名上传 URL 失败: mediaId={}", mediaId, e);
             throw new BizException(ErrorCode.INTERNAL_ERROR, "生成上传凭证失败");
+        }
+    }
+
+    @Override
+    public String presignedGetUrl(String mediaId, Duration expiry) {
+        try {
+            return client().getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
+                    .method(Method.GET)
+                    .bucket(properties.getMinio().getBucket())
+                    .object(mediaId)
+                    .expiry((int) expiry.getSeconds())
+                    .build());
+        } catch (Exception e) {
+            log.error("生成预签名读取 URL 失败: mediaId={}", mediaId, e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "生成读取凭证失败");
         }
     }
 

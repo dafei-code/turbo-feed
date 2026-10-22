@@ -24,6 +24,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -107,7 +108,7 @@ public class MediaUploadFinalizer {
             maybeReprocess(reservation);
 
             List<String> urls = mediaIds.stream()
-                    .map(m -> properties.getPublicUrlBase() + m)
+                    .map(this::accessUrl)
                     .toList();
             mediaRepository.batchInsert(buildRows(reservation, urls));
 
@@ -208,13 +209,26 @@ public class MediaUploadFinalizer {
             try {
                 byte[] bytes = storageClient.download(slot.mediaId());
                 String hash = contentDedupService.sha256(bytes);
-                contentDedupService.record(uid, hash, slot.mediaId(), properties.getPublicUrlBase() + slot.mediaId());
+                contentDedupService.record(uid, hash, slot.mediaId(), accessUrl(slot.mediaId()));
             } catch (IOException e) {
                 log.warn("去重记账下载/算哈希失败（跳过该张）: mediaId={}, {}", slot.mediaId(), e.getMessage());
             } catch (Exception e) {
                 log.warn("去重记账异常（跳过该张）: mediaId={}, {}", slot.mediaId(), e.getMessage());
             }
         }
+    }
+
+    /** 生成客户端可访问的媒体 URL：minio 私有桶走预签名 GET，本地/占位走公网基址拼接。 */
+    private String accessUrl(String mediaId) {
+        if ("minio".equals(properties.getStorage())) {
+            try {
+                return storageClient.presignedGetUrl(mediaId,
+                        Duration.ofSeconds(properties.getMinio().getUrlExpirySeconds()));
+            } catch (Exception e) {
+                log.warn("预签名读取 URL 生成失败（回退公网基址）: mediaId={}, {}", mediaId, e.getMessage());
+            }
+        }
+        return properties.getPublicUrlBase() + mediaId;
     }
 
     /**

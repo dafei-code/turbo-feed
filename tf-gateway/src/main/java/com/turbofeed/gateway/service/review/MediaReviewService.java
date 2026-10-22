@@ -22,6 +22,7 @@ import com.turbofeed.gateway.service.penalty.ViolationSource;
 import com.turbofeed.gateway.service.health.AccountHealthService;
 import com.turbofeed.gateway.service.review.credit.ReporterCreditService;
 import com.turbofeed.gateway.service.review.ModerationPolicy;
+import com.turbofeed.gateway.storage.MediaStorageClient;
 import com.turbofeed.gateway.service.review.ModerationScenario;
 import com.turbofeed.gateway.service.review.StrictnessProfile;
 import com.turbofeed.gateway.service.signal.ModerationSignalService;
@@ -118,6 +119,7 @@ public class MediaReviewService {
     private final BehaviorLogService behaviorLogService;
     /** 双严格度策略（feature-match M3）：按 (来源, 场景, 类目) 查表得阈值档案，替换 M1 单一全局阈值。 */
     private final ModerationPolicy moderationPolicy;
+    private final MediaStorageClient storageClient;
 
     public MediaReviewService(MediaJdbcRepository mediaRepository,
                               MediaTagJdbcRepository mediaTagRepository,
@@ -136,6 +138,7 @@ public class MediaReviewService {
             ReviewWaterLevelService reviewWaterLevelService,
             ModerationSignalService moderationSignalService,
             BehaviorLogService behaviorLogService,
+            MediaStorageClient storageClient,
             ModerationPolicy moderationPolicy) {
         this.mediaRepository = mediaRepository;
         this.mediaTagRepository = mediaTagRepository;
@@ -155,6 +158,7 @@ public class MediaReviewService {
         this.moderationSignalService = moderationSignalService;
         this.behaviorLogService = behaviorLogService;
         this.moderationPolicy = moderationPolicy;
+        this.storageClient = storageClient;
     }
 
     /**
@@ -762,6 +766,10 @@ public class MediaReviewService {
             // penalty 集成缝：确认违规 → 落处罚（与信用扣分同触发点，CAS 保证单次）。
             penaltyService.recordViolation(authorId, ViolationCategory.OTHER, severity,
                     source, mediaId, operator, reason);
+            // P0-3：下架同步物理删除对象（minio 私有桶下杜绝直链残留；本地/占位不删，保留申诉恢复可能）
+            if ("minio".equals(properties.getStorage())) {
+                storageClient.delete(mediaId);
+            }
         }
         return rows;
     }
