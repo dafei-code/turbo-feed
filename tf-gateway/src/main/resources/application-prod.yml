@@ -1,0 +1,13 @@
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+turbofeed:
+  internal:
+    # 生产必须从环境变量注入，无默认值：缺失则启动失败（与 InternalTokenInterceptor fail-closed 双保险）
+    token: ${TURBOFEED_INTERNAL_TOKEN}
+  media:
+    minio:
+      # 生产严禁匿名可读：若被显式置 true，MinioStorageClient 启动抛异常（publicRead 代码默认已为 false）
+      public-read: false

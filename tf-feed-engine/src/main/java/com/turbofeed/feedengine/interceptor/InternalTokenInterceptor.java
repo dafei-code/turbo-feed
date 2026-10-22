@@ -4,6 +4,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -17,9 +19,9 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * 调用方须携带与引擎一致的 {@code X-Internal-Token}（配置注入 {@code turbofeed.internal.token}），
  * 否则返回 401。</p>
  *
- * <p><b>fail-open 开发模式</b>：当 {@code turbofeed.internal.token} 未配置（为空）时跳过校验，
- * 保证「克隆即跑」本地开发/测试不被拦。生产部署<b>必须</b>配置该令牌，否则内部接口等同于裸奔——
- * 未配置时会打 WARN 提醒（与网关侧同口径）。</p>
+ * <p><b>鉴权策略</b>：{@code turbofeed.internal.token} 未配置（为空）时，非 {@code prod} 环境跳过校验
+ * （fail-open，保证「克隆即跑」）；<b>prod 环境则启动抛 {@link IllegalStateException}（fail-closed）</b>，
+ * 与网关侧口径一致，杜绝生产内部接口裸奔。</p>
  *
  * <p><b>为什么不用 Spring Security</b>：与网关一致，项目未引入 Security；拦截器在 DispatcherServlet
  * 内运行，直接写 401 + {@code Result} 形态 JSON（与 {@code FeedTimelineController} 返回体一致）。</p>
@@ -32,10 +34,18 @@ public class InternalTokenInterceptor implements HandlerInterceptor {
     public static final String HEADER = "X-Internal-Token";
 
     private final String expectedToken;
+    private final boolean prodProfile;
 
-    public InternalTokenInterceptor(@Value("${turbofeed.internal.token:}") String expectedToken) {
+    public InternalTokenInterceptor(@Value("${turbofeed.internal.token:}") String expectedToken,
+                                   Environment env) {
         this.expectedToken = expectedToken == null ? "" : expectedToken;
+        this.prodProfile = env.acceptsProfiles(Profiles.of("prod"));
         if (this.expectedToken.isEmpty()) {
+            if (prodProfile) {
+                // fail-closed：生产缺令牌直接启动失败，杜绝内部接口裸奔（与网关侧口径一致）
+                throw new IllegalStateException("turbofeed.internal.token 未配置：prod 环境下 /internal/** 接口不能无鉴权放行，"
+                        + "启动失败。请通过环境变量 TURBOFEED_INTERNAL_TOKEN 注入服务间共享令牌。");
+            }
             log.warn("turbofeed.internal.token 未配置：/internal/** 接口处于无鉴权（fail-open）状态，"
                     + "生产部署务必配置 X-Internal-Token 共享密钥，否则内部接口可被任意调用");
         }
