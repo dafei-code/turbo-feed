@@ -57,7 +57,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus
+        include: health,info,prometheus,metrics
 
 turbofeed:
   # Redis 拓扑开关（与 tf-gateway 完全同名同义，实现来自 tf-redis 模块）：
