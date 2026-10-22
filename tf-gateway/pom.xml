@@ -27,6 +27,11 @@
             <groupId>com.turbofeed</groupId>
             <artifactId>tf-redis</artifactId>
         </dependency>
+        <!-- 热点治理 SDK：复用 LocalCacheWithBroadcast 的「本地缓存 + pub/sub 失效广播」模式（P2-6）。 -->
+        <dependency>
+            <groupId>com.turbofeed</groupId>
+            <artifactId>tf-hotspot</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
