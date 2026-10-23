@@ -13,8 +13,6 @@ import com.turbofeed.shared.result.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -22,7 +20,6 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executor;
 
 import java.nio.charset.StandardCharsets;
 
@@ -45,8 +42,10 @@ import java.nio.charset.StandardCharsets;
  *   <li><b>点赞 = Redis 64 槽</b>：{@link CommentLikeService} 抖音式 toggle 去重 + 计数，
  *       DB {@code like_count} 仅灾备冗余；列表读经 {@link CommentLikeService#likeCounts} 一次
  *       pipeline 聚合后回填 {@code likeCount}。</li>
- *   <li><b>落库异步化</b>：主 INSERT 与点赞落库均经 {@code interactionExecutor} 异步刷盘，主链路
- *       不阻塞 DB 写；Redis 为权威，落库仅灾备。fail-open：落库异常只告警，不影响主流程。</li>
+ *   <li><b>落库异步化 / 削峰</b>：主 INSERT 经 {@link CommentEventPublisher} 解耦——默认走进程内
+ *       {@code interactionExecutor} 异步刷盘（零回归），启用 MQ（{@code --spring.profiles.active=mq}）
+ *       后改发 RocketMQ 顺序事件、由 {@code CommentPersistConsumer} 幂等落库，把瞬时写峰值削平。
+ *       Redis 为权威，落库仅灾备；fail-open：落库异常只告警，不影响主流程。</li>
  * </ul>
  */
 @Service
@@ -81,13 +80,8 @@ public class CommentService {
     /** 评论点赞（Redis 64 槽去重 + 计数 + 异步落库 + 接 tf-counter）。 */
     private final CommentLikeService commentLikeService;
 
-    /** 异步落库执行器（与 ② 点赞同款 interactionExecutor：队列 1024、CallerRunsPolicy 背压）。
-     *  非 final + @Autowired@Qualifier 字段注入：@RequiredArgsConstructor 只注入其余 final 字段，
-     *  而构造器注入不会读取字段级 @Qualifier，故这里用字段注入精确指定 Bean 名，避免与
-     *  reviewExecutor/uploadFinalizeExecutor/taskScheduler 等同类型 Executor 冲突。 */
-    @Autowired
-    @Qualifier("interactionExecutor")
-    private Executor interactionExecutor;
+    /** 评论落库发布器（发布/订阅解耦，opt-in 削峰）：默认进程内异步落库，启用 MQ 后改经 RocketMQ 削峰。 */
+    private final CommentEventPublisher commentEventPublisher;
 
     /**
      * 发布评论（顶层或回复）。
@@ -137,16 +131,10 @@ public class CommentService {
         Comment c = new Comment(
                 commentId, mediaId, userId, rootId, parentId, content,
                 status, 0, Instant.now());
-        // ③ 评论落库异步化：主链路不阻塞 DB 写，经 interactionExecutor 异步刷盘（与 ② 点赞同套路）。
+        // ③ 评论落库异步化：经 CommentEventPublisher 解耦（默认进程内 interactionExecutor 异步落库，
+        // 启用 MQ 后改发 RocketMQ 顺序事件、由 CommentPersistConsumer 幂等落库），主链路不阻塞 DB 写；
         // Redis 计数为权威，落库仅为灾备重建用；fail-open：落库异常只告警，不影响评论发布主流程。
-        interactionExecutor.execute(() -> {
-            try {
-                commentRepository.insert(c);
-            } catch (Exception ex) {
-                log.warn("评论异步落库失败（fail-open，不影响主流程）: mediaId={}, commentId={}, {}",
-                        mediaId, commentId, ex.getMessage());
-            }
-        });
+        commentEventPublisher.publish(c);
         // 总数 +1（Redis INCR，支撑快速增长的评论实时计数）
         commentCountService.incr(mediaId);
         // 热头写入 ZSET（最新头 + 最热头初始 0），读路径热头优先不扫大表

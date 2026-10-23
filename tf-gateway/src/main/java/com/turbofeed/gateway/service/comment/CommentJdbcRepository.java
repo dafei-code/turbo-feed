@@ -57,6 +57,17 @@ public class CommentJdbcRepository {
     }
 
     /**
+     * 幂等落库（MQ 消费者用）：{@code comment_id} 为主键，重复事件 {@code INSERT IGNORE} 静默跳过，
+     * 保证 RocketMQ at-least-once 投递下（网络重投/消费重试）同评论只落一次，不报错。
+     */
+    public void insertIgnore(Comment c) {
+        jdbcTemplate.update(
+                "INSERT IGNORE INTO comment (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                c.commentId(), c.mediaId(), c.userId(), c.rootId(), c.parentId(),
+                c.content(), c.status().code(), c.likeCount(), Timestamp.from(c.createdAt()));
+    }
+
+    /**
      * 顶层评论列表（{@code rootId = 0}）最新一页（无游标，按 {@code created_at} 倒序）。
      * 走索引 {@code idx_media_root_created} 的有序前缀，仅读 {@code LIMIT} 行，无深扫。
      */
