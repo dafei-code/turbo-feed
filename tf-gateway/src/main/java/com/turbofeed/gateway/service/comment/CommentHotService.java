@@ -3,9 +3,11 @@ package com.turbofeed.gateway.service.comment;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -51,15 +53,39 @@ public class CommentHotService {
         return HOT_KEY_PREFIX + mediaId;
     }
 
-    /** 发布一条评论时写入两个 ZSET（最新头 + 最热头初始 0）。fail-open：Redis 异常仅告警。 */
+    /**
+     * 发布一条评论时写入两个 ZSET（最新头 + 最热头初始 0）。fail-open：Redis 异常仅告警。
+     *
+     * <p><b>A3：4 次往返 → 1 次</b>。改造前是 {@code ZADD recent} → {@code ZADD hot} →
+     * {@code EXPIRE recent} → {@code EXPIRE hot} 四次独立调用，大并发发布评论时往返开销 ×4，
+     * 且中途失败会留下「进了 recent 没进 hot」或「无 TTL 的永久 Key」（后者是内存泄漏面）。
+     * 现在四条命令在一次 pipeline 内发出：往返降为 1 次，失败窗口收窄到单次往返。</p>
+     *
+     * <p><b>为什么不用 Lua 脚本</b>：脚本要同时操作 recent 与 hot 两个 Key，而 Redis Cluster 下
+     * 多 Key 脚本要求全部落在<b>同一槽</b>，否则报 {@code CROSSSLOT}（本项目已为此在
+     * {@code RecommendedFeedService#invalidate} 放弃过批量 {@code DEL}）。要满足同槽就得给 Key 加
+     * hashtag，而改 Key 名会让既有 ZSET 数据立即不可见——{@code hotHead} <b>没有 DB 回退</b>，
+     * 最热 tab 会空窗整个 8d TTL。代价远高于收益，故选 pipeline：集群下多 Key 命令各自独立路由，
+     * 无 CROSSSLOT 问题、零迁移。</p>
+     *
+     * <p><b>原子性非硬需求</b>：recent 写失败时读路径有 DB 回退
+     * （{@code CommentService#listTopLevelFresh}）；hot 缺该 member 时，首次点赞的
+     * {@code ZINCRBY} 会自动补建（初始分本就是 0，语义无损）。</p>
+     */
     public void add(Comment c) {
         try {
-            String recent = recentKey(c.mediaId());
-            String hot = hotKey(c.mediaId());
-            redisTemplate.opsForZSet().add(recent, String.valueOf(c.commentId()), c.createdAt().toEpochMilli());
-            redisTemplate.opsForZSet().add(hot, String.valueOf(c.commentId()), 0.0);
-            redisTemplate.expire(recent, TTL);
-            redisTemplate.expire(hot, TTL);
+            byte[] recentB = recentKey(c.mediaId()).getBytes(StandardCharsets.UTF_8);
+            byte[] hotB = hotKey(c.mediaId()).getBytes(StandardCharsets.UTF_8);
+            byte[] memberB = String.valueOf(c.commentId()).getBytes(StandardCharsets.UTF_8);
+            double score = c.createdAt().toEpochMilli();
+            long ttlSeconds = TTL.getSeconds();
+            redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                connection.zSetCommands().zAdd(recentB, score, memberB);
+                connection.zSetCommands().zAdd(hotB, 0.0, memberB);
+                connection.keyCommands().expire(recentB, ttlSeconds);
+                connection.keyCommands().expire(hotB, ttlSeconds);
+                return null;
+            });
         } catch (Exception e) {
             log.warn("评论热头 ZADD 失败（fail-open，不影响发布）: mediaId={}, commentId={}, {}",
                     c.mediaId(), c.commentId(), e.getMessage());
