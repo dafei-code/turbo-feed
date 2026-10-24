@@ -3,10 +3,13 @@ package com.turbofeed.gateway.service.comment;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 
 /**
  * 评论总数计数服务（支撑「快速增长的评论」实时计数，避免 {@code SELECT COUNT(*)} 扫分片）。
@@ -35,27 +38,61 @@ public class CommentCountService {
     private final StringRedisTemplate redisTemplate;
     private final CommentJdbcRepository commentRepository;
 
-    /** 发布一条评论时 +1（顶层 / 回复均计入内容总评论数）。fail-open：Redis 异常仅告警。 */
+    /**
+     * 发布一条评论时 +1（顶层 / 回复均计入内容总评论数）。fail-open：Redis 异常仅告警。
+     *
+     * <p><b>A8 冷启动校正（修真实缺陷）</b>：{@code INCR} 对<b>不存在</b>的 Key 会创建为 0 再 +1。
+     * 因此 Redis 重启 / Key 过期后的第一条评论会把总数变成 1，而<b>不是</b>「历史总数 + 1」；
+     * 更糟的是此后 Key 已存在，{@link #getCount(String)} 的 DB 回退<b>永不触发</b>，
+     * 于是一个有上千条评论的内容会长期显示个位数。判定依据：{@code INCR} 返回 1 即说明 Key 是本次新建的。
+     * 此时用 {@code COUNT(*)} 取 DB 真实值，再以 {@code INCRBY} 原子补上差额。</p>
+     *
+     * <p><b>为什么用 INCRBY 而不是 SET</b>：评论落库是异步的（见 {@code CommentService}），
+     * 校正窗口内可能有并发评论也在 {@code INCR}；无条件 {@code SET} 会覆盖掉这些增量，
+     * {@code INCRBY} 则只补差额、不丢并发写入。补完后 Key = {@code dbCount + 1}
+     * （当前这条尚未落库，故 {@code dbCount} 不含它），正是正确总数。</p>
+     */
     public void incr(String mediaId) {
         try {
             String key = COUNT_KEY + mediaId;
-            redisTemplate.opsForValue().increment(key);
+            Long v = redisTemplate.opsForValue().increment(key);
+            if (v != null && v == 1L) {
+                // Key 为本次新建 → 冷启动，需以 DB 真实值校正，否则总数从 1 重新累加
+                long db = commentRepository.countAll(mediaId);
+                if (db > 0) {
+                    redisTemplate.opsForValue().increment(key, db);
+                    log.info("评论总数冷启动校正（Redis Key 缺失，按 DB 补齐差额）: mediaId={}, dbCount={}", mediaId, db);
+                }
+            }
             redisTemplate.expire(key, TTL);
         } catch (Exception e) {
             log.warn("评论总数 INCR 失败（fail-open，不影响发布）: mediaId={}, {}", mediaId, e.getMessage());
         }
     }
 
-    /** 读某内容总评论数（Redis 优先，冷启动回退 DB 并预热）。 */
+    /**
+     * 读某内容总评论数（Redis 优先，冷启动回退 DB 并预热）。
+     *
+     * <p><b>A4 滑动续期</b>：{@code GET} 与 {@code EXPIRE} 合并进一次 pipeline（往返次数不变），
+     * 使「仍在被浏览的内容」计数 Key 不会因固定 8d TTL 到期而回到冷启动路径。</p>
+     */
     public long getCount(String mediaId) {
+        String key = COUNT_KEY + mediaId;
         try {
-            String v = redisTemplate.opsForValue().get(COUNT_KEY + mediaId);
+            List<Object> pipelined = redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                byte[] kb = key.getBytes(StandardCharsets.UTF_8);
+                connection.stringCommands().get(kb);
+                // EXPIRE 对不存在的 Key 是 no-op，不会误建空 Key
+                connection.keyCommands().expire(kb, TTL.getSeconds());
+                return null;
+            });
+            Object v = pipelined.isEmpty() ? null : pipelined.get(0);
             if (v != null) {
-                return Long.parseLong(v);
+                return Long.parseLong(v.toString());
             }
             long db = commentRepository.countAll(mediaId);
             try {
-                redisTemplate.opsForValue().set(COUNT_KEY + mediaId, String.valueOf(db), TTL);
+                redisTemplate.opsForValue().set(key, String.valueOf(db), TTL);
             } catch (Exception ignore) {
                 // 预热失败不影响本次返回
             }
