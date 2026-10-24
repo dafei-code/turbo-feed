@@ -2,12 +2,12 @@ package com.turbofeed.feedengine.timeline;
 
 import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.shared.model.FeedItemView;
+import com.turbofeed.shared.model.FeedTimelineEvent;
 import com.turbofeed.shared.model.PlayableView;
 import com.turbofeed.shared.result.Result;
 import com.turbofeed.feedengine.interest.InterestService;
 import com.turbofeed.feedengine.interest.SessionSequenceService;
 import com.turbofeed.feedengine.logging.BehaviorLogSink;
-import com.turbofeed.feedengine.interest.TagIndexService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -46,9 +46,9 @@ import java.util.List;
 public class FeedTimelineController {
 
     private final RecommendedFeedService recommendedFeedService;
-    private final FeedTimelineStore feedTimelineStore;
+    /** 时间线投递的唯一入口（R7）：本类只解析入参，副作用全部由它承担。 */
+    private final FeedTimelineDeliveryService feedTimelineDelivery;
     private final PostStatService postStatService;
-    private final TagIndexService tagIndexService;
     private final InterestService interestService;
     private final SessionSequenceService sessionSequenceService;
     private final BehaviorLogSink behaviorLogSink;
@@ -95,12 +95,9 @@ public class FeedTimelineController {
     @PostMapping("/timeline/append")
     public Result<Void> append(@RequestParam(value = "poolLevel", defaultValue = "1") int poolLevel,
                                @RequestBody FeedItemView item) {
-        feedTimelineStore.append(item, poolLevel);
-        // 同步维护标签反向索引（兴趣召回/画像的基础设施），fail-open：失败只告警。
-        tagIndexService.index(item.timelineKey(), item.tags());
-        // 内容进流的同一刻清掉推荐流缓存：否则新内容要等满 15s TTL 才对用户可见。
-        // 放在 store.append 之后——先保证时间线落定，再让缓存失效（顺序颠倒会有"读到旧列表"的窗口）。
-        recommendedFeedService.invalidate();
+        // R7：三件副作用（时间线写入 + 标签索引 + 缓存失效）统一由投递入口承担，
+        // 本类不再逐个调用——否则新增通道时漏掉任何一条都是静默失效。
+        feedTimelineDelivery.apply(FeedTimelineEvent.append(item, poolLevel));
         return Result.ok();
     }
 
@@ -111,11 +108,8 @@ public class FeedTimelineController {
      */
     @PostMapping("/timeline/remove")
     public Result<Void> remove(@RequestParam("mediaId") String mediaId) {
-        feedTimelineStore.remove(mediaId);
-        // 同步摘除标签索引（与 append 用同一 timelineKey；见 TagIndexService 说明）。
-        tagIndexService.remove(mediaId);
-        // 下架比发布更需要及时：内容已从时间线摘除，缓存却还在返回它 = 已下架内容继续展示。
-        recommendedFeedService.invalidate();
+        // 同上：副作用集合由投递入口统一保证（含"下架后缓存必须立刻失效"这条最容易漏的）。
+        feedTimelineDelivery.apply(FeedTimelineEvent.remove(mediaId));
         return Result.ok();
     }
 

@@ -1,6 +1,5 @@
 package com.turbofeed.feedengine.timeline;
 
-import com.turbofeed.feedengine.interest.TagIndexService;
 import com.turbofeed.shared.model.FeedTimelineEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,10 +22,15 @@ import org.springframework.stereotype.Component;
  * 键是<b>帖身份</b>（有 postId 用 postId，历史单图数据回退 mediaId），与 {@code FeedTimelineStore}
  * 的反查索引同口径。</p>
  *
+ * <p><b>R7：本类只做「解析消息 + 决定传输语义」，副作用全部交给
+ * {@link FeedTimelineDeliveryService#applyStrict}</b>。改造前本类与 HTTP 通道各写一遍
+ * 「时间线 + 标签索引 + 缓存失效」三条副作用，本类还<b>漏了缓存失效</b>——开 MQ 后新内容要等满
+ * 缓存 TTL 才可见、下架内容仍被缓存继续返回。收敛到统一入口后，两个通道的副作用集合由同一段代码保证，
+ * 新增通道在结构上无法漏调。</p>
+ *
  * <p><b>必须走严格写入入口</b>：消费失败（抛异常）交给 RocketMQ 重试 / DLQ，
- * 因此调用 {@link FeedTimelineStore#appendStrict} / {@link FeedTimelineStore#removeStrict}（异常上抛），
- * 而非 fail-open 的 {@code append}/{@code remove}——否则异常被吞、重试与 DLQ 永不触发，
- * 静默丢失只是从 HTTP 搬到 MQ（等于白做 B2）。本类仅做 {@code log.error} 后原样 rethrow。</p>
+ * 因此调用 {@code applyStrict}（异常上抛），而非 fail-open 的 {@code apply}——否则异常被吞、
+ * 重试与 DLQ 永不触发，静默丢失只是从 HTTP 搬到 MQ（等于白做 B2）。本类仅做 {@code log.error} 后原样 rethrow。</p>
  */
 @Slf4j
 @Component
@@ -39,37 +43,18 @@ import org.springframework.stereotype.Component;
         maxReconsumeTimes = 5)
 public class FeedTimelineConsumer implements RocketMQListener<FeedTimelineEvent> {
 
-    private final FeedTimelineStore feedTimelineStore;
-    private final TagIndexService tagIndexService;
+    private final FeedTimelineDeliveryService feedTimelineDelivery;
 
     @Override
     public void onMessage(FeedTimelineEvent event) {
         try {
-            if (FeedTimelineEvent.ACTION_APPEND.equals(event.action())) {
-                int pool = event.poolLevel() == null ? 1 : event.poolLevel();
-                feedTimelineStore.appendStrict(event.item(), pool);
-                // 同步维护标签反向索引（与 HTTP 兜底路径 FeedTimelineController#append 对齐）。
-                // FeedTimelineStore 自身不维护该索引，两条投递路径必须各自显式调用，否则
-                // 开 MQ 后 tf:tag:media 整条索引会静默失效（兴趣召回/搜索都读它）。
-                // TagIndexService 内部 fail-open（异常只告警），不会破坏本消费者的严格语义。
-                tagIndexService.index(event.item().timelineKey(), event.item().tags());
-            } else if (FeedTimelineEvent.ACTION_REMOVE.equals(event.action())) {
-                feedTimelineStore.removeStrict(event.timelineKey());
-                // 摘除标签索引：键与 append 同口径（timelineKey = postId ?: mediaId）。
-                // 漏摘 → 已下架内容仍留在倒排链里，7d TTL 到期前都可被标签召回/搜到。
-                tagIndexService.remove(event.timelineKey());
-            } else {
-                // 未知 action（action 为 null / 两侧版本不一致 / 消息损坏）。
-                // 【绝不能走 else 兜底当成 REMOVE】—— 那会让一条坏消息把内容下架，是反方向的安全事故。
-                // 抛异常交给 MQ 重试，重试耗尽进 DLQ 人工核对；本分支不改动任何数据。
-                throw new IllegalArgumentException("未知的 Feed 时间线 action（拒绝按 REMOVE 兜底）: action="
-                        + event.action() + ", timelineKey=" + event.timelineKey());
-            }
+            feedTimelineDelivery.applyStrict(event);
         } catch (Exception e) {
             // 抛异常 → RocketMQ 按 maxReconsumeTimes 重投；重投耗尽进入死信队列 %DLQ%{consumerGroup}，
             // 由人工 / 巡检对账处理。严格写入入口保证异常能冒泡到此（fail-open 路径会吞掉）。
             log.error("Feed 时间线消费失败，触发 RocketMQ 重试/DLQ: timelineKey={}, action={}",
-                    event.timelineKey(), event.action(), e);
+                    event == null ? null : event.timelineKey(),
+                    event == null ? null : event.action(), e);
             throw e;
         }
     }
