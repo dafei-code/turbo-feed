@@ -84,8 +84,35 @@ public class RankingProperties {
     private boolean remoteModelEnabled = false;
 
     // ===================== 粗排（pre-rank）截断层（G1） =====================
-    /** 粗排保留倍数（相对单页 limit）：0 = 关闭（零回归），>0 时保留 {@code limit × ratio} 条进精排。 */
-    private double preRankKeepRatio = 0.0d;
+    /**
+     * 粗排保留比例（相对<b>单个流量池的候选量</b>）：0 = 关闭（零回归），>0 时每个池保留
+     * {@code ceil(池候选量 × ratio)} 条进精排。
+     *
+     * <p><b>语义修正（2026-10-24）</b>：本值原为「相对单页 limit 的保留倍数」，即跨池统一取
+     * {@code limit × ratio} 条。但读路径的分页是「按池权重切片」（见
+     * {@code FeedTimelineStore#allocateSlots}），全局 Top-N 与各池当页切片几乎不相交
+     * （全池千条里挑几十条 vs 切片只有个位数），开启后单页条数会塌缩。现改为逐池、
+     * 相对池候选量计算，并配套 {@link #preRankMinPages} 下限。</p>
+     *
+     * <p>当前 0.3 是<b>保守起步值</b>，最终取值应由 tf-benchmark 压测数据确定（见 docs 中 A5/M6）。</p>
+     */
+    private double preRankKeepRatio = 0.3d;
+
+    /**
+     * 粗排生效的最小池候选量：池内候选少于该值时不启用。
+     *
+     * <p>目的：小数据 / 低峰期（池就几十条）粗排既省不了算力、又改变了池内顺序，
+     * 用阈值把它挡掉，行为与关闭态完全一致（零变化）。</p>
+     */
+    private int preRankMinCandidates = 50;
+
+    /**
+     * 粗排保留条数的下限（相对单页 limit 的<b>页数</b>）：每个池至少保留 {@code limit × 该值} 条。
+     *
+     * <p>目的：分页是「按池权重切片」，若某池保留数少于它分摊到的页大小，切片取不满 →
+     * 单页条数塌缩。该下限保证每池都有足够候选填满自己的前若干页。</p>
+     */
+    private int preRankMinPages = 5;
 
     // ===================== DeepFM 特征交叉项（G3） =====================
     /** FM 嵌入维度（确定性 hash 初始化，无需训练产物即可跑）。 */
@@ -262,6 +289,22 @@ public class RankingProperties {
 
     public void setPreRankKeepRatio(double preRankKeepRatio) {
         this.preRankKeepRatio = preRankKeepRatio;
+    }
+
+    public int getPreRankMinCandidates() {
+        return preRankMinCandidates;
+    }
+
+    public void setPreRankMinCandidates(int preRankMinCandidates) {
+        this.preRankMinCandidates = preRankMinCandidates;
+    }
+
+    public int getPreRankMinPages() {
+        return preRankMinPages;
+    }
+
+    public void setPreRankMinPages(int preRankMinPages) {
+        this.preRankMinPages = preRankMinPages;
     }
 
     public int getDeepfmFieldDim() {

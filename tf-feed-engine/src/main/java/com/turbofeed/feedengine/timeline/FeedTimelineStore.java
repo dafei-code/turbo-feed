@@ -30,6 +30,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -116,8 +117,9 @@ public class FeedTimelineStore {
     private final RealtimeFeatureService realtimeFeatureService;
     /**
      * 粗排截断过滤器（抖音式「召回 → 粗排 → 精排 → 重排」里的粗排层，G1）。
-     * 对流量池全量候选用廉价特征快速打分、只保留 Top-N 进精排，省算力、防长尾淹没。
-     * 默认关闭（{@code preRankKeepRatio=0}），开启后对池候选做截断。
+     * 逐池对候选用廉价特征打分、按分降序<b>重排池内顺序</b>并裁掉尾部，让「兴趣匹配 + 新鲜度」
+     * 而不是单纯「入流时刻」决定谁能进这一页。默认启用（{@code preRankKeepRatio=0.3}），
+     * 候选量低于 {@code preRankMinCandidates} 的池自动跳过（小数据零变化）。
      */
     private final PreRankFilter preRankFilter;
 
@@ -451,23 +453,58 @@ public class FeedTimelineStore {
 
         // ==================================================================
         // 粗排截断（抖音式「召回 → 粗排 → 精排 → 重排」里的粗排层，G1）。
-        // 对流量池全量候选用廉价特征（兴趣/短期/session/实时 + 新鲜度，不查 DB 统计、不查健康分）
-        // 快速打分，只保留 Top-N 进精排——把「海量候选 × 贵精排」压成「少量候选 × 精排」。
-        // 默认关闭（preRankKeepRatio=0 → preRank 返回空集 = 不裁剪，行为与改造前一致）。
+        //
+        // <b>逐池独立</b>：对每个流量池的候选单独用廉价特征（兴趣/短期/session/实时 + 新鲜度，
+        // 不查 DB 统计、不查健康分）打分，按分降序<b>重排池内顺序</b>并裁掉尾部——
+        // 于是「谁能进这一页」由粗排分决定，而不再只看入流时刻：池里兴趣更匹配的内容
+        // 能顶掉"只是更早入流"的内容。
+        //
+        // <b>为什么不能跨池统一取 Top-N</b>：下面的分页是「按池权重切片」（allocateSlots），
+        // 全局 Top-N（limit×ratio，几十条）与各池当页切片（个位数条）几乎不相交，
+        // 开启后流量池对单页的贡献趋近于 0——单页条数塌缩（2026-10-24 修正的缺陷）。
+        // 逐池保留 + keep 下限（limit × preRankMinPages 页）保证每池都有足够候选填满自己的切片。
+        //
+        // 保留条数 = max(limit × preRankMinPages, ceil(池候选量 × ratio))，再受池大小约束；
+        // 池候选量 < preRankMinCandidates 时跳过（小数据零变化）。
+        // fail-open：preRank 返回空（禁用 / 无候选）即保持原顺序，绝不丢页。
         // ==================================================================
-        final Set<String> preRankKeep;
         if (preRankFilter.isEnabled()) {
-            List<PreRankCandidate> poolCands = new ArrayList<>();
-            for (List<ScoredItem> sl : scored.values()) {
-                for (ScoredItem s : sl) {
-                    poolCands.add(new PreRankCandidate(s.item(), s.recency()));
+            PreRankContext preRankCtx = new PreRankContext(interest, shortInterest, session, realtimeProfile);
+            for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
+                List<ScoredItem> sl = scored.get(pool);
+                if (sl == null || sl.isEmpty() || !preRankFilter.isEnabledFor(sl.size())) {
+                    continue;
                 }
+                List<PreRankCandidate> cands = new ArrayList<>(sl.size());
+                for (ScoredItem s : sl) {
+                    cands.add(new PreRankCandidate(s.item(), s.recency()));
+                }
+                int keep = Math.min(preRankFilter.keepCount(limit, sl.size()), sl.size());
+                List<String> order = preRankFilter.preRank(cands, preRankCtx, keep);
+                if (order.isEmpty()) {
+                    continue; // fail-open：不裁剪
+                }
+                Map<String, Integer> rank = new HashMap<>(Math.max(order.size() * 2, 16));
+                for (int i = 0; i < order.size(); i++) {
+                    rank.put(order.get(i), i);
+                }
+                List<ScoredItem> reordered = new ArrayList<>(order.size());
+                for (ScoredItem s : sl) {
+                    if (rank.containsKey(s.item().timelineKey())) {
+                        reordered.add(s);
+                    }
+                }
+                reordered.sort(Comparator.comparingInt(
+                        s -> rank.getOrDefault(s.item().timelineKey(), Integer.MAX_VALUE)));
+                scored.put(pool, reordered);
+                // parsed 与 scored 一一对应（见上方解析），同步压缩：槽位分配
+                // （allocateSlots 据此判断池非空）与向量召回候选都基于压缩后的集合。
+                List<FeedItemView> pl = new ArrayList<>(reordered.size());
+                for (ScoredItem s : reordered) {
+                    pl.add(s.item());
+                }
+                parsed.put(pool, pl);
             }
-            int keep = Math.max(1, preRankFilter.keepCount(limit));
-            preRankKeep = preRankFilter.preRank(poolCands,
-                    new PreRankContext(interest, shortInterest, session, realtimeProfile), keep);
-        } else {
-            preRankKeep = Set.of();
         }
 
         // ==================================================================
@@ -581,10 +618,8 @@ public class FeedTimelineStore {
             // 池内按"入流时刻 + 完播率加权"重排：完播率高的内容在同类 cohort 里往前排（抖音式"看完即加权"）。
             // 仅对当页切片重排，Redis 读次数有界（≤ 本池页大小），不扫全量候选。
             List<ScoredItem> slice = new ArrayList<>(items.subList(start, end));
-            // 粗排截断：仅保留被粗排选中的候选（preRankKeep 非空时才生效；空 = 不裁剪）。
-            if (!preRankKeep.isEmpty()) {
-                slice.removeIf(s -> !preRankKeep.contains(s.item().timelineKey()));
-            }
+            // 粗排已在池解析阶段完成「重排 + 截断」（见上方 G1 段），这里不再二次过滤——
+            // 之前在此处用跨池 Top-N 集合过滤当页切片，两者作用域不一致导致单页条数塌缩。
             // 精排：统一交给 RankingModel（含作者健康分降权）。原先这里有一个"各加权项全为 0 就跳过排序"的开关，
             // 现在权重默认非 0 且排序对象是页级切片（≤ 页大小），成本可忽略，故恒重排——
             // 少一个分支就少一处"权重配置错了却以为在排序"的静默分歧。
