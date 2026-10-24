@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
+import java.util.List;
 
 /**
  * 评论点赞持久层（JDBC，经 ShardingSphere DataSource 路由到分片）。
@@ -36,5 +37,17 @@ public class CommentLikeJdbcRepository {
         return jdbcTemplate.update(
                 "DELETE FROM comment_like WHERE comment_id = ? AND user_id = ? AND media_id = ?",
                 commentId, userId, mediaId);
+    }
+
+    /**
+     * 查某评论下全部点赞用户（A4 灾备重建用，带分片键 {@code media_id} 单分片命中）。
+     *
+     * <p>本表是「Redis 为权威、DB 为灾备」中的灾备侧：{@code CommentLikeService#rebuildFromDb}
+     * 据此恢复 64 槽去重集合与计数 Key。改造前本表只写不读，灾备承诺无法执行。</p>
+     */
+    public List<Long> listUserIds(String mediaId, long commentId) {
+        return jdbcTemplate.queryForList(
+                "SELECT user_id FROM comment_like WHERE media_id = ? AND comment_id = ?",
+                Long.class, mediaId, commentId);
     }
 }

@@ -8,12 +8,16 @@ import com.turbofeed.gateway.service.like.MediaLikeService;
 import com.turbofeed.gateway.service.review.MediaStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -165,42 +169,84 @@ public class MediaQueryService {
     /**
      * 给推荐流卡片注入点赞/评论计数与已赞态（抖音式「计数接卡片」）。
      *
-     * <p>逐条以时间线幂等键 {@link MediaItem#timelineKey()} 为身份：点赞数取网关 Redis Set
-     * {@code tf:like:users:{postId}} 的基数（天然 per-user 去重），已赞态取 {@code SISMEMBER}
+     * <p><b>A1 批量化</b>：改造前在循环内逐条调用 {@code likeCount}（64 次 SCARD）+
+     * {@code isLiked}（1 次 SISMEMBER）+ {@code commentCountOf}（1 次 HGET），一页 20 条 =
+     * <b>1320 个 Redis 命令、60 次独立往返</b>。现在三类计数各用一次批量读取：
+     * 点赞数走 {@code MGET}、已赞态走一次 pipeline {@code SISMEMBER}、评论数走一次 pipeline
+     * {@code HGET}——热路径降到 <b>约 60 个命令、3 次往返</b>，且与页大小无关地保持常数次往返。</p>
+     *
+     * <p>逐条以时间线幂等键 {@link MediaItem#timelineKey()} 为身份：点赞数取网关计数 Key
+     * {@code tf:like:count:{postId}}（与 64 槽去重集合同步维护），已赞态取 {@code SISMEMBER}
      * （匿名用户按未赞），评论数取引擎共享实时分 {@code tf:post:stat:{postId}.comments}
      * （与引擎 PostStatService 同命名空间，复用现有 Redis，避免再查分片库）。</p>
      *
-     * <p>fail-open：单条计数读不到按 0 / 未赞处理，绝不因计数缺失让整页失败。</p>
+     * <p>fail-open：批量读取整体失败时对应计数按 0 / 未赞处理，绝不因计数缺失让整页失败。</p>
      */
     private List<MediaItem> enrichCounts(List<MediaItem> items, String userId) {
         if (items == null || items.isEmpty()) {
             return items;
         }
         boolean authed = userId != null && !userId.isBlank();
+        List<String> keys = new ArrayList<>(items.size());
+        for (MediaItem it : items) {
+            keys.add(it.timelineKey());
+        }
+        // 三类计数各一次批量读取（往返次数与页大小无关）
+        Map<String, Long> likeCounts = mediaLikeService.likeCounts(keys);
+        Map<String, Boolean> likedSet = authed
+                ? mediaLikeService.isLikedBatch(keys, Long.parseLong(userId))
+                : Map.of();
+        Map<String, Long> commentCounts = commentCountsOf(keys);
+
         List<MediaItem> out = new ArrayList<>(items.size());
         for (MediaItem it : items) {
             String tk = it.timelineKey();
-            long likeCount = mediaLikeService.likeCount(tk);
-            boolean liked = authed && mediaLikeService.isLiked(tk, Long.parseLong(userId));
-            long commentCount = commentCountOf(tk);
-            out.add(it.withCounts(likeCount, commentCount, liked));
+            out.add(it.withCounts(
+                    likeCounts.getOrDefault(tk, 0L),
+                    commentCounts.getOrDefault(tk, 0L),
+                    Boolean.TRUE.equals(likedSet.get(tk))));
         }
         return out;
     }
 
-    /** 评论数：引擎共享实时分 comments 字段（客户端 COMMENT 行为事件实时累加）。读不到按 0。 */
-    private long commentCountOf(String timelineKey) {
+    /**
+     * 批量评论数：引擎共享实时分 {@code comments} 字段（客户端 COMMENT 行为事件实时累加）。
+     * 一次 pipeline {@code HGET} 取 N 条；读不到的项不出现在结果里（调用方按 0 处理）。
+     */
+    private Map<String, Long> commentCountsOf(List<String> timelineKeys) {
+        Map<String, Long> result = new LinkedHashMap<>();
+        if (timelineKeys.isEmpty()) {
+            return result;
+        }
         try {
-            Object v = redisTemplate.opsForHash().get(POST_STAT_PREFIX + timelineKey, "comments");
-            if (v == null) {
-                return 0L;
+            List<Object> vals = redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                for (String tk : timelineKeys) {
+                    connection.hashCommands().hGet(
+                            (POST_STAT_PREFIX + tk).getBytes(StandardCharsets.UTF_8),
+                            "comments".getBytes(StandardCharsets.UTF_8));
+                }
+                return null;
+            });
+            for (int i = 0; i < timelineKeys.size(); i++) {
+                result.put(timelineKeys.get(i), toLong(vals.get(i)));
             }
-            if (v instanceof Number n) {
-                return n.longValue();
-            }
-            return Long.parseLong(v.toString());
         } catch (Exception e) {
-            log.warn("评论数读取失败（按 0 处理）: timelineKey={}, {}", timelineKey, e.getMessage());
+            log.warn("批量评论数读取失败（按 0 处理）: size={}, {}", timelineKeys.size(), e.getMessage());
+        }
+        return result;
+    }
+
+    /** pipeline 返回值归一化为 long（缺失 / 非数字按 0）。 */
+    private static long toLong(Object v) {
+        if (v == null) {
+            return 0L;
+        }
+        if (v instanceof Number n) {
+            return n.longValue();
+        }
+        try {
+            return Long.parseLong(v.toString());
+        } catch (NumberFormatException e) {
             return 0L;
         }
     }
