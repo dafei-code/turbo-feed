@@ -183,6 +183,7 @@ turbofeed:
     connect-timeout-ms: 500
     read-timeout-ms: 2000
   # 服务间内部接口共享令牌（评审 doc P0-2）：网关↔引擎的 /internal/** 调用须携带 X-Internal-Token。
-  # 两侧共用同一值（由 TURBOFEED_INTERNAL_TOKEN 注入）；未配置则两侧均 fail-open（克隆即跑）。
+  # 两侧共用同一值（由 TURBOFEED_INTERNAL_TOKEN 注入）；未配置时仅 dev/local profile 允许 fail-open
+  # （克隆即跑 + 启动 banner 告警），其余 profile 由 InternalTokenInterceptor 启动即失败。
   internal:
     token: ${TURBOFEED_INTERNAL_TOKEN:}

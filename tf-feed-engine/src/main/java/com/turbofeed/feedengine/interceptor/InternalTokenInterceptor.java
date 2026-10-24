@@ -19,9 +19,14 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * 调用方须携带与引擎一致的 {@code X-Internal-Token}（配置注入 {@code turbofeed.internal.token}），
  * 否则返回 401。</p>
  *
- * <p><b>鉴权策略</b>：{@code turbofeed.internal.token} 未配置（为空）时，非 {@code prod} 环境跳过校验
- * （fail-open，保证「克隆即跑」）；<b>prod 环境则启动抛 {@link IllegalStateException}（fail-closed）</b>，
- * 与网关侧口径一致，杜绝生产内部接口裸奔。</p>
+ * <p><b>鉴权策略（fail-fast 优先）</b>：{@code turbofeed.internal.token} 未配置（为空）时，
+ * <b>只有 {@code dev} / {@code local} 两个 profile 允许 fail-open</b>（保证「克隆即跑」不受损），
+ * 并且启动时打印 banner 大字告警；<b>其余任何 profile（含无 profile 的 default、staging、uat、prod）
+ * 一律启动抛 {@link IllegalStateException}</b>，而不是运行期 warn + 放行，与网关侧完全对称。</p>
+ *
+ * <p><b>为什么是"非 dev/local 即失败"而不是"仅 prod 失败"</b>：内部接口裸奔的判定成本在运行期几乎为零
+ * （日志看不到、监控不报警），一旦某个中间环境漏配就永久静默。把 fail-open 收敛成显式白名单，
+ * 漏配立刻变成"起不来"，运维可感知、可修复。</p>
  *
  * <p><b>为什么不用 Spring Security</b>：与网关一致，项目未引入 Security；拦截器在 DispatcherServlet
  * 内运行，直接写 401 + {@code Result} 形态 JSON（与 {@code FeedTimelineController} 返回体一致）。</p>
@@ -33,27 +38,43 @@ public class InternalTokenInterceptor implements HandlerInterceptor {
     /** 服务间共享令牌头名（网关侧同名常量保持一致）。 */
     public static final String HEADER = "X-Internal-Token";
 
+    /**
+     * 允许 fail-open（缺令牌放行）的 profile 名单：仅 dev / local（与网关侧同名常量保持一致）。
+     * 其余 profile（含无 profile 的 default）缺令牌一律启动失败。
+     */
+    static final Profiles FAIL_OPEN_PROFILES = Profiles.of("dev", "local");
+
     private final String expectedToken;
-    private final boolean prodProfile;
 
     public InternalTokenInterceptor(@Value("${turbofeed.internal.token:}") String expectedToken,
                                    Environment env) {
         this.expectedToken = expectedToken == null ? "" : expectedToken;
-        this.prodProfile = env.acceptsProfiles(Profiles.of("prod"));
         if (this.expectedToken.isEmpty()) {
-            if (prodProfile) {
-                // fail-closed：生产缺令牌直接启动失败，杜绝内部接口裸奔（与网关侧口径一致）
-                throw new IllegalStateException("turbofeed.internal.token 未配置：prod 环境下 /internal/** 接口不能无鉴权放行，"
-                        + "启动失败。请通过环境变量 TURBOFEED_INTERNAL_TOKEN 注入服务间共享令牌。");
+            if (!env.acceptsProfiles(FAIL_OPEN_PROFILES)) {
+                // fail-fast：非 dev/local 缺令牌直接启动失败，杜绝内部接口裸奔（与网关侧口径一致）
+                throw new IllegalStateException("turbofeed.internal.token 未配置：只有 dev/local profile 允许 /internal/** 无鉴权放行，"
+                        + "当前 profile 不在豁免名单内，启动失败。请通过环境变量 TURBOFEED_INTERNAL_TOKEN 注入服务间共享令牌，"
+                        + "或以 --spring.profiles.active=dev|local 显式声明本地开发模式。");
             }
-            log.warn("turbofeed.internal.token 未配置：/internal/** 接口处于无鉴权（fail-open）状态，"
-                    + "生产部署务必配置 X-Internal-Token 共享密钥，否则内部接口可被任意调用");
+            warnFailOpen();
         }
+    }
+
+    /**
+     * fail-open 启动告警：用 banner 大字块输出，避免被滚动日志淹没。
+     * 能走到这里说明是 dev/local 本地模式，属预期行为，但仍需一眼可见。
+     */
+    private static void warnFailOpen() {
+        log.warn("================================================================================");
+        log.warn("  安全告警：turbofeed.internal.token 未配置，/internal/** 接口处于【无鉴权 fail-open】状态");
+        log.warn("  当前为 dev/local 本地模式（豁免放行，保证克隆即跑）；任何能访问本服务端口的调用方均可调用内部接口。");
+        log.warn("  生产部署必须通过环境变量 TURBOFEED_INTERNAL_TOKEN 注入共享令牌（网关与引擎两端同值）。");
+        log.warn("================================================================================");
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        // 未配置令牌：开发/克隆即跑模式，跳过校验（fail-open）。
+        // 未配置令牌：仅 dev/local 本地模式可走到这里（构造期已对其它 profile 启动失败），放行。
         if (expectedToken.isEmpty()) {
             return true;
         }

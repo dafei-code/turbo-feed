@@ -1,0 +1,10 @@
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+turbofeed:
+  internal:
+    # 生产必须从环境变量注入，无默认值：缺失则启动失败（与 InternalTokenInterceptor fail-fast 双保险）。
+    # 与 tf-gateway 的 application-prod.yml 对称：网关↔引擎两端注入同一个 TURBOFEED_INTERNAL_TOKEN。
+    token: ${TURBOFEED_INTERNAL_TOKEN}

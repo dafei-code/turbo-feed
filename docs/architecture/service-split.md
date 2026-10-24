@@ -77,7 +77,7 @@ curl -X POST "http://localhost:8083/internal/feed/timeline/remove?mediaId=media/
 | 已完成 | 结构拆分：3 个独立可执行服务 + 端口规划 + actuator 健康检查 |
 | 已完成 | **B1：Feed 时间线读模型迁入 tf-feed-engine**；gateway 引 HTTP 客户端（RestClient 直连 + 超时 + fail-open）；契约 `FeedItemView` 下沉 tf-shared；降级口径 `turbofeed.feed.degraded-mode` |
 | 已完成 | **B2：Feed 时间线投递改 RocketMQ 顺序消息**；gateway 侧 `FeedTimelinePublisher` 双实现（HTTP 兜底 / MQ 顺序），引擎侧 `FeedTimelineConsumer` 走严格写入入口（异常上抛触发重试/DLQ）；9 处调用点全部经 publisher |
-| 已完成 | **容器化交付**：`Dockerfile` 多阶段构建（按 `build.args.MODULE` 选子模块）+ `docker-compose.yml` 全栈编排（mysql / redis / minio / 三服务，RocketMQ 收进 `mq` profile），所有凭据经环境变量注入；服务间 `/internal/**` 已落地 `X-Internal-Token` 鉴权（评审 #186，fail-open） |
+| 已完成 | **容器化交付**：`Dockerfile` 多阶段构建（按 `build.args.MODULE` 选子模块）+ `docker-compose.yml` 全栈编排（mysql / redis / minio / 三服务，RocketMQ 收进 `mq` profile），所有凭据经环境变量注入；服务间 `/internal/**` 已落地 `X-Internal-Token` 鉴权（评审 #186；M0 起仅 dev/local fail-open，其余 profile 启动即失败） |
 | 下一步 | traceId 全链路日志（Phase 1 方案已定）；计数（tf-counter）写路径与 DB 拆分 |
 | Phase 2 | Nacos 服务发现 + LoadBalancer + Prometheus / Grafana + Loki 日志集中 |
 | Phase 3 | 多机房容灾与降级预案 |
@@ -115,7 +115,7 @@ curl -X POST "http://localhost:8083/internal/feed/timeline/remove?mediaId=media/
 
 - 写侧（B1 时期）为**同步 HTTP + fail-open**：引擎抖动时内容会静默不入流。语义与拆分前"网关本地写 Redis 失败仅告警"
   等价，不构成回归；**该静默丢失窗口已被 B2 的 RocketMQ 顺序消息投递消除**——MQ 不可用 → 发布器 fail-fast 抛异常 → 审核/删除事务回滚 → 对外可见失败，而非悄悄不入流。
-- 引擎 `/internal/**` **已落地服务间令牌鉴权**（评审 P0-2 / #186）：`InternalTokenInterceptor` 校验请求头 `X-Internal-Token`，值与 `TURBOFEED_INTERNAL_TOKEN` 一致才放行；令牌未配置（缺环境变量）时**两侧均 fail-open 放行**（克隆即跑），本地开发 yml 写死 `local-dev-internal-token` 即开启校验。生产部署务必两端注入同一令牌。
+- 引擎 `/internal/**` **已落地服务间令牌鉴权**（评审 P0-2 / #186）：`InternalTokenInterceptor` 校验请求头 `X-Internal-Token`，值与 `TURBOFEED_INTERNAL_TOKEN` 一致才放行。令牌未配置（缺环境变量）时的语义在 **M0 已收紧**：**只有 `dev` / `local` 两个 profile 允许 fail-open 放行**（保证「克隆即跑」，且启动打印 banner 大字告警），**其余任何 profile（含无 profile 的 default、staging、prod）一律启动抛 `IllegalStateException`**——把"漏配"从运行期静默裸奔变成"起不来"，运维可感知可修复。本地开发 yml 写死 `local-dev-internal-token` 即开启校验。生产部署务必两端注入同一令牌。
 
 ## 9. B2 落地明细（Feed 时间线投递改 RocketMQ 顺序消息）
 
