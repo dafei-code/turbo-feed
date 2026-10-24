@@ -86,7 +86,7 @@ public class EcosystemRegulationService {
             if (t != null) {
                 tagCount.merge(t, 1, Integer::sum);
             }
-            String a = FeedTimelineStore.authorIdOf(it);
+            String a = TimelineSupport.authorIdOf(it);
             if (a != null) {
                 authorCount.merge(a, 1, Integer::sum);
             }
@@ -107,7 +107,7 @@ public class EcosystemRegulationService {
         Map<String, Integer> authorUsed = new HashMap<>();
         for (FeedItemView it : page) {
             String t = primaryTag(it);
-            String a = FeedTimelineStore.authorIdOf(it);
+            String a = TimelineSupport.authorIdOf(it);
             boolean tagOk = t == null || tagUsed.getOrDefault(t, 0) < tagKeep.getOrDefault(t, Integer.MAX_VALUE);
             boolean authorOk = a == null || authorUsed.getOrDefault(a, 0) < authorKeep.getOrDefault(a, Integer.MAX_VALUE);
             if (tagOk && authorOk) {

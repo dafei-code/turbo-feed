@@ -1,6 +1,6 @@
 package com.turbofeed.feedengine.timeline;
 
-import com.turbofeed.feedengine.timeline.FeedTimelineStore.ScoredItem;
+import com.turbofeed.feedengine.timeline.RecommendationPipeline.ScoredItem;
 import com.turbofeed.shared.model.FeedItemView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,14 +92,14 @@ public class DiversityRerankService {
             remaining.remove(best);
             out.add(best);
             // 更新上下文窗口
-            String aid = FeedTimelineStore.authorIdOf(best.item());
+            String aid = TimelineSupport.authorIdOf(best.item());
             if (aid != null) {
                 authorCountInWindow.merge(aid, 1, Integer::sum);
             }
             recent.add(best);
             if (recent.size() > window) {
                 ScoredItem evicted = recent.remove(0);
-                String evictedAid = FeedTimelineStore.authorIdOf(evicted.item());
+                String evictedAid = TimelineSupport.authorIdOf(evicted.item());
                 if (evictedAid != null) {
                     authorCountInWindow.merge(evictedAid, -1, Integer::sum);
                     if (authorCountInWindow.get(evictedAid) <= 0) {
@@ -113,7 +113,7 @@ public class DiversityRerankService {
 
     /** 作者重复惩罚：超过 cap 后线性加重（cap 内也给基础惩罚，促使作者分散）。 */
     private double authorRepeatPenalty(ScoredItem c, Map<String, Integer> authorCountInWindow, int authorCap) {
-        String aid = FeedTimelineStore.authorIdOf(c.item());
+        String aid = TimelineSupport.authorIdOf(c.item());
         if (aid == null) {
             return 0d;
         }

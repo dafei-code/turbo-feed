@@ -54,6 +54,7 @@ class FeedTimelineStoreTest {
     @Mock VectorRecallChannel vectorRecallChannel;
     @Mock RealtimeFeatureService realtimeFeatureService;
     @Mock PreRankFilter preRankFilter;
+    @Mock RecommendationPipeline recommendationPipeline;
     @Mock DiversityRerankProperties diversityRerankProperties;
     @Mock DiversityRerankService diversityRerankService;
     @Mock ColdStartService coldStartService;
@@ -71,10 +72,9 @@ class FeedTimelineStoreTest {
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
         // 热点榜 L1 在测试里不命中（无真实热点数据），返回空，热点召回贡献为空（与原行为一致）。
         lenient().when(hotTimelineKeyCache.getHotKeys(anyInt(), any())).thenReturn(List.of());
-        return new FeedTimelineStore(redisTemplate, objectMapper, postStatService, hotTimelineKeyCache,
-                interestService, sessionSequenceService, rankingModel, reviewSignalClient, moderationProperties,
-                vectorRecallChannel, realtimeFeatureService, preRankFilter, diversityRerankProperties,
-                diversityRerankService, coldStartService, followService, ecosystemRegulationService);
+        // A7 之后本类只保留读模型职责（池 ZSET + 索引 + 游标），漏斗编排已迁至 RecommendationPipeline。
+        // 写路径用例不触达漏斗，故 pipeline 用 mock 即可。
+        return new FeedTimelineStore(redisTemplate, objectMapper, recommendationPipeline);
     }
 
     private FeedItemView approvedItem() {

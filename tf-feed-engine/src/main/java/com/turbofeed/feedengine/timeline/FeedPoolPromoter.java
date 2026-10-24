@@ -111,7 +111,7 @@ public class FeedPoolPromoter {
                                 timelineKey, cur, target, e.getMessage());
                     }
                 }
-                if (target >= FeedTimelineStore.MAX_POOL_LEVELS) {
+                if (target >= TimelineSupport.MAX_POOL_LEVELS) {
                     redisTemplate.opsForSet().remove(PostStatService.TRACKED_KEY, timelineKey);
                 }
             } else if (target < cur) {

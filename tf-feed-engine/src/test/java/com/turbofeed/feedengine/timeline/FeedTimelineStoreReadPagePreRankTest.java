@@ -91,8 +91,6 @@ class FeedTimelineStoreReadPagePreRankTest {
     @Mock
     private RealtimeFeatureService realtimeFeatureService;
     @Mock
-    private DiversityRerankProperties diversityRerankProperties;
-    @Mock
     private DiversityRerankService diversityRerankService;
     @Mock
     private ColdStartService coldStartService;
@@ -111,12 +109,18 @@ class FeedTimelineStoreReadPagePreRankTest {
      */
     private FeedTimelineStore store(PreRankFilter preRankFilter) {
         lenient().when(redisTemplate.opsForZSet()).thenReturn(zSet);
-        FeedTimelineStore s = new FeedTimelineStore(redisTemplate, MAPPER, postStatService, hotTimelineKeyCache,
-                interestService, sessionSequenceService, rankingModel, reviewSignalClient, moderationProperties,
-                vectorRecallChannel, realtimeFeatureService, preRankFilter, diversityRerankProperties,
-                diversityRerankService, coldStartService, followService, ecosystemRegulationService);
+        // A7：漏斗编排在 RecommendationPipeline 里，粗排也在其中，故这里构造真实的 pipeline
+        // （不是 mock），否则测不到"粗排 × 分页"的组合行为——那正是本文件要守护的地方。
+        RecommendationPipeline pipeline = new RecommendationPipeline(redisTemplate, MAPPER,
+                postStatService, hotTimelineKeyCache, interestService, sessionSequenceService,
+                rankingModel, reviewSignalClient, moderationProperties, vectorRecallChannel,
+                realtimeFeatureService, preRankFilter, diversityRerankService, coldStartService,
+                followService, ecosystemRegulationService);
+        // @Value 字段 new 出来不注入：poolWeightsCsv 需显式给出，其余召回配比保持 0（各路关闭，只留流量池）
+        ReflectionTestUtils.setField(pipeline, "poolWeightsCsv", "0.2,0.3,0.5");
+        FeedTimelineStore s = new FeedTimelineStore(redisTemplate, MAPPER, pipeline);
+        // 同样是 @Value 字段：false 会走「全池合并 + 全局倒序」回退分支，粗排根本不执行
         ReflectionTestUtils.setField(s, "poolReadWeightEnabled", true);
-        ReflectionTestUtils.setField(s, "poolWeightsCsv", "0.2,0.3,0.5");
         return s;
     }
 
