@@ -13,6 +13,12 @@
 --      ds_1(turbo_feed_2): user_1/_3, account_credit_1/_3, ...（_4 表） + media_1/_3/.../_127（奇数下标 64 张）
 --    若命名/分布不符，会报 Table doesn't exist 或路由错乱。请勿改成 user_0/user_1 各库两份。
 --
+-- ⚠️ 环境守卫（M0 / R3）：本脚本仅供【本地开发】与【compose 首次初始化】使用，严禁指向任何共享/生产实例。
+--    原因：脚本顶部会先 DROP turbo_feed_1 / turbo_feed_2 再重建，误连非本地实例等于删库。
+--    执行前自检：① 目标是本地 mysqld 或一次性容器；② 实例上无需要保留的数据；
+--                 ③ 凭据来自 .env（compose 已改为 ${VAR:?} 强制必填，缺变量直接报错而非兜底 root）。
+--    生产/预发的结构变更请走受控迁移脚本，不要用本文件。
+--
 -- 用法（在本仓库根目录执行）：
 --   mysql -uroot -p123456 < deploy/mysql/init-local.sql
 -- 顶部先 DROP 两库再重建，保证 ShardingSphere 元数据以最新 DDL（含 phone 列）为准，

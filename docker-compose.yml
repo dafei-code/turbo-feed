@@ -21,7 +21,7 @@ services:
     image: mysql:8.0
     command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     environment:
-      MYSQL_ROOT_PASSWORD: ${TURBOFEED_DB_PASSWORD:-root}
+      MYSQL_ROOT_PASSWORD: ${TURBOFEED_DB_PASSWORD:?请在 .env 中设置 TURBOFEED_DB_PASSWORD，MySQL root 口令不再提供 root 兜底}
       MYSQL_DATABASE: turbo_feed_1
       TZ: Asia/Shanghai
     ports:
@@ -32,7 +32,7 @@ services:
       - ./deploy/mysql/init-local.sql:/docker-entrypoint-initdb.d/01-init-local.sql:ro
       - mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${TURBOFEED_DB_PASSWORD:-root}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${TURBOFEED_DB_PASSWORD:?请在 .env 中设置 TURBOFEED_DB_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -51,8 +51,8 @@ services:
     image: minio/minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${TURBOFEED_MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${TURBOFEED_MINIO_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_USER: ${TURBOFEED_MINIO_ACCESS_KEY:?请在 .env 中设置 TURBOFEED_MINIO_ACCESS_KEY，不再提供 minioadmin 兜底}
+      MINIO_ROOT_PASSWORD: ${TURBOFEED_MINIO_SECRET_KEY:?请在 .env 中设置 TURBOFEED_MINIO_SECRET_KEY，不再提供 minioadmin 兜底}
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -76,8 +76,8 @@ services:
       mc mb -p local/turbo-feed-media || true
       "
     environment:
-      MINIO_ROOT_USER: ${TURBOFEED_MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${TURBOFEED_MINIO_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_USER: ${TURBOFEED_MINIO_ACCESS_KEY:?请在 .env 中设置 TURBOFEED_MINIO_ACCESS_KEY，不再提供 minioadmin 兜底}
+      MINIO_ROOT_PASSWORD: ${TURBOFEED_MINIO_SECRET_KEY:?请在 .env 中设置 TURBOFEED_MINIO_SECRET_KEY，不再提供 minioadmin 兜底}
 
   # ---- 可选消息总线（默认不启用，--profile mq 才拉起；沿用原独立编排配置）----
   namesrv:
@@ -137,18 +137,18 @@ services:
       TURBOFEED_DB_1_URL: jdbc:mysql://mysql:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
       TURBOFEED_REPLICA_DB_0_URL: jdbc:mysql://mysql:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
       TURBOFEED_REPLICA_DB_1_URL: jdbc:mysql://mysql:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
-      TURBOFEED_DB_USERNAME: ${TURBOFEED_DB_USERNAME:-root}
-      TURBOFEED_DB_PASSWORD: ${TURBOFEED_DB_PASSWORD:-root}
+      TURBOFEED_DB_USERNAME: ${TURBOFEED_DB_USERNAME:?请在 .env 中设置 TURBOFEED_DB_USERNAME}
+      TURBOFEED_DB_PASSWORD: ${TURBOFEED_DB_PASSWORD:?请在 .env 中设置 TURBOFEED_DB_PASSWORD}
       TURBOFEED_JWT_SECRET: ${TURBOFEED_JWT_SECRET}
       TURBOFEED_SNOWFLAKE_WORKER_ID: ${TURBOFEED_SNOWFLAKE_WORKER_ID:-1}
       TURBOFEED_SNOWFLAKE_DATACENTER_ID: ${TURBOFEED_SNOWFLAKE_DATACENTER_ID:-1}
       TURBOFEED_FEED_ENGINE_BASE_URL: http://tf-feed-engine:8083
       TURBOFEED_FEED_DEGRADED_MODE: empty
       TURBOFEED_MINIO_ENDPOINT: http://minio:9000
-      TURBOFEED_MINIO_ACCESS_KEY: ${TURBOFEED_MINIO_ACCESS_KEY:-minioadmin}
-      TURBOFEED_MINIO_SECRET_KEY: ${TURBOFEED_MINIO_SECRET_KEY:-minioadmin}
+      TURBOFEED_MINIO_ACCESS_KEY: ${TURBOFEED_MINIO_ACCESS_KEY:?请在 .env 中设置 TURBOFEED_MINIO_ACCESS_KEY}
+      TURBOFEED_MINIO_SECRET_KEY: ${TURBOFEED_MINIO_SECRET_KEY:?请在 .env 中设置 TURBOFEED_MINIO_SECRET_KEY}
       TURBOFEED_MEDIA_PUBLIC_URL_BASE: http://minio:9000/turbo-feed-media/
-      TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN}
+      TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN:?请在 .env 中设置 TURBOFEED_INTERNAL_TOKEN，网关与引擎必须同值}
       TURBOFEED_MQ_ENABLED: "false"
     ports:
       - "8080:8080"
@@ -180,7 +180,7 @@ services:
       TURBOFEED_REDIS_MODE: single
       TURBOFEED_REDIS_PASSWORD: ${TURBOFEED_REDIS_PASSWORD:-}
       TURBOFEED_GATEWAY_BASE_URL: http://tf-gateway:8080
-      TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN}
+      TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN:?请在 .env 中设置 TURBOFEED_INTERNAL_TOKEN，网关与引擎必须同值}
       TURBOFEED_MQ_ENABLED: "false"
     ports:
       - "8083:8083"
