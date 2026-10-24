@@ -12,19 +12,21 @@
 turbo-feed/
 ├── tf-shared/         契约库：跨服务传输模型（Result / ErrorCode / FeedItemView / FeedTimelineEvent），零依赖
 ├── tf-redis/          Redis 接入单一事实源（进程内库）：拓扑装配 单机/哨兵/集群 + 连接池，引入即生效
-├── tf-hotspot/        热点治理 SDK（进程内库）：热 Key 探测 + 广播 + Caffeine L1 —— 模块骨架，待实现
+├── tf-hotspot/        热点治理 SDK（进程内库）：L1 本地缓存 + Redis pub/sub 失效广播 —— 已落地（AccountStateCache / HotTimelineKeyCache 在用）；热 Key 探测（滑动窗口）待实现
 ├── tf-feed-engine/    Feed 引擎（独立服务 :8083）：公域时间线读模型 —— 多池 ZSET + 反查索引 + 推荐流旁路缓存
 │                      + 存量补投消费端（`/internal/feed/timeline/*`），需与 tf-gateway 同时启动
-├── tf-counter/        计数服务（独立服务 :8081）：Redis 分桶 + MQ 削峰 + 批量落库 + 三级读缓存(L1/L2/L3) —— 模块骨架，待实现
+├── tf-counter/        计数服务（独立服务 :8081）：Redis 分桶 + MQ 削峰 + 批量落库 + 三级读缓存(L1 Caffeine/L2 Redis/L3 DB) —— 已落地
 ├── tf-gateway/        HTTP 接入层（独立服务 :8080）：认证/RBAC + 媒体上传(一帖多图) + 审核状态机 + 关注关系(follow/fans) + Sentinel 流量防护
-├── tf-benchmark/      压测模块：五场景压测器 + Markdown 报告生成 —— 模块骨架，待实现
+├── tf-benchmark/      压测模块：五场景压测器 + Markdown 报告生成 —— 空壳（0 个 Java 源文件，仅目录占位），M6 待实现
 └── turbo-feed-ui/     静态前端（纯 HTML，无构建）：登录/注册 + 发布 + 公域 Feed(整帖轮播) + 审核 / 管理工作台
 ```
 
 服务间通信：同步走 HTTP（网关 → 引擎 `/internal/**`，与对外 `/api/**` 物理隔离）；异步走 RocketMQ **顺序消息**
 ——时间线的 `append` / `remove` 共用同一 topic 与同一消费者、靠消息体 `action` 区分，以保证同一帖内先后有序
 （拆 tag / 拆消费者会使「已下架内容重新出现」）。未启用 MQ 时自动退回「进程内事件 + HTTP 投递」，克隆即跑。
-契约见 `tf-shared`。服务间 `/internal/**` 接口已加 **`X-Internal-Token` 鉴权**（fail-open：缺令牌即放行，详见 `docker-compose.yml` 的 `TURBOFEED_INTERNAL_TOKEN`）。
+契约见 `tf-shared`。服务间 `/internal/**` 接口已加 **`X-Internal-Token` 鉴权**（网关与引擎两侧 `InternalTokenInterceptor`，值来自 `TURBOFEED_INTERNAL_TOKEN`）：
+**缺令牌时只有 `dev` / `local` 两个 profile 允许 fail-open 放行**（保证「克隆即跑」不受损，启动时打印 banner 告警），
+**其余任何 profile（含无 profile 的 default、staging、prod）一律启动即失败**，不允许内部接口裸奔。
 
 ## 技术栈
 
@@ -62,7 +64,7 @@ java -jar tf-feed-engine/target/tf-feed-engine-0.1.0-SNAPSHOT.jar  # Feed引擎 
 |---|---|
 | `TURBOFEED_SNOWFLAKE_WORKER_ID` / `TURBOFEED_SNOWFLAKE_DATACENTER_ID` | 雪花实例标识（0~31），单实例本地开发也必须显式给；多实例必须逐实例取不同值，否则同毫秒生成相同 ID 撞主键 |
 | `TURBOFEED_JWT_SECRET` | **JWT 签发密钥（必填 ≥32 位）**；缺失则网关启动失败，杜绝 demo 串兜底被生产静默使用 |
-| `TURBOFEED_INTERNAL_TOKEN` | 服务间 `/internal/**` 共享令牌；网关与引擎必须两端一致，未配置则两侧 fail-open 放行 |
+| `TURBOFEED_INTERNAL_TOKEN` | 服务间 `/internal/**` 共享令牌；网关与引擎必须两端一致。**仅 `dev`/`local` profile 允许缺失（fail-open + 启动告警），其它 profile 缺失即启动失败** |
 | `TURBOFEED_REDIS_PASSWORD` / `TURBOFEED_REDIS_MODE` | Redis 口令（默认空串=无密码）与模式（single / sentinel / cluster） |
 | `TURBOFEED_DB_USERNAME` / `TURBOFEED_DB_PASSWORD` | MySQL 账号密码（经 `TURBOFEED_DB_0/1_URL`、`TURBOFEED_REPLICA_DB_0/1_URL` 注入 ShardingSphere 逻辑库数据源） |
 | `TURBOFEED_FEED_ENGINE_BASE_URL` / `TURBOFEED_GATEWAY_BASE_URL` | 引擎↔网关互访地址（默认 `http://localhost:8083` / `http://localhost:8080`） |

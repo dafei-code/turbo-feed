@@ -2,7 +2,9 @@
 
 > 分布式计数服务：Feed 场景的点赞 / 播放 / 评论计数。
 > 形态：独立 Spring Boot 服务（端口 8081，`com.turbofeed.counter`）。
-> **当前状态：设计骨架**（主类 + 配置就位，业务实现待填充），本文档同时是设计蓝图。
+> **当前状态：已落地**（17 个源文件 / ~990 行：分桶累加、MQ 消费削峰、定时批量落库、三级读缓存均已实现并可用）。
+> 本文 §2 仍保留完整设计蓝图（含参数口径），§3 为**现状清单**——两者不一致时以 §3 为准。
+> 待补：与 `tf-hotspot` 的 L1 联动（当前 L1 由本模块直接用 Caffeine 自建，未接入 hotspot SDK）。
 
 ## 1. 设计目标
 
@@ -30,9 +32,19 @@
 
 ## 3. 当前实现状态
 
-- ✅ `CounterApplication` 主类、application.yml（8081 / actuator health,info / H2 兜底数据源）
-- ✅ pom：web + actuator + repackage + Redisson（自动配置暂 exclude，Redis 就绪后删）
-- ⬜ 分桶计数、MQ 消费、批量落库、三级缓存——待实现，落地时更新本文档
+**已完成（代码在 `tf-counter/src/main/java/com/turbofeed/counter/`）**：
+
+- ✅ 主类与配置：`CounterApplication`、`CounterProperties`（分桶数 / flush 间隔 / L1 TTL）、`ShedLockConfig`（多实例 flush 互斥）
+- ✅ 写路径：`CounterIncrService`（分桶 HINCRBY）、`CounterBuffer` / `RedisCounterBuffer` / `CounterBufferService`（进程内聚合缓冲）
+- ✅ MQ 削峰：`CounterMqConsumer`（消费计数事件）、`CounterIncrController`（HTTP 兜底入口）
+- ✅ 批量落库：`CounterFlushService` + `CounterFlushScheduler`（单机定时）/ `ClusteredCounterFlushScheduler`（ShedLock 集群单点调度）→ `PostCounterRepository`
+- ✅ 读路径：`CounterReadService` —— L1 Caffeine（5000 条 / TTL 60s）→ L2 Redis（`RedisCounterStore`，**opt-in**，默认关）→ L3 DB（`post_counter` 权威源），逐层回写
+- ✅ 持久化：`PostCounterRepository`（H2 兜底 + MySQL），已有 `PostCounterRepositoryH2Test`
+
+**待补**：
+
+- ⬜ 与 `tf-hotspot` 联动：L1 目前是本模块自持的 Caffeine 实例，未接入 `LocalCacheWithBroadcast`（跨实例失效广播）。当前多实例下 L1 最长有 60s 不一致窗口。
+- ⬜ `tf-benchmark` 压测验证（分桶数 / flush 间隔的最优值目前是经验值，缺客观数据）
 
 ## 4. 依赖边界
 

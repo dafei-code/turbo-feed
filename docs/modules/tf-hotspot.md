@@ -1,7 +1,8 @@
 # tf-hotspot 技术文档
 
 > 热点探测与治理 SDK。**进程内库**（不独立部署）：按设计嵌入 tf-counter / tf-feed-engine 进程使用。
-> **当前状态：模块骨架，业务未实现**（源文件 0 个；pom 依赖已就位，且已被 tf-counter / tf-feed-engine 声明依赖，但**尚无任何代码调用**）。本文档**通篇是设计蓝图，不是现状描述**。
+> **当前状态：部分落地** —— 「L1 本地缓存 + 跨实例失效广播」**已实现并在用**（2 个源文件，被 tf-gateway 的 `AccountStateCache` 与 tf-feed-engine 的 `HotTimelineKeyCache` 调用，另有 `LocalCacheWithBroadcastTest`）；
+> 「热 Key 探测」（滑动窗口计数判热，§2 第一项）**尚未实现**。本文 §2 中**只有热探测与热/冷桶迁移是蓝图**，L1 + 广播部分已是现状描述。
 
 ## 1. 为什么是库不是服务
 
@@ -25,4 +26,15 @@ L1 缓存天然属于使用它的进程（本机内存）；热点探测需要�
 
 ## 3. 当前实现状态
 
-设计蓝图（pom 依赖 Caffeine 就位，代码待填充）。落地时更新本文档并补充与 tf-counter / tf-feed-engine 的集成方式。
+**已完成**：
+
+- ✅ `LocalCacheWithBroadcast<K,V>`：L1 本地缓存 + Redis pub/sub 失效广播；version stamp 防脏窗口（失效后首次读取必 reload）；超限整体清空（非 LRU，保护性熔断）；`sweepExpired()` 周期清理；零 Spring / 零 Redis 依赖（仅依赖 `CacheInvalidationPublisher` 契约）
+- ✅ `CacheInvalidationPublisher`：失效广播发布契约（gateway 侧实现为 `RedisCacheInvalidationPublisher`）
+- ✅ `LocalCacheWithBroadcastTest`
+- ✅ 接入方：tf-gateway `AccountStateCache`（账号状态缓存）、tf-feed-engine `HotTimelineKeyCache`（热时间线 Key 缓存）
+
+**待补**：
+
+- ⬜ 热 Key 探测：滑动窗口访问计数（`window-seconds` / `hot-threshold` 已配置但**无代码消费**），判热后自动进 L1 并广播热 Key 集合
+- ⬜ 热/冷桶迁移：与 `tf-counter.bucket-count` 联动，热 Key 走独立桶隔离写热点
+- ⬜ tf-counter 的 L1 接入：目前 tf-counter 自持 Caffeine，未用本 SDK（见 [tf-counter.md](tf-counter.md) §3）

@@ -17,7 +17,7 @@ docs/
 │   └── recommendation-design.md  # 推荐与用户画像：分表数据聚合分析 / CDC 出仓 / 召回排序（**规划中未实施**）
 ├── modules/                  # 模块级技术文档（与 Maven 模块一一对应）
 │   ├── tf-gateway.md         # 网关：认证与 RBAC / 一帖多图上传 / 审核状态机 / 分片 / 配置
-│   ├── tf-counter.md         # 计数服务：现状（模块骨架）+ 设计蓝图
+│   ├── tf-counter.md         # 计数服务：已落地（分桶 / MQ 削峰 / 批量落库 / 三级读缓存）+ 与 tf-hotspot 联动待补
 │   ├── tf-feed-engine.md     # Feed 引擎：公域时间线读模型（已实现）+ 扇出蓝图
 │   ├── tf-hotspot.md         # 热点探测 SDK：设计蓝图（尚未实现）
 │   └── tf-shared.md          # 公共契约：Result / ErrorCode / FeedItemView / FeedTimelineEvent
