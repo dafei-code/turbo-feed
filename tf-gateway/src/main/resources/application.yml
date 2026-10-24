@@ -299,8 +299,17 @@ turbofeed:
     window-seconds: 10          # 滑动窗口长度
     hot-threshold: 1000         # 热 Key 判定阈值（窗口内访问次数）
     l1-ttl-seconds: 3           # L1 本地缓存 TTL
+  # ==================== 安全降级开关（M0 / R10）====================
+  # 每项的取值与后果登记在 docs/architecture/threat-model-degradation.md，改值前先看那张矩阵。
+  security:
+    # Redis 不可用时，JWT 黑名单查询放行还是拒绝。
+    # false（默认，fail-closed）：查不到黑名单 = 无法证明令牌未被吊销 → 拒绝请求。
+    # true（显式 fail-open）：放行，但每次降级打 WARN + 累加 turbofeed.security.blacklist.error{mode=open}。
+    # 两种都行，但必须由这里显式声明，不允许代码里悄悄选一个。
+    token-blacklist-fail-open-on-error: false
   # 服务间内部接口共享令牌（评审 doc P0-2）：网关↔引擎的 /internal/** 调用须携带 X-Internal-Token。
-  # 两侧共用同一值（由 TURBOFEED_INTERNAL_TOKEN 注入）；未配置则两侧均 fail-open（克隆即跑）。
+  # 两侧共用同一值（由 TURBOFEED_INTERNAL_TOKEN 注入）；未配置时仅 dev/local profile 允许 fail-open
+  # （克隆即跑 + 启动 banner 告警），其余 profile 由 InternalTokenInterceptor 启动即失败。
   internal:
     token: ${TURBOFEED_INTERNAL_TOKEN:}
   # ==================== P0-5 Sentinel 规则 Nacos 数据源（ADR-002，opt-in）====================

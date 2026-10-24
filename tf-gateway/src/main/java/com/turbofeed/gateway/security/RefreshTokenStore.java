@@ -29,9 +29,11 @@ import java.util.Set;
  * 立即失效，刷新令牌另删 RT key。于是「角色变更 / 封禁 / 全端登出」对访问令牌也是<b>即时生效</b>
  * （旧实现只吊销 RT，AT 要等 ≤30min 自然过期）。</p>
  *
- * <p><b>Fail-open（与 TokenBlacklist 一致）</b>：Redis 不可用时，store / revoke 尽力而为仅记日志；
- * 批量吊销返回 0（视为无效，逼客户端重新登录）。理由：刷新令牌是「增强可用性」的辅助通道，
- * 不能因 Redis 抖动把登录链路整体拖垮；最坏情况退化为「无刷新，访问令牌到期需重新登录」，行为可接受。</p>
+ * <p><b>Fail-open（刻意与 {@link TokenBlacklist} 不同，见《威胁模型与降级矩阵》§3.4）</b>：
+ * Redis 不可用时，store / revoke 尽力而为仅记日志；批量吊销返回 0（视为无效，逼客户端重新登录）。
+ * 理由：黑名单管的是「止损」（放行的代价是盗号令牌继续可用，不可接受 → 默认 fail-closed）；
+ * 刷新令牌管的是「续期」（放行的代价仅是用户需重新登录，可接受 → fail-open）。
+ * 两者语义不同，因此降级策略也不同，不是遗漏而是刻意区分。</p>
  */
 @Component
 public class RefreshTokenStore {
