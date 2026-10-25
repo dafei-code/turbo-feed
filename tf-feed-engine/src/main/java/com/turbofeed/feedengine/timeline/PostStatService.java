@@ -1,6 +1,7 @@
 package com.turbofeed.feedengine.timeline;
 
 import com.turbofeed.shared.model.FeedBehaviorEvent;
+import com.turbofeed.shared.redis.RedisKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -47,7 +48,7 @@ public class PostStatService {
     private final StringRedisTemplate redisTemplate;
 
     /** 每帖实时分：{@code tf:post:stat:{timelineKey}} => Hash(各行为计数)。 */
-    static final String STAT_PREFIX = "tf:post:stat:";
+    static final String STAT_PREFIX = RedisKeys.POST_STAT;
     /** 待晋级评估的帖集合（有界，避免 SCAN）。 */
     static final String TRACKED_KEY = "tf:feed:stat:tracked";
     /**

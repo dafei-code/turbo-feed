@@ -1,5 +1,7 @@
 package com.turbofeed.gateway.service.search;
 
+import com.turbofeed.shared.redis.RedisKeys;
+
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.MediaStatus;
@@ -58,7 +60,7 @@ public class SearchService {
     private static final Logger log = LoggerFactory.getLogger(SearchService.class);
 
     /** 有序倒排键前缀（与引擎 {@code TagIndexService} 同源，勿单边修改）。 */
-    private static final String ORDERED_KEY_PREFIX = "tf:tag:media:z:";
+    private static final String ORDERED_KEY_PREFIX = RedisKeys.TAG_MEDIA_ORDERED;
 
     private static final int DEFAULT_SIZE = 20;
     private static final int MAX_SIZE = 50;

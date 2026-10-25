@@ -1,5 +1,7 @@
 package com.turbofeed.feedengine.ranking;
 
+import com.turbofeed.shared.redis.RedisKeys;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -18,7 +20,7 @@ import org.springframework.stereotype.Component;
 public class FeedModerationProperties {
 
     /** 审核信号 KV 命名空间（须与网关生产者一致，默认 tf:mod:）。 */
-    private String namespace = "tf:mod:";
+    private String namespace = RedisKeys.MODERATION_DEFAULT_NAMESPACE;
 
     /** 召回过滤总开关：true = 按内容处置(INTERCEPT/MONITOR) + 低健康分作者剔除公域内容。 */
     private boolean enableRecallFilter = true;

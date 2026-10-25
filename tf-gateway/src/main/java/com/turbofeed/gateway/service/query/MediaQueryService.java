@@ -1,5 +1,7 @@
 package com.turbofeed.gateway.service.query;
 
+import com.turbofeed.shared.redis.RedisKeys;
+
 import com.turbofeed.gateway.client.FeedEngineClient;
 import com.turbofeed.gateway.config.FeedEngineProperties;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
@@ -52,11 +54,11 @@ public class MediaQueryService {
     private final MediaLikeService mediaLikeService;
 
     /** 引擎共享实时分前缀（{@code tf:post:stat:{timelineKey}} Hash；与引擎 PostStatService 同命名空间，复用现有 Redis）。 */
-    private static final String POST_STAT_PREFIX = "tf:post:stat:";
+    private static final String POST_STAT_PREFIX = RedisKeys.POST_STAT;
 
     /** 单条状态缓存 TTL：60s（个人中心轮询刷新，较长 TTL 进一步降 DB 压力） */
     private static final Duration STATUS_CACHE_TTL = Duration.ofSeconds(60);
-    private static final String STATUS_KEY_PREFIX = "tf:media:status:";
+    private static final String STATUS_KEY_PREFIX = RedisKeys.MEDIA_STATUS;
 
     /**
      * 查询指定用户上传的内容列表（按上传时间倒序，分页）。

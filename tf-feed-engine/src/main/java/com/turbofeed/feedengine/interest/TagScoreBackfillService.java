@@ -1,6 +1,7 @@
 package com.turbofeed.feedengine.interest;
 
 import com.turbofeed.feedengine.timeline.FeedTimelineStore;
+import com.turbofeed.shared.redis.RedisKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.ScanOptions;
@@ -55,9 +56,9 @@ public class TagScoreBackfillService {
     private static final Logger log = LoggerFactory.getLogger(TagScoreBackfillService.class);
 
     /** 标签 → 内容集合（回填的驱动侧，与 {@link TagIndexService} 同源，勿单边修改）。 */
-    private static final String TAG_SET_PREFIX = "tf:tag:media:";
+    private static final String TAG_SET_PREFIX = RedisKeys.TAG_MEDIA;
     /** 标签 → 内容有序集合（回填的目标侧）。 */
-    private static final String TAG_ZSET_PREFIX = "tf:tag:media:z:";
+    private static final String TAG_ZSET_PREFIX = RedisKeys.TAG_MEDIA_ORDERED;
 
     /** 扫描批大小：只影响 SCAN 的每次往返条数，不影响结果完整性。 */
     private static final int SCAN_BATCH = 500;

@@ -1,5 +1,7 @@
 package com.turbofeed.feedengine.interest;
 
+import com.turbofeed.shared.redis.RedisKeys;
+
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -38,7 +40,7 @@ public class TagIndexService {
     private final StringRedisTemplate redisTemplate;
 
     /** 标签 → 内容集合。 */
-    private static final String TAG_TO_MEDIA = "tf:tag:media:";
+    private static final String TAG_TO_MEDIA = RedisKeys.TAG_MEDIA;
     /**
      * 标签 → 内容<b>有序</b>集合（ZSET，score = 入流时间戳毫秒）。
      *
@@ -47,7 +49,7 @@ public class TagIndexService {
      * 天然支持「按时间倒序 + 游标翻页」，是搜索（S1）的读路径主索引。
      * 两者<b>同源双写</b>：SET 供既有兴趣召回读，ZSET 供搜索翻页读；灰度完成后再收敛为单写。</p>
      */
-    private static final String TAG_TO_MEDIA_ORDERED = "tf:tag:media:z:";
+    private static final String TAG_TO_MEDIA_ORDERED = RedisKeys.TAG_MEDIA_ORDERED;
     /**
      * 联想词典（全局唯一一个键，member 恒 score=0 才能用 {@code ZRANGEBYLEX} 做前缀扫描）。
      *

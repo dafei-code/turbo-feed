@@ -1,5 +1,6 @@
 package com.turbofeed.feedengine.social;
 
+import com.turbofeed.shared.redis.RedisKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -24,7 +25,7 @@ public class FollowService {
 
     private static final Logger log = LoggerFactory.getLogger(FollowService.class);
     /** 关注关系键前缀（网关写入，本服务只读）：tf:follow:{userId} = ZSET(authorId → 关注时刻)。 */
-    private static final String FOLLOW_PREFIX = "tf:follow:";
+    private static final String FOLLOW_PREFIX = RedisKeys.FOLLOW;
 
     private final StringRedisTemplate redisTemplate;
 

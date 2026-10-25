@@ -1,6 +1,7 @@
 package com.turbofeed.gateway.service.social;
 
 import com.turbofeed.gateway.exception.BizException;
+import com.turbofeed.shared.redis.RedisKeys;
 import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,10 +42,18 @@ public class FollowService {
 
     private static final Logger log = LoggerFactory.getLogger(FollowService.class);
 
-    /** 我关注的作者：tf:follow:{userId} = ZSET(authorId → 关注时刻ms)。引擎 G6 只读此键。 */
-    static final String FOLLOW_PREFIX = "tf:follow:";
-    /** 我的粉丝：tf:follower:{userId} = ZSET(followerId → 关注时刻ms)。 */
-    static final String FOLLOWER_PREFIX = "tf:follower:";
+    /**
+     * 我关注的作者：tf:follow:{userId} = ZSET(authorId → 关注时刻ms)。引擎 G6 只读此键。
+     *
+     * <p><b>跨服务契约</b>：字面量统一来自 {@link RedisKeys#FOLLOW}，避免两侧各写一份漂移。</p>
+     */
+    static final String FOLLOW_PREFIX = RedisKeys.FOLLOW;
+    /**
+     * 我的粉丝：tf:follower:{userId} = ZSET(followerId → 关注时刻ms)。
+     *
+     * <p><b>跨服务契约</b>：字面量统一来自 {@link RedisKeys#FOLLOWER}。</p>
+     */
+    static final String FOLLOWER_PREFIX = RedisKeys.FOLLOWER;
     /** 用户社交计数：tf:user:stat:{userId} HASH(following / followers)。 */
     static final String STAT_PREFIX = "tf:user:stat:";
     static final String FOLLOWING_FIELD = "following";

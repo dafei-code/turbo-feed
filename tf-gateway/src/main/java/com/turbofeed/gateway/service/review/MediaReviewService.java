@@ -28,6 +28,7 @@ import com.turbofeed.gateway.service.review.StrictnessProfile;
 import com.turbofeed.gateway.service.signal.ModerationSignalService;
 import com.turbofeed.gateway.service.behavior.BehaviorLogService;
 import com.turbofeed.shared.caption.CaptionTagParser;
+import com.turbofeed.shared.redis.RedisKeys;
 import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,7 +78,7 @@ public class MediaReviewService {
      */
     private static final Logger log = LoggerFactory.getLogger(MediaReviewService.class);
 
-    private static final String STATUS_KEY_PREFIX = "tf:media:status:";
+    private static final String STATUS_KEY_PREFIX = RedisKeys.MEDIA_STATUS;
 
     /** 热度累计计数键前缀（抖音式「越火审得越严」，changelog 0066）。键为 postId（帖身份）。 */
     private static final String HEAT_KEY_PREFIX = "tf:media:heat:";

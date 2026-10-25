@@ -6,6 +6,7 @@ import com.turbofeed.gateway.service.review.ModerationScenario;
 import com.turbofeed.gateway.service.review.ModerationStrictness;
 import com.turbofeed.gateway.service.review.StrictnessProfile;
 import com.turbofeed.gateway.service.penalty.ViolationCategory;
+import com.turbofeed.shared.redis.RedisKeys;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.util.unit.DataSize;
@@ -1179,7 +1180,7 @@ public class MediaProperties {
      */
     public static class Signal {
         /** KV 命名空间前缀（所有审核信号键的前缀）。默认 tf:mod:，避免与现有 tf:report:/tf:comment:/tf:media: 混用。 */
-        private String namespace = "tf:mod:";
+        private String namespace = RedisKeys.MODERATION_DEFAULT_NAMESPACE;
 
         /** 内容处置信号 TTL（秒）：随内容生命周期，默认 30 天可刷新。0 表示不设过期（不推荐）。 */
         private long mediaTtlSeconds = 2592000L;

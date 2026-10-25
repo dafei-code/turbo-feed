@@ -39,6 +39,7 @@ import com.turbofeed.gateway.service.validation.UploadValidation;
 import com.turbofeed.gateway.service.validation.UploadValidationChain;
 import com.turbofeed.gateway.storage.MediaStorageClient;
 import com.turbofeed.gateway.util.CaptionMarkParser;
+import com.turbofeed.shared.redis.RedisKeys;
 import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -177,7 +178,7 @@ public class MediaUploadService {
     }
 
     /** 单条状态缓存前缀（与 MediaReviewService 一致，删除时精确失效） */
-    private static final String STATUS_KEY_PREFIX = "tf:media:status:";
+    private static final String STATUS_KEY_PREFIX = RedisKeys.MEDIA_STATUS;
 
     /** Magic Number 探测字节数：需覆盖 WEBP（标识位于偏移 8、长 4 字节），故取 12。 */
     private static final int HEADER_PROBE_BYTES = 12;
