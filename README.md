@@ -73,7 +73,26 @@ java -jar tf-feed-engine/target/tf-feed-engine-0.1.0-SNAPSHOT.jar  # Feed引擎 
 
 常用开关：`--spring.profiles.active=mq` 启用 RocketMQ 投递 · `turbofeed.media.storage=minio|local` 媒体存储实现 ·
 `turbofeed.feed.degraded-mode=empty|local-scan` 引擎不可用时的口径（生产必须 `empty`，`local-scan` 会跨分片广播回源）·
-`turbofeed.review.moderation-mode=rule|pass|ai` 机审策略。
+`turbofeed.review.moderation-mode=rule|pass|ai` 机审策略 ·
+`turbofeed.security.token-blacklist-fail-open-on-error=false` 黑名单查询失败时拒绝（fail-closed，详见下节）。
+
+### Redis 持久化与灾备重建
+
+Redis 在本项目**不只是缓存**，而是多项能力的权威数据源，因此不能按"丢了重建就行"对待：
+
+| Redis 中的数据 | 角色 | 丢失后的表现 |
+|---|---|---|
+| 令牌黑名单 `turbofeed:jwt:blacklist:{jti}` | 登出 / 风控踢人 / 盗号止损的权威 | 已吊销令牌重新可用，且**无任何报错** |
+| 计数 Key `tf:like:count:*` / `tf:comment:like:count:*` | 点赞 / 评论点赞的权威计数源 | 计数归零后从 1 重新累加（冷启动校正也无法覆盖"去重集合已丢"的情形） |
+| 去重集合 `tf:like:users:*` / `tf:comment:liked:*` | 幂等权威 | 老内容可被重复点赞 |
+| 时间线 `tf:feed:tl:*` / 反查索引 `tf:feed:idx:*` | 公域读模型 | 推荐流空白（需走补投/重建） |
+| 会话序列 / 兴趣画像 / 热头 ZSET | 个性化与榜单 | 推荐退化、热榜清空 |
+
+对应措施：
+
+- **compose 演示栈已显式开启 AOF**（`redis:7-alpine` 默认不开）并挂 `redis-data` 数据卷，避免容器删除即全丢。
+- **重建入口已可执行**（不是注释承诺）：`/api/admin/counter/*` 提供 recount（按去重集合对账）与 rebuild（按 `media_like` / `comment_like` 灾备表重建）；搜索侧另有 `/api/admin/search/rebuild`。三者均需 `SYSTEM_CONFIG` 权限（仅 ADMIN）。
+- 去重集合采用**滑动续期**（详情页读路径刷新 TTL），使仍被浏览的内容不会因固定 8d TTL 到期而丢失幂等语义。
 
 ## 技术文档
 

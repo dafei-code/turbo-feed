@@ -39,8 +39,18 @@ services:
 
   redis:
     image: redis:7-alpine
+    # A8 核实结论：redis:7-alpine 默认【不开 AOF】，且未挂数据卷 →
+    # 容器删除 / 重建后 Redis 数据全部丢失。而本项目 Redis 不只是缓存：
+    #   ① 令牌黑名单（登出 / 风控踢人 / 盗号止损的权威）
+    #   ② 会话级最近互动序列、用户兴趣画像
+    #   ③ 点赞 / 评论计数（Redis 为权威计数源）
+    # 丢了不会报错，只表现为「已登出的令牌又能用」「计数归零」，属静默故障。
+    # 故显式开启 AOF 并挂数据卷；演示栈重启后状态可恢复。
+    command: redis-server --appendonly yes
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -213,4 +223,5 @@ services:
 
 volumes:
   mysql-data:
+  redis-data:
   minio-data:
