@@ -2,7 +2,6 @@ package com.turbofeed.gateway.service.review;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.turbofeed.gateway.config.MediaProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -33,13 +32,13 @@ public class CloudContentModeration implements ContentModeration {
 
     private static final Logger log = LoggerFactory.getLogger(CloudContentModeration.class);
 
-    private final MediaProperties.Review.Cloud cloud;
+    private final ReviewProperties.Cloud cloud;
     private final CloudResponseParser parser;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpClient httpClient;
 
-    public CloudContentModeration(MediaProperties mediaProperties, CloudResponseParser parser) {
-        this.cloud = mediaProperties.getReview().getCloud();
+    public CloudContentModeration(ReviewProperties reviewProperties, CloudResponseParser parser) {
+        this.cloud = reviewProperties.getCloud();
         this.parser = parser != null ? parser : new GenericCloudResponseParser();
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(cloud.getTimeoutMs()))

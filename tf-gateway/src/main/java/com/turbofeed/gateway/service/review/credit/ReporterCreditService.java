@@ -1,9 +1,9 @@
 package com.turbofeed.gateway.service.review.credit;
 
-import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.repository.ReporterCreditRepository;
 import com.turbofeed.gateway.service.health.AccountHealthService;
 import com.turbofeed.gateway.service.penalty.ViolationSeverity;
+import com.turbofeed.gateway.service.review.ReviewProperties;
 import com.turbofeed.gateway.service.signal.ModerationSignalService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,16 +33,16 @@ public class ReporterCreditService {
     private static final int MIN = 0;
 
     private final ReporterCreditRepository repository;
-    private final MediaProperties mediaProperties;
+    private final ReviewProperties reviewProperties;
     private final AccountHealthService accountHealthService;
     /** 审核信号外供 KV（P2-1）：举报人信用写成 Redis，供上游推荐系统消费。 */
     private final ModerationSignalService moderationSignalService;
 
-    public ReporterCreditService(ReporterCreditRepository repository, MediaProperties mediaProperties,
+    public ReporterCreditService(ReporterCreditRepository repository, ReviewProperties reviewProperties,
                                  AccountHealthService accountHealthService,
                                  ModerationSignalService moderationSignalService) {
         this.repository = repository;
-        this.mediaProperties = mediaProperties;
+        this.reviewProperties = reviewProperties;
         this.accountHealthService = accountHealthService;
         this.moderationSignalService = moderationSignalService;
     }
@@ -79,7 +79,7 @@ public class ReporterCreditService {
         log.info("举报人信用扣分（举报被驳回）: userId={}, credibility={}->{}", userId, cur.credibility(), next);
         // P2-1：把「举报人信用」写成外供 KV（刷新式）。
         moderationSignalService.publishReporterCredit(userId, next, accountHealthService.isBanned(userId));
-        if (rejected >= mediaProperties.getReview().getReporterAbuseRejectedThreshold()) {
+        if (rejected >= reviewProperties.getReporterAbuseRejectedThreshold()) {
             // 恶意举报惩罚：复用账号健康分通道（扣 LOW），与内容违规三通道解耦。
             accountHealthService.recordViolation(userId, ViolationSeverity.LOW);
             log.warn("恶意举报惩罚：累计驳回达阈值，扣健康分: userId={}, rejected={}", userId, rejected);
@@ -88,7 +88,7 @@ public class ReporterCreditService {
 
     /** 信用是否达标：达标（&gt;= floor）的举报人才计入复审升级；无记录按满分 100 处理（无罪推定）。 */
     public boolean isCredible(long userId) {
-        return credibilityOf(userId) >= mediaProperties.getReview().getReporterCredibilityFloor();
+        return credibilityOf(userId) >= reviewProperties.getReporterCredibilityFloor();
     }
 
     public int credibilityOf(long userId) {
@@ -101,11 +101,11 @@ public class ReporterCreditService {
     }
 
     private int upStep() {
-        return mediaProperties.getReview().getReporterCredibilityUpStep();
+        return reviewProperties.getReporterCredibilityUpStep();
     }
 
     private int downStep() {
-        return mediaProperties.getReview().getReporterCredibilityDownStep();
+        return reviewProperties.getReporterCredibilityDownStep();
     }
 
     private static int clamp(int v) {

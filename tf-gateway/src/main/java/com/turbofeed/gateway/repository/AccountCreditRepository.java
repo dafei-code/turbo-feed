@@ -1,6 +1,6 @@
 package com.turbofeed.gateway.repository;
 
-import com.turbofeed.gateway.config.MediaProperties;
+import com.turbofeed.gateway.service.review.ReviewProperties;
 import com.turbofeed.gateway.service.review.credit.AccountCredit;
 import com.turbofeed.gateway.service.review.credit.CreditLevel;
 import lombok.RequiredArgsConstructor;
@@ -36,7 +36,7 @@ import java.util.List;
 public class AccountCreditRepository {
 
     private final JdbcTemplate jdbcTemplate;
-    private final MediaProperties mediaProperties;
+    private final ReviewProperties reviewProperties;
 
     /**
      * 确保信用行存在（不存在则插入：100 分 / L1，且<b>进入新人观察期</b>）；幂等。
@@ -55,7 +55,7 @@ public class AccountCreditRepository {
 
     /** 读取信用等级（无记录默认 L1，等同 ensure 后的状态）。加严/观察按时间窗推导（P0-5/P0-6）。 */
     public CreditLevel getLevel(long userId) {
-        MediaProperties.Review review = mediaProperties.getReview();
+        ReviewProperties review = reviewProperties;
         List<Integer> codes = jdbcTemplate.query(
                 "SELECT level FROM account_credit WHERE user_id = ?",
                 (rs, rn) -> rs.getInt("level"), userId);

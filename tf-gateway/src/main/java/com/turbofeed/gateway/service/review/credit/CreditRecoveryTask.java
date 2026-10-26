@@ -1,6 +1,6 @@
 package com.turbofeed.gateway.service.review.credit;
 
-import com.turbofeed.gateway.config.MediaProperties;
+import com.turbofeed.gateway.service.review.ReviewProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -30,11 +30,11 @@ import java.time.Instant;
 public class CreditRecoveryTask {
 
     private final JdbcTemplate jdbcTemplate;
-    private final MediaProperties mediaProperties;
+    private final ReviewProperties reviewProperties;
 
     @Scheduled(cron = "0 0 3 * * ?")
     public void recover() {
-        MediaProperties.Review review = mediaProperties.getReview();
+        ReviewProperties review = reviewProperties;
         Timestamp quietCutoff = Timestamp.from(Instant.now().minus(Duration.ofDays(review.getCreditRecoverQuietDays())));
         // 注意：不过滤 strict_queue_flag=0——该标记持久化后只置 1 不清 0（是否仍加严由读取时时间窗推导），
         // 若按 flag=0 过滤，超窗口的违规账号会被永久排除在恢复外。此处按 last_violation_at 窗口判断，

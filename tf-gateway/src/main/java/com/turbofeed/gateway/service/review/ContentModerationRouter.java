@@ -5,7 +5,6 @@ import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import com.turbofeed.gateway.config.MediaProperties;
 
 /**
  * 机审路由选择器（可插拔的核心）。
@@ -27,8 +26,8 @@ public class ContentModerationRouter {
 
     private final ContentModeration delegate;
 
-    public ContentModerationRouter(MediaProperties mediaProperties, List<ContentModeration> candidates) {
-        ModerationMode mode = mediaProperties.getReview().getModerationMode();
+    public ContentModerationRouter(ReviewProperties reviewProperties, List<ContentModeration> candidates) {
+        ModerationMode mode = reviewProperties.getModerationMode();
         this.delegate = candidates.stream()
                 .filter(c -> c.mode() == mode)
                 .findFirst()

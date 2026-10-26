@@ -1,6 +1,5 @@
 package com.turbofeed.gateway.service.review;
 
-import com.turbofeed.gateway.config.MediaProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -38,11 +37,11 @@ public class ReviewWaterLevelService {
     private static final String WATER_KEY = "tf:report:waterlevel:total";
 
     private final StringRedisTemplate redisTemplate;
-    private final MediaProperties properties;
+    private final ReviewProperties reviewProperties;
 
-    public ReviewWaterLevelService(StringRedisTemplate redisTemplate, MediaProperties properties) {
+    public ReviewWaterLevelService(StringRedisTemplate redisTemplate, ReviewProperties reviewProperties) {
         this.redisTemplate = redisTemplate;
-        this.properties = properties;
+        this.reviewProperties = reviewProperties;
     }
 
     /**
@@ -50,7 +49,7 @@ public class ReviewWaterLevelService {
      * 窗口内无举报后计数自然清零（水位回落）。
      */
     public void recordReport() {
-        MediaProperties.Review r = properties.getReview();
+        ReviewProperties r = reviewProperties;
         try {
             Long n = redisTemplate.opsForValue().increment(WATER_KEY);
             if (n != null && n == 1) {
@@ -67,7 +66,7 @@ public class ReviewWaterLevelService {
      * <p>动态阈值 = clamp(round(base × multiplier), min, max)，multiplier 由水位等级决定。</p>
      */
     public int currentReportThreshold() {
-        MediaProperties.Review r = properties.getReview();
+        ReviewProperties r = reviewProperties;
         int base = r.getReportReReviewThreshold();
         try {
             String v = redisTemplate.opsForValue().get(WATER_KEY);
@@ -82,7 +81,7 @@ public class ReviewWaterLevelService {
     }
 
     /** 水位等级 → 阈值乘数（爆量收紧 / 平稳放宽）。 */
-    private double multiplierFor(long total, MediaProperties.Review r) {
+    private double multiplierFor(long total, ReviewProperties r) {
         if (total <= r.getWaterLevelCalm()) {
             return 1.5;            // 平静：放宽，减少误审
         }

@@ -1,6 +1,5 @@
 package com.turbofeed.gateway.service.review;
 
-import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.service.penalty.ViolationSeverity;
 import com.turbofeed.gateway.service.penalty.ViolationSource;
 import org.slf4j.Logger;
@@ -30,10 +29,10 @@ public class DispositionPolicy {
      */
     private static final Logger log = LoggerFactory.getLogger(DispositionPolicy.class);
 
-    private final MediaProperties mediaProperties;
+    private final ReviewProperties reviewProperties;
 
-    public DispositionPolicy(MediaProperties mediaProperties) {
-        this.mediaProperties = mediaProperties;
+    public DispositionPolicy(ReviewProperties reviewProperties) {
+        this.reviewProperties = reviewProperties;
     }
 
     /**
@@ -44,7 +43,7 @@ public class DispositionPolicy {
      * @return 处置动作；配置非法值回落默认
      */
     public Disposition resolve(ViolationSource source, ViolationSeverity severity) {
-        Map<String, String> matrix = mediaProperties.getReview().getDispositionMatrix();
+        Map<String, String> matrix = reviewProperties.getDispositionMatrix();
         if (matrix != null) {
             String overridden = matrix.get(source.name() + ":" + severity.name());
             if (overridden != null && !overridden.isBlank()) {

@@ -1,8 +1,8 @@
 package com.turbofeed.gateway.service.health;
 
-import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.repository.AccountHealthRepository;
 import com.turbofeed.gateway.service.penalty.ViolationSeverity;
+import com.turbofeed.gateway.service.review.ReviewProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -40,11 +40,11 @@ public class AccountHealthService {
     private static final int MAX_SCORE = 100;
 
     private final AccountHealthRepository repository;
-    private final MediaProperties mediaProperties;
+    private final ReviewProperties reviewProperties;
 
-    public AccountHealthService(AccountHealthRepository repository, MediaProperties mediaProperties) {
+    public AccountHealthService(AccountHealthRepository repository, ReviewProperties reviewProperties) {
         this.repository = repository;
-        this.mediaProperties = mediaProperties;
+        this.reviewProperties = reviewProperties;
     }
 
     /**
@@ -108,7 +108,7 @@ public class AccountHealthService {
     }
 
     private int deductPoints(ViolationSeverity severity) {
-        MediaProperties.Review r = mediaProperties.getReview();
+        ReviewProperties r = reviewProperties;
         return switch (severity) {
             case CRITICAL -> r.getHealthDeductCritical();
             case HIGH -> r.getHealthDeductHigh();

@@ -1,6 +1,5 @@
 package com.turbofeed.gateway.service.review;
 
-import com.turbofeed.gateway.config.MediaProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -31,8 +30,8 @@ public class RuleBasedModeration implements ContentModeration {
 
     private final List<String> bannedKeywords;
 
-    public RuleBasedModeration(MediaProperties mediaProperties) {
-        this.bannedKeywords = mediaProperties.getReview().getBannedKeywords();
+    public RuleBasedModeration(ReviewProperties reviewProperties) {
+        this.bannedKeywords = reviewProperties.getBannedKeywords();
     }
 
     @Override

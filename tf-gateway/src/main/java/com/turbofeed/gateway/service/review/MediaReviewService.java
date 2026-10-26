@@ -96,7 +96,10 @@ public class MediaReviewService {
     private final MediaTagJdbcRepository mediaTagRepository;
     private final StringRedisTemplate redisTemplate;
     private final ContentModerationRouter contentModeration;
+    /** 存储/公共配置（仅用于 {@code getStorage()} 等本类的非审核项）。 */
     private final MediaProperties properties;
+    /** 审核域配置（{@code turbofeed.media.review}），与上传/存储配置分离，见 {@link ReviewProperties}。 */
+    private final ReviewProperties reviewProperties;
     private final AccountCreditService accountCreditService;
     private final ReportRepository reportRepository;
     private final AppealRepository appealRepository;
@@ -127,6 +130,7 @@ public class MediaReviewService {
                               StringRedisTemplate redisTemplate,
                               ContentModerationRouter contentModeration,
                               MediaProperties properties,
+                              ReviewProperties reviewProperties,
                               AccountCreditService accountCreditService,
             ReportRepository reportRepository,
             AppealRepository appealRepository,
@@ -146,6 +150,7 @@ public class MediaReviewService {
         this.redisTemplate = redisTemplate;
         this.contentModeration = contentModeration;
         this.properties = properties;
+        this.reviewProperties = reviewProperties;
         this.accountCreditService = accountCreditService;
         this.reportRepository = reportRepository;
         this.appealRepository = appealRepository;
@@ -211,7 +216,7 @@ public class MediaReviewService {
             verdict = new ModerationVerdict(MediaStatus.APPROVED, 0.0, List.of(), true);
         }
 
-        if (properties.getReview().isAutoPass()) {
+        if (reviewProperties.isAutoPass()) {
             // 演示占位：机审结果直接放行（仅供本地联调）
             ReviewOutcome outcome = review(representativeId, userId, verdict.decision() == MediaStatus.APPROVED);
             if (outcome.transitioned() && outcome.status() == MediaStatus.APPROVED) {
@@ -346,7 +351,7 @@ public class MediaReviewService {
             }
             // 人工通过计数：新人观察期据此解除。只统计人工路径——先发后审的自动通过不计入，
             // 否则新号第一帖上传即把自己顶出观察期，观察期形同虚设。
-            accountCreditService.onHumanApproved(userId, properties.getReview().getNewUserApproveThreshold());
+            accountCreditService.onHumanApproved(userId, reviewProperties.getNewUserApproveThreshold());
         }
         return outcome.status();
     }
@@ -588,7 +593,7 @@ public class MediaReviewService {
         } catch (Exception e) {
             log.warn("读取流量池热度阈值覆盖失败，回落全局默认: postId={}, {}", postId, e.getMessage());
         }
-        return properties.getReview().getHeatReReviewThreshold();
+        return reviewProperties.getHeatReReviewThreshold();
     }
 
     /**
@@ -608,7 +613,7 @@ public class MediaReviewService {
         }
         reviewTaskRepository.insert(rep.mediaId(), rep.authorId(), ReviewTask.TYPE_HEAT_ACCUMULATED, heat);
         log.info("热度累计达阈值，自动建复审任务(HEAT_ACCUMULATED，REVIEWER 二次研判): postId={}, mediaId={}, heat={}, threshold={}",
-                postId, rep.mediaId(), heat, properties.getReview().getHeatReReviewThreshold());
+                postId, rep.mediaId(), heat, reviewProperties.getHeatReReviewThreshold());
     }
 
     /**
@@ -690,7 +695,7 @@ public class MediaReviewService {
 
     /** 流量池分级热度复审阈值：池越高阈值越低（越火审得越严）。L1=1000/L2=500/L3=200；兜底用全局默认。 */
     private int poolHeatThreshold(int pool) {
-        MediaProperties.Review r = properties.getReview();
+        ReviewProperties r = reviewProperties;
         return switch (pool) {
             case 1 -> r.getPoolHeatThresholdL1();
             case 2 -> r.getPoolHeatThresholdL2();
@@ -959,9 +964,9 @@ public class MediaReviewService {
             Long n = redisTemplate.opsForValue().increment(key);
             if (n != null && n == 1) {
                 redisTemplate.expire(key, Duration.ofSeconds(
-                        properties.getReview().getReporterRateLimitWindowSeconds()));
+                        reviewProperties.getReporterRateLimitWindowSeconds()));
             }
-            if (n != null && n > properties.getReview().getReporterRateLimitPerHour()) {
+            if (n != null && n > reviewProperties.getReporterRateLimitPerHour()) {
                 throw new BizException(ErrorCode.PARAM_ERROR, "举报过于频繁，请稍后再试");
             }
         } catch (BizException be) {

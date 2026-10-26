@@ -33,6 +33,7 @@ import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
 import com.turbofeed.gateway.service.review.MediaStatus;
 import com.turbofeed.gateway.repository.ReviewTaskRepository;
 import com.turbofeed.gateway.service.review.RiskScorer;
+import com.turbofeed.gateway.service.review.ReviewProperties;
 import com.turbofeed.gateway.service.review.ReviewTask;
 import com.turbofeed.gateway.service.validation.ConcurrentUploadValidator;
 import com.turbofeed.gateway.service.validation.UploadValidation;
@@ -124,6 +125,8 @@ public class MediaUploadService {
     private final AccountCreditService accountCreditService;
     /** 复审任务仓储（#8 落 RISK_TIERED 任务）。 */
     private final ReviewTaskRepository reviewTaskRepository;
+    /** 审核域配置（{@code turbofeed.media.review}）：与上传/存储配置分离，见 {@link ReviewProperties}。 */
+    private final ReviewProperties reviewProperties;
 
     /**
      * 构造器注入（原为 {@code @RequiredArgsConstructor}）。
@@ -153,7 +156,8 @@ public class MediaUploadService {
                               ContentDedupService contentDedupService,
                               RiskScorer riskScorer,
                               AccountCreditService accountCreditService,
-                              ReviewTaskRepository reviewTaskRepository) {
+                              ReviewTaskRepository reviewTaskRepository,
+                              ReviewProperties reviewProperties) {
         this.properties = properties;
         this.storageClient = storageClient;
         this.eventPublisher = eventPublisher;
@@ -175,6 +179,7 @@ public class MediaUploadService {
         this.riskScorer = riskScorer;
         this.accountCreditService = accountCreditService;
         this.reviewTaskRepository = reviewTaskRepository;
+        this.reviewProperties = reviewProperties;
     }
 
     /** 单条状态缓存前缀（与 MediaReviewService 一致，删除时精确失效） */
@@ -339,7 +344,7 @@ public class MediaUploadService {
      * （tierCode MED=1 / HIGH=2）。fail-open：读信号 / 算分 / 建任务任一异常默认按 MED 送审。</p>
      */
     private void riskRoute(long userId, String representativeMediaId, String caption) {
-        if (!properties.getReview().isRiskEnabled()) {
+        if (!reviewProperties.isRiskEnabled()) {
             return;
         }
         RiskScorer.RiskLevel level;

@@ -1,6 +1,5 @@
 package com.turbofeed.gateway.service.review;
 
-import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.service.penalty.ViolationCategory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,12 +21,12 @@ public class DefaultModerationPolicy implements ModerationPolicy {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultModerationPolicy.class);
 
-    private final MediaProperties.Review.ModerationPolicyConfig cfg;
+    private final ReviewProperties.ModerationPolicyConfig cfg;
     private final double standardPassThreshold;
 
-    public DefaultModerationPolicy(MediaProperties mediaProperties) {
-        this.cfg = mediaProperties.getReview().getModerationPolicy();
-        this.standardPassThreshold = mediaProperties.getReview().getConfidenceThreshold();
+    public DefaultModerationPolicy(ReviewProperties reviewProperties) {
+        this.cfg = reviewProperties.getModerationPolicy();
+        this.standardPassThreshold = reviewProperties.getConfidenceThreshold();
     }
 
     @Override

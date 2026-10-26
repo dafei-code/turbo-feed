@@ -1,6 +1,6 @@
 package com.turbofeed.gateway.service.penalty;
 
-import com.turbofeed.gateway.config.MediaProperties;
+import com.turbofeed.gateway.service.review.ReviewProperties;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -27,11 +27,11 @@ import java.time.Instant;
 @Component
 public class PenaltyEscalationPolicy {
 
-    private final MediaProperties mediaProperties;
+    private final ReviewProperties reviewProperties;
 
     /** 构造器注入（不用 Lombok，原因同 {@code AccountPenaltyRepository}）。 */
-    public PenaltyEscalationPolicy(MediaProperties mediaProperties) {
-        this.mediaProperties = mediaProperties;
+    public PenaltyEscalationPolicy(ReviewProperties reviewProperties) {
+        this.reviewProperties = reviewProperties;
     }
 
     /** 一次升级评估的结果。 */
@@ -54,7 +54,7 @@ public class PenaltyEscalationPolicy {
                              ViolationSeverity severity,
                              int currentViolationCount,
                              AccountPenaltyStatus currentStatus) {
-        MediaProperties.Review review = mediaProperties.getReview();
+        ReviewProperties review = reviewProperties;
 
         if (severity == ViolationSeverity.CRITICAL) {
             boolean perm = review.isCriticalAutoPermBan();

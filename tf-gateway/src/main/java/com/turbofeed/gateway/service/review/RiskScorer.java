@@ -1,6 +1,5 @@
 package com.turbofeed.gateway.service.review;
 
-import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.service.health.AccountHealth;
 import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.service.review.credit.CreditLevel;
@@ -39,11 +38,11 @@ public class RiskScorer {
     static final double W_VIOLATION = 0.20;
     static final double W_CONTENT = 0.15;
 
-    private final MediaProperties mediaProperties;
+    private final ReviewProperties reviewProperties;
     private final AccountCreditService accountCreditService;
 
-    public RiskScorer(MediaProperties mediaProperties, AccountCreditService accountCreditService) {
-        this.mediaProperties = mediaProperties;
+    public RiskScorer(ReviewProperties reviewProperties, AccountCreditService accountCreditService) {
+        this.reviewProperties = reviewProperties;
         this.accountCreditService = accountCreditService;
     }
 
@@ -87,7 +86,7 @@ public class RiskScorer {
                 + W_CONTENT * riskContent;
         score = clamp01(score);
 
-        MediaProperties.Review r = mediaProperties.getReview();
+        ReviewProperties r = reviewProperties;
         RiskLevel level = score >= r.getRiskMedThreshold() ? RiskLevel.HIGH
                 : score >= r.getRiskLowThreshold() ? RiskLevel.MED
                 : RiskLevel.LOW;

@@ -41,6 +41,7 @@ class MediaReviewServiceTest {
     @Mock StringRedisTemplate redisTemplate;
     @Mock ContentModerationRouter contentModeration;
     @Mock MediaProperties properties;
+    @Mock ReviewProperties reviewProperties;
     @Mock AccountCreditService accountCreditService;
     @Mock ReportRepository reportRepository;
     @Mock AppealRepository appealRepository;
@@ -58,7 +59,7 @@ class MediaReviewServiceTest {
 
     private MediaReviewService service() {
         return new MediaReviewService(mediaRepository, mediaTagRepository, redisTemplate, contentModeration,
-                properties, accountCreditService, reportRepository, appealRepository, reviewTaskRepository,
+                properties, reviewProperties, accountCreditService, reportRepository, appealRepository, reviewTaskRepository,
                 outboxService, penaltyService, dispositionPolicy, accountHealthService, reporterCreditService,
                 reviewWaterLevelService, moderationSignalService, behaviorLogService, storageClient, moderationPolicy);
     }
