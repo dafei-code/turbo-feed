@@ -263,6 +263,12 @@
             <artifactId>junit-platform-launcher</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- ArchUnit（M1/3.1）：分层 / Redis 单一事实源等架构约束的可执行门禁。 -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
         <!-- Testcontainers：真集成测试（UserJdbcRepository 分片路由需真实 MySQL）。
              版本由根 pom 的 testcontainers-bom 托管。集成测用 @RequiresDocker 守卫：无 Docker 时跳过而非失败。 -->
         <dependency>

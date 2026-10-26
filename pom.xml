@@ -38,6 +38,9 @@
         <spring-cloud.version>2024.0.2</spring-cloud.version>
         <spring-cloud-alibaba.version>2023.0.3.4</spring-cloud-alibaba.version>
         <redisson.version>3.27.2</redisson.version>
+        <!-- ArchUnit（M1/3.1）：把「架构决策」写成可执行规则。版本 1.3.0 与 JUnit 5.11（Boot 3.4）
+             兼容；只用于测试，不进任何运行期 classpath。 -->
+        <archunit.version>1.3.0</archunit.version>
         <!-- caffeine / h2 / mysql-connector-j 由 spring-boot-dependencies BOM 托管，无需声明版本 -->
     </properties>
 
@@ -87,6 +90,14 @@
                 <groupId>org.redisson</groupId>
                 <artifactId>redisson</artifactId>
                 <version>${redisson.version}</version>
+            </dependency>
+            <!-- ArchUnit（M1/3.1）：架构约束的可执行化。scope 直接钉死 test —— 它是构建期
+                 门禁，绝不能出现在任何运行期 classpath 上（会带进 ASM 等字节码依赖）。 -->
+            <dependency>
+                <groupId>com.tngtech.archunit</groupId>
+                <artifactId>archunit-junit5</artifactId>
+                <version>${archunit.version}</version>
+                <scope>test</scope>
             </dependency>
             <!-- RocketMQ：钉死 2.3.5（2.3.x 最新，对 Spring Boot 3.4.x 的 @ConfigurationProperties 绑定兼容）。
                  关键点：spring-cloud-alibaba-dependencies BOM 会把内层 rocketmq-spring-boot

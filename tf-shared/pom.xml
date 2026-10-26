@@ -30,6 +30,14 @@
             <artifactId>junit-platform-launcher</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- ArchUnit（M1/3.1）：把「tf-shared 零第三方依赖」这条定位写成可执行规则——
+             它是被所有服务内嵌的共享库，一旦被谁塞进 Spring/Jackson 依赖，等于把框架
+             耦合扩散到每个服务。test scope，不向引用方传递。 -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

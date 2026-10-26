@@ -76,6 +76,13 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- ArchUnit（M1/3.1）：本服务是 Redis 客户端的【使用方】而非【装配方】，
+             规则会拦截「又把 Redisson / Lettuce 连接工厂自建回来」的回潮。 -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
         <!-- 分布式定时锁（ShedLock）：仅集群模式（redis-buffer-enabled=true）启用，
              配合共享 Redis 缓冲做「选主独占 drain」，保证多副本下 flush 只执行一次。
              默认 standalone 模式不引入（无 Redis 依赖、无锁开销）。 -->
