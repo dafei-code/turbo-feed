@@ -5,6 +5,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
@@ -29,19 +31,38 @@ import java.util.stream.Collectors;
  * 把原先「逐帖串行 UPDATE + 逐帖串行 SELECT」的 O(P) 往返压缩成<b>常数级往返</b>
  * （1 次去重登记 + 1 次批量 UPSERT），解决「数据量大时可行性」问题。</p>
  *
- * <p>幂等由 {@code counter_flush_dedup(batch_id, post_id)} 主键保证：每周期生成唯一
- * {@code batch_id}，逐帖先登记；同一 (batch_id, post_id) 再次到达（ShedLock 锁过期续跑 /
- * 进程崩溃重试）直接跳过 UPSERT，<b>绝不重复累加</b>。不同批次的同帖各自合法落库——因为
- * {@code batch_id} 不同，去重行不冲突。批量登记若整体命中 DuplicateKeyException（整批重放），
- * 自动降级为逐帖 {@link #safeApply} 补落，保证「部分已落、部分未落」的故障恢复也安全。</p>
+ * <p><b>事务闭合（M2 / 4.2，本次改造的核心）</b>：去重登记与批量 UPSERT <b>必须在同一个
+ * 本地事务里</b>。改造前这两步是两个独立的自动提交批次，中间夹着一个<b>永久丢增量</b>的窗口：</p>
+ * <pre>
+ *   ① dedup 登记成功 ──→ ② UPSERT 失败（连接闪断 / 部分失败）
+ *                          ↓
+ *       dedup 里已有本批记录 → 下次重放被判为「已落」直接跳过 → 这批增量【永久丢失】
+ * </pre>
+ * 反过来「先 UPSERT 后登记」也不行：登记失败会让重放时 dedup 查不到，而 UPSERT 是
+ * {@code +VALUES()} <b>累加</b>而非覆盖，重放就变成<b>重复累加</b>——把「丢」换成「重」，
+ * 而计数重复对业务是硬伤。所以两条路都不能靠顺序解决，只能靠<b>原子性</b>：
+ * 两步并入同一事务后，要么都成（计数已加且已登记），要么都滚（下个周期可安全重放）。
+ * 两条 SQL 同数据源，纯本地事务即可，不需要任何分布式事务。</p>
+ *
+ * <p>幂等仍由 {@code counter_flush_dedup(batch_id, post_id)} 主键兜底：它是<b>最后一道</b>防线
+ * （防同一 batch 被二次执行），日常的「不丢不重」由上面的事务保证。不同批次的同帖各自合法
+ * 落库——{@code batch_id} 不同，去重行不冲突。整批重放（{@code DuplicateKeyException}）
+ * 时自动降级为逐帖 {@link #safeApply} 在独立事务里补落。</p>
+ *
+ * <p><b>为什么用 {@code TransactionTemplate} 而不是 {@code @Transactional}</b>：
+ * {@link #safeApply} 是被本类内部调用的，标注 {@code @Transactional} 会踩 Spring 自调用失效
+ * 的经典坑（同类内部调用不走代理，事务不生效，而且不报错）。显式用模板对象，
+ * 事务边界在代码里看得见，也让「逃生路径必须开新事务」这件事无法被误写成同类调用。</p>
  */
 @Repository
 public class PostCounterRepository {
 
     private final JdbcTemplate jdbcTemplate;
+    private final TransactionTemplate tx;
 
-    public PostCounterRepository(JdbcTemplate jdbcTemplate) {
+    public PostCounterRepository(JdbcTemplate jdbcTemplate, PlatformTransactionManager transactionManager) {
         this.jdbcTemplate = jdbcTemplate;
+        this.tx = new TransactionTemplate(transactionManager);
     }
 
     /** 批量 UPSERT（MySQL 8 与 H2 MySQL 模式均支持 ON DUPLICATE KEY UPDATE）。
@@ -72,55 +93,72 @@ public class PostCounterRepository {
             return;
         }
         List<String> postIds = new ArrayList<>(snapshot.keySet());
-        // 阶段一：批量登记去重。同一 batch 被整体重放会触发 DuplicateKeyException。
         try {
-            jdbcTemplate.batchUpdate(DEDUP_SQL, new BatchPreparedStatementSetter() {
-                @Override
-                public void setValues(PreparedStatement ps, int i) throws SQLException {
-                    ps.setString(1, batchId);
-                    ps.setString(2, postIds.get(i));
-                    ps.setTimestamp(3, Timestamp.from(Instant.now()));
-                }
+            // ① + ② 同一事务：要么「已登记且已累加」，要么两者都没发生（下周期可安全重放）。
+            //    改造前这下面是两次独立自动提交，中间的丢增量窗口见类注释。
+            tx.execute(status -> {
+                // ① 批量登记去重（同 batch 被整体重放会撞 PK，由下方 catch 走补落路径）
+                jdbcTemplate.batchUpdate(DEDUP_SQL, new BatchPreparedStatementSetter() {
+                    @Override
+                    public void setValues(PreparedStatement ps, int i) throws SQLException {
+                        ps.setString(1, batchId);
+                        ps.setString(2, postIds.get(i));
+                        ps.setTimestamp(3, Timestamp.from(Instant.now()));
+                    }
 
-                @Override
-                public int getBatchSize() {
-                    return postIds.size();
-                }
+                    @Override
+                    public int getBatchSize() {
+                        return postIds.size();
+                    }
+                });
+                // ② 批量 UPSERT 增量（O(1) 往返）
+                jdbcTemplate.batchUpdate(UPSERT_SQL, new BatchPreparedStatementSetter() {
+                    @Override
+                    public void setValues(PreparedStatement ps, int i) throws SQLException {
+                        long[] d = snapshot.get(postIds.get(i));
+                        ps.setString(1, postIds.get(i));
+                        ps.setLong(2, d[0]);
+                        ps.setLong(3, d[1]);
+                        ps.setLong(4, d[2]);
+                        ps.setLong(5, d[3]);
+                    }
+
+                    @Override
+                    public int getBatchSize() {
+                        return postIds.size();
+                    }
+                });
+                return null;
             });
         } catch (DuplicateKeyException e) {
-            // 整批为已落批次的重放 → 逐帖安全补 apply（已落的被 dedup 拦下，未落的补上）
+            // 整批为已落批次的重放：上面的事务已整体回滚（① ② 都没落），这里逐帖在
+            // 【独立新事务】里补落——已落的被 dedup 拦下，未落的补上。
             for (String pid : postIds) {
                 safeApply(pid, snapshot.get(pid), batchId);
             }
-            return;
         }
-        // 阶段二：批量 UPSERT 增量（O(1) 往返）
-        jdbcTemplate.batchUpdate(UPSERT_SQL, new BatchPreparedStatementSetter() {
-            @Override
-            public void setValues(PreparedStatement ps, int i) throws SQLException {
-                long[] d = snapshot.get(postIds.get(i));
-                ps.setString(1, postIds.get(i));
-                ps.setLong(2, d[0]);
-                ps.setLong(3, d[1]);
-                ps.setLong(4, d[2]);
-                ps.setLong(5, d[3]);
-            }
-
-            @Override
-            public int getBatchSize() {
-                return postIds.size();
-            }
-        });
+        // 其它异常（UPSERT 失败 / 连接中断）不在此捕获：事务已回滚，dedup 与计数都没落，
+        // 交由调度器下个周期用新 batch_id 重放。绝不能吞掉——吞掉就等于把「可重放」
+        // 变成「静默丢弃」，那正是本次改造要消灭的失效形状。
     }
 
-    /** 单帖幂等补落：去重登记成功才 UPSERT，已登记则跳过。 */
+    /**
+     * 单帖幂等补落（整批重放的逃生路径）：登记与 UPSERT 同样并在一个独立事务里。
+     *
+     * <p>已登记 → 空事务直接提交，不重复累加；UPSERT 失败 → 事务回滚、登记一并作废，
+     * 与 {@link #applyBatch} 的批量路径保持同一套「要么都成、要么都滚」语义，
+     * 不存在「逃生路径反而更不安全」的裂缝。</p>
+     */
     private void safeApply(String postId, long[] d, String batchId) {
-        try {
-            jdbcTemplate.update(DEDUP_SQL, batchId, postId, Timestamp.from(Instant.now()));
-        } catch (DuplicateKeyException e) {
-            return; // 该 (batch, post) 已落，跳过
-        }
-        jdbcTemplate.update(UPSERT_SQL, postId, d[0], d[1], d[2], d[3]);
+        tx.execute(status -> {
+            try {
+                jdbcTemplate.update(DEDUP_SQL, batchId, postId, Timestamp.from(Instant.now()));
+            } catch (DuplicateKeyException e) {
+                return null; // 该 (batch, post) 已落，跳过（空事务提交）
+            }
+            jdbcTemplate.update(UPSERT_SQL, postId, d[0], d[1], d[2], d[3]);
+            return null;
+        });
     }
 
     /** 批量回读聚合计数（1 次 IN 查询），供 flush 后修正 L1/L2。空集合返回空 Map。 */
