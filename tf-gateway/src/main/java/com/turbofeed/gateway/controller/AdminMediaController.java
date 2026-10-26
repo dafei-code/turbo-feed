@@ -1,6 +1,5 @@
 package com.turbofeed.gateway.controller;
 
-import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
 import com.turbofeed.gateway.security.UserContextHolder;
@@ -41,7 +40,6 @@ import java.util.List;
 public class AdminMediaController {
 
     private final MediaReviewService reviewService;
-    private final MediaJdbcRepository mediaRepository;
 
     /**
      * 人工审核队列：全平台 PENDING 内容（按受理时间倒序，分页）。
@@ -57,7 +55,7 @@ public class AdminMediaController {
             @RequestParam(value = "size", defaultValue = "20") int size) {
         int limit = size <= 0 ? 20 : size;
         long offset = (long) Math.max(0, page) * limit;
-        List<MediaItem> items = mediaRepository.listPendingGlobal(limit, offset);
+        List<MediaItem> items = reviewService.listPendingQueue(limit, offset);
         return Result.ok(items);
     }
 

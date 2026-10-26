@@ -36,19 +36,19 @@ class ArchitectureTest {
      * 就有两个地方可写——写在 Controller 的那份，任何走 Service 的调用路径都不会经过它。
      * 这正是「同一副作用两条路径各写一遍」的入口。</p>
      *
-     * <p><b>已知例外</b>：{@code AdminMediaController} 的审核队列查询直接调
-     * {@code MediaJdbcRepository#listPendingGlobal}。它是一个纯只读分页查询、没有对应 Service 方法，
-     * 且审核接口本身不参与公域写路径。此处以白名单保留并明确记录——白名单的意义是
-     * <b>让例外显形</b>，而不是让它消失：新增任何其它直连都会被拦下。</p>
+     * <p><b>本规则零例外</b>：规则初建时 {@code AdminMediaController} 曾直连
+     * {@code MediaJdbcRepository#listPendingGlobal}，当时以白名单保留、并把原因写进
+     * {@code because} 让债务显形；随后该查询已下沉为
+     * {@code MediaReviewService#listPendingQueue}，白名单随即移除。
+     * <b>保留这条记录是为了说明处置方式</b>：白名单是「已知的债 + 排期」，不是永久豁免。</p>
      */
     @ArchTest
     static final ArchRule controller不得直接依赖repository = noClasses()
             .that().resideInAPackage("..controller..")
-            .and().doNotHaveFullyQualifiedName("com.turbofeed.gateway.controller.AdminMediaController")
             .should().dependOnClassesThat().resideInAPackage("..repository..")
             .because("数据访问必须经 Service 收敛：事务边界 / 权限校验 / 缓存失效一旦在 Controller 里"
                     + "再写一遍，任何走 Service 的路径都会绕过它（本项目已付过学费的失败模式）。"
-                    + "唯一例外 AdminMediaController 已在规则中显式白名单。");
+                    + "本规则零例外——需要新查询就在 Service 加方法，不要回来开白名单。");
 
     /**
      * Service 不得反向依赖 Controller（分层单向：Controller → Service → Repository）。

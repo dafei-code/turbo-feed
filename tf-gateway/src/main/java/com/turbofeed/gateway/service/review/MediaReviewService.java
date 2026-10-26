@@ -352,6 +352,26 @@ public class MediaReviewService {
     }
 
     /**
+     * 人工审核队列：全平台 PENDING 内容（按受理时间倒序，分页）。
+     *
+     * <p><b>为什么落在 Service 而不是让 Controller 直连仓储（M1/3.1）</b>：架构门禁禁止
+     * Controller 直接依赖 Repository，原因是横切逻辑（事务边界、权限校验、缓存失效）一旦
+     * 可以在两层各写一遍，就会出现「走 Service 的路径绕过 Controller 里那份」的静默失效。
+     * 本方法因此成为审核队列的<b>唯一入口</b>——将来要加「审核员分派」「队列长度埋点」
+     * 都只改这一处。</p>
+     *
+     * <p><b>性能提醒</b>：底层是跨分片广播查询（PENDING 内容没有用户维度分片键可收敛），
+     * 只适合管理端低流量的审核队列；公域读路径一律走引擎的时间线读模型，不要复用本方法。</p>
+     *
+     * @param limit  单页条数
+     * @param offset 偏移量
+     * @return 待审核内容列表（mediaId / url / status / createdAt）
+     */
+    public List<MediaItem> listPendingQueue(int limit, long offset) {
+        return mediaRepository.listPendingGlobal(limit, offset);
+    }
+
+    /**
      * 用户举报：仅已发布内容可被举报。高危类目（涉政/暴恐/儿童）立即下架停推（fail-closed）；
      * 普通举报写表进人工队列，由 {@link #handleReport} 复核。
      *
