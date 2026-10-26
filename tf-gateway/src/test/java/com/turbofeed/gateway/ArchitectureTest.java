@@ -8,6 +8,7 @@ import io.lettuce.core.RedisClient;
 import io.lettuce.core.cluster.RedisClusterClient;
 import org.redisson.Redisson;
 import org.redisson.config.Config;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.connection.lettuce.LettucePoolingClientConfiguration;
@@ -75,6 +76,34 @@ class ArchitectureTest {
             .should().dependOnClassesThat().areAnnotatedWith(Service.class)
             .because("Repository 处于分层底部，反向调用 Service 会形成循环依赖，"
                     + "且让事务边界变得不可推理（service 调 repository、repository 又回调 service）。");
+
+    /**
+     * {@code config} 包下的配置属性类必须是纯数据契约：不得依赖任何业务包（M1 / 3.5）。
+     *
+     * <p><b>防的是什么</b>：{@code MediaProperties} 曾为了装一个 636 行的审核嵌套类，反过来
+     * import 了 {@code service.review}（{@code ModerationMode}、{@code ModerationStrictness}…）
+     * 与 {@code service.penalty}（{@code ViolationCategory}）的领域类型——配置类依赖业务包，
+     * 方向是反的，而且它让「配置类」和「业务实现」绑死：改一个审核枚举，配置类跟着动。</p>
+     *
+     * <p><b>正确的处置（已执行）</b>：不是开白名单，而是把那份配置<b>挪到业务包</b>——审核配置
+     * 独立为 {@code service.review.ReviewProperties}，与它服务的审核实现同包，prefix
+     * {@code turbofeed.media.review} 一字未改，线上 yml / ConfigMap 零改动。
+     * 项目里已有同样手法的先例：{@code service.moderation.ContentSecurityProperties}。</p>
+     *
+     * <p><b>口径</b>：只约束 {@code config} 包<b>内</b>的 {@code @ConfigurationProperties} 类。
+     * 落在业务包里的配置类（如 {@code ReviewProperties}）本就应该认识本领域的枚举，不在约束内。
+     * 普通 {@code @Configuration} 装配类（如 {@code RedisCacheInvalidationConfig} 订阅侧）
+     * 引用业务 Bean 属于正常的装配职责，也不在约束内。</p>
+     */
+    @ArchTest
+    static final ArchRule 配置属性类不得依赖业务包 = noClasses()
+            .that().resideInAPackage("..config..")
+            .and().areAnnotatedWith(ConfigurationProperties.class)
+            .should().dependOnClassesThat()
+            .resideInAnyPackage("..service..", "..repository..", "..controller..", "..storage..")
+            .because("配置属性类必须是纯数据契约。一旦它 import 业务领域类型，说明这份配置的归属错了——"
+                    + "正确处置是把它挪到业务包（审核配置据此独立为 ReviewProperties，prefix 一字未改），"
+                    + "而不是在这里开白名单。");
 
     /**
      * Redis 客户端与连接工厂只能由 tf-redis 装配，业务模块不得自建（R2 单一事实源）。
