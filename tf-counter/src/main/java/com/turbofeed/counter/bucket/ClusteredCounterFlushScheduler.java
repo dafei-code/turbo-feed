@@ -6,7 +6,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * 集群模式 flush 调度器（{@code redis-buffer.enabled=true} 时生效，覆盖 standalone 调度器）。
+ * 集群模式 flush 调度器（{@code redis-buffer-enabled=true} 时生效，覆盖 standalone 调度器）。
  *
  * <p>此模式下缓冲是<b>共享 Redis 缓冲</b>，所有副本写同一份。因此必须保证「同一时刻只有一个副本
  * 执行 drain」——否则多副本各自 drain 同一份共享缓冲会重复落库。{@link SchedulerLock} 用 ShedLock
@@ -18,10 +18,10 @@ import org.springframework.stereotype.Component;
  * 二者均须 < 调度间隔（5s 仅约束 lockAtLeastFor；lockAtMostFor 仅作兜底上限）。</p>
  *
  * <p>本调度器依赖 {@code ShedLockConfig} 提供的 {@code @EnableSchedulerLock} 与 JDBC 锁提供器，
- * 而 ShedLockConfig 同样以 {@code redis-buffer.enabled=true} 为门控——两者天然同生共灭。</p>
+ * 而 ShedLockConfig 同样以 {@code redis-buffer-enabled=true} 为门控——两者天然同生共灭。</p>
  */
 @Component
-@ConditionalOnProperty(name = "turbofeed.counter.redis-buffer.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "turbofeed.counter.redis-buffer-enabled", havingValue = "true")
 public class ClusteredCounterFlushScheduler {
 
     private final CounterFlushService flushService;

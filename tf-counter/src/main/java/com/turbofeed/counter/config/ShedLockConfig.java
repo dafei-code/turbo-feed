@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import javax.sql.DataSource;
 
 /**
- * ShedLock 分布式定时锁装配（<b>仅集群模式</b> {@code turbofeed.counter.redis-buffer.enabled=true} 时生效）。
+ * ShedLock 分布式定时锁装配（<b>仅集群模式</b> {@code turbofeed.counter.redis-buffer-enabled=true} 时生效）。
  *
  * <p><b>为何与 redis-buffer 强耦合</b>：ShedLock 只解决「多副本里谁执行 flush」，
  * 不解决「缓冲在哪」。若缓冲仍是各副本各自的进程内 {@code ConcurrentHashMap}，选主后只有
@@ -23,7 +23,7 @@ import javax.sql.DataSource;
  * 让其他副本接管）；{@code lockAtLeastFor=4s} 防止短任务在多数调度框架下被同一副本重复抢到。</p>
  */
 @Configuration
-@ConditionalOnProperty(name = "turbofeed.counter.redis-buffer.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "turbofeed.counter.redis-buffer-enabled", havingValue = "true")
 @EnableSchedulerLock(defaultLockAtMostFor = "9s", defaultLockAtLeastFor = "4s")
 public class ShedLockConfig {
 

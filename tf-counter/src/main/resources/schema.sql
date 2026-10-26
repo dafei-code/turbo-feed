@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS counter_flush_dedup (
   PRIMARY KEY (batch_id, post_id)
 );
 
--- ShedLock 分布式锁表（仅集群模式 redis-buffer.enabled=true 时由 ShedLockConfig 启用）。
+-- ShedLock 分布式锁表（仅集群模式 redis-buffer-enabled=true 时由 ShedLockConfig 启用）。
 -- 选主保证多 tf-counter 副本中只有一个执行 drain；JdbcLockProvider 复用本服务 DataSource。
 CREATE TABLE IF NOT EXISTS shedlock (
   name       VARCHAR(64)  NOT NULL,

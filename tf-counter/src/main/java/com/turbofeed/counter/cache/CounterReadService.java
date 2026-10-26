@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
  * <b>L2 Redis</b>（{@link RedisCounterStore}，opt-in，跨实例共享、减轻 DB 读压）→
  * <b>L3 DB</b>（{@code post_counter}，权威持久源）。任一上层命中即返回，未命中下沉并回写上层。</p>
  *
- * <p><b>零回归</b>：Redis L2 默认关（{@code turbofeed.counter.redis.enabled=false}），
+ * <p><b>零回归</b>：Redis L2 默认关（{@code turbofeed.counter.redis-enabled=false}），
  * 此时 {@link RedisCounterStore} Bean 不创建，{@code redisStore} 为 {@code null}，
  * 读路径退化为 L1 + L3，本地无 Redis 也能跑。</p>
  */

@@ -16,10 +16,15 @@ import java.util.Map;
 /**
  * 计数增量<b>共享 Redis</b>缓冲（削峰层，集群模式实现）。
  *
- * <p>激活条件：<b>同时</b> {@code turbofeed.counter.redis-buffer.enabled=true} 且
- * {@code turbofeed.counter.redis.enabled=true}（需 RedissonClient）。激活后本 Bean 标
+ * <p>激活条件：<b>同时</b> {@code turbofeed.counter.redis-buffer-enabled=true} 且
+ * {@code turbofeed.counter.redis-enabled=true}（需 RedissonClient）。激活后本 Bean 标
  * {@link Primary}，覆盖进程内 {@link CounterBufferService}，成为注入 {@link CounterBuffer}
  * 的实际实现。</p>
+ *
+ * <p><b>门控属性名（M1 / R2 修正）</b>：见 {@link com.turbofeed.counter.config.CounterProperties}
+ * ——两项开关均改为与 {@code @ConfigurationProperties} 字段、yml 键一致的 canonical 名。
+ * 客户端本身不再由本服务私有配置，而由 tf-redis 按 {@code turbofeed.redis.*} 统一拓扑装配
+ * （需 {@code turbofeed.redis.redisson-enabled=true}），缺失时启动期即缺 Bean 报错。</p>
  *
  * <p><b>多副本正确性</b>：所有 tf-counter 副本把增量写进同一份 Redis 缓冲，因此没有任何副本
  * 「私藏」增量。再配合 {@code ClusteredCounterFlushScheduler} 的 ShedLock 选主，保证同一时刻
@@ -36,8 +41,8 @@ import java.util.Map;
  */
 @Component
 @ConditionalOnProperty(name = {
-        "turbofeed.counter.redis-buffer.enabled",
-        "turbofeed.counter.redis.enabled"
+        "turbofeed.counter.redis-buffer-enabled",
+        "turbofeed.counter.redis-enabled"
 }, havingValue = "true")
 @Primary
 public class RedisCounterBuffer implements CounterBuffer {

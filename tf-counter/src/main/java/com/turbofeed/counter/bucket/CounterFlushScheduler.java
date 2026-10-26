@@ -5,7 +5,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * standalone 模式 flush 调度器（<b>默认</b>，{@code redis-buffer.enabled=false} / 缺省时生效）。
+ * standalone 模式 flush 调度器（<b>默认</b>，{@code redis-buffer-enabled=false} / 缺省时生效）。
  *
  * <p>此模式下缓冲是各副本各自的进程内 {@code ConcurrentHashMap}（天然分片），每个副本独立 flush
  * 自己的那一份，<b>不需要也不该加 ShedLock</b>——加锁反而会让非 leader 副本的缓冲永不被 flush。
@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
  * 由 {@link ClusteredCounterFlushScheduler} 接管。</p>
  */
 @Component
-@ConditionalOnProperty(name = "turbofeed.counter.redis-buffer.enabled", havingValue = "false", matchIfMissing = true)
+@ConditionalOnProperty(name = "turbofeed.counter.redis-buffer-enabled", havingValue = "false", matchIfMissing = true)
 public class CounterFlushScheduler {
 
     private final CounterFlushService flushService;

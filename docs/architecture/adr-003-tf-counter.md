@@ -61,10 +61,12 @@
 
 ### 6.2 决策：双模式调度（缓冲与锁强耦合）
 
-- **standalone（默认 `redis-buffer.enabled=false`）**：缓冲 = 进程内 `CounterBufferService`（`ConcurrentHashMap`）。每个副本天然分片、各 flush 自己那一份，**无需也不该加锁**——加锁反而丢非 leader 缓冲。零 Redis 依赖、零锁开销。
-- **clustered（`redis-buffer.enabled=true`，且必须同时 `redis.enabled=true`）**：缓冲切换为共享 `RedisCounterBuffer`（Redisson Lua 原子 `add`/`drain`）；`ClusteredCounterFlushScheduler` 用 `@SchedulerLock(name="tf-counter-flush")` 选主，多副本仅 leader drain。
+- **standalone（默认 `redis-buffer-enabled=false`）**：缓冲 = 进程内 `CounterBufferService`（`ConcurrentHashMap`）。每个副本天然分片、各 flush 自己那一份，**无需也不该加锁**——加锁反而丢非 leader 缓冲。零 Redis 依赖、零锁开销。
+- **clustered（`redis-buffer-enabled=true`，且必须同时 `redis-enabled=true`）**：缓冲切换为共享 `RedisCounterBuffer`（Redisson Lua 原子 `add`/`drain`）；`ClusteredCounterFlushScheduler` 用 `@SchedulerLock(name="tf-counter-flush")` 选主，多副本仅 leader drain。
 
-> ShedLock 的 `@EnableSchedulerLock` 与 `JdbcLockProvider` 同样以 `redis-buffer.enabled=true` 为门控（`ShedLockConfig`），与集群调度器同生共灭——从机制上杜绝「开了锁却没共享缓冲」的丢数组合。
+> ShedLock 的 `@EnableSchedulerLock` 与 `JdbcLockProvider` 同样以 `redis-buffer-enabled=true` 为门控（`ShedLockConfig`），与集群调度器同生共灭——从机制上杜绝「开了锁却没共享缓冲」的丢数组合。
+
+> **属性名与连接来源（2026-10-25 修正，M1 / R2）**：两个开关的 canonical 名是 `turbofeed.counter.redis-enabled` / `turbofeed.counter.redis-buffer-enabled`（与 `CounterProperties` 字段、yml 键一致）。此前代码里写的是 `turbofeed.counter.redis.enabled` / `redis-buffer.enabled`，而 `@ConditionalOnProperty` 按字面量匹配、不做 relaxed binding —— 于是 yml 里把开关改成 true 也不会生效。现已统一。此外 `RedissonClient` 不再由本服务用私有 `turbofeed.counter.redis.addresses/password` 自建，改由 `tf-redis` 按统一拓扑 `turbofeed.redis.*` 装配（需 `turbofeed.redis.redisson-enabled=true`），消除「同一套 Redis 两套连接参数」。
 
 ### 6.3 为什么能达到「不丢、不重、只执行一次」
 

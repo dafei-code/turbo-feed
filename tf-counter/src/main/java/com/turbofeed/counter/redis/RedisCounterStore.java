@@ -7,14 +7,20 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
- * Redis L2 计数缓存（opt-in，{@code turbofeed.counter.redis.enabled=true} 时激活）。
+ * Redis L2 计数缓存（opt-in，{@code turbofeed.counter.redis-enabled=true} 时激活）。
  *
  * <p>以 {@code tf:counter:{postId}} 为 Key 存 {@link CounterView} JSON，
  * 跨 tf-counter 实例共享、减轻 DB L3 读压。本类仅在 Redis 启用时由 Spring 创建，
  * 否则 {@link CounterReadService} 拿到 {@code null} 自动跳过 L2（零回归）。</p>
+ *
+ * <p><b>门控属性名（M1 / R2 修正）</b>：此前写的是 {@code turbofeed.counter.redis.enabled}，
+ * 而 {@code CounterProperties} 的字段 {@code redisEnabled} 与 yml 里写的键都是
+ * {@code turbofeed.counter.redis-enabled}——{@code @ConditionalOnProperty} 按字面量匹配、
+ * 不做 relaxed binding，于是<b>配置改了但开关没动</b>：把 yml 的 {@code redis-enabled} 设成
+ * true 也不会激活本类。现统一为 canonical 名 {@code turbofeed.counter.redis-enabled}。</p>
  */
 @Component
-@ConditionalOnProperty(name = "turbofeed.counter.redis.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "turbofeed.counter.redis-enabled", havingValue = "true")
 public class RedisCounterStore {
 
     private final RedissonClient redisson;
