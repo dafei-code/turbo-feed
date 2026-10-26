@@ -107,6 +107,16 @@ turbofeed:
   snowflake:
     worker-id: ${TURBOFEED_SNOWFLAKE_WORKER_ID:}
     datacenter-id: ${TURBOFEED_SNOWFLAKE_DATACENTER_ID:}
+    # worker-id 自租约（M2/4.3）：true 时 worker-id 不再靠人肉分配，改由 Redis
+    # SET NX EX 抢占 + 后台续约，扩容加机器无需再逐实例配号（datacenter-id 仍需显式配置）。
+    # 默认 false = 上面的显式配置路径，无 Redis 也能起（保住「克隆即跑」）。
+    # ⚠️ 置 true 后 Redis 不可用即启动失败，不做静默退化——见 WorkerIdLeaseManager 类注释。
+    #    续约失败会拉闸停止生成 ID（fail-closed），避免与其它实例共用 worker-id 撞主键。
+    lease-enabled: ${TURBOFEED_SNOWFLAKE_LEASE_ENABLED:false}
+    # 租约 TTL 与续约间隔（秒）。约束：renew-interval 必须 <= ttl 的一半，
+    # 否则续约前租约可能已过期 → worker-id 被别的实例抢走；违反即启动失败。
+    lease-ttl-seconds: 60
+    lease-renew-interval-seconds: 20
   # Feed 引擎（tf-feed-engine，默认 8083）调用配置：Feed 时间线读模型已迁至独立部署单元，
   # 网关只做转发 + 降级决策，不再持有任何 Feed 读模型或推荐流缓存
   feed:
