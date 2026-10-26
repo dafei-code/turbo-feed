@@ -46,9 +46,9 @@ public class FileConstraintValidator extends UploadValidator {
         if (files == null || files.length == 0) {
             throw new BizException(ErrorCode.UPLOAD_INVALID, "请选择至少一张图片");
         }
-        if (files.length > properties.getMaxBatchCount()) {
+        if (files.length > properties.getUpload().getMaxBatchCount()) {
             throw new BizException(ErrorCode.UPLOAD_INVALID,
-                    "单次最多上传 " + properties.getMaxBatchCount() + " 张");
+                    "单次最多上传 " + properties.getUpload().getMaxBatchCount() + " 张");
         }
 
         // 单文件级：空文件 → 大小上限 → Magic Number；格式写回上下文供主链路取用
@@ -62,9 +62,9 @@ public class FileConstraintValidator extends UploadValidator {
         if (file.isEmpty()) {
             throw new BizException(ErrorCode.UPLOAD_INVALID, "存在空文件");
         }
-        if (file.getSize() > properties.getMaxFileSize().toBytes()) {
+        if (file.getSize() > properties.getUpload().getMaxFileSize().toBytes()) {
             throw new BizException(ErrorCode.UPLOAD_INVALID,
-                    "单文件不得超过 " + properties.getMaxFileSize().toMegabytes() + "MB");
+                    "单文件不得超过 " + properties.getUpload().getMaxFileSize().toMegabytes() + "MB");
         }
         return detectFormat(file);
     }

@@ -38,7 +38,7 @@ public class ThumbnailProcessor implements ImageProcessor {
 
     @Override
     public BufferedImage process(BufferedImage source, String extension) {
-        long max = properties.getThumbnailMaxDimension();
+        long max = properties.getProcessing().getThumbnailMaxDimension();
         int width = source.getWidth();
         int height = source.getHeight();
         if (width <= max && height <= max) {

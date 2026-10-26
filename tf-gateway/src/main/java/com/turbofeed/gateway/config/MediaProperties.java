@@ -15,9 +15,20 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 媒体上传配置（turbofeed.media.*）。
+ * 媒体上传配置（{@code turbofeed.media.*}）。
  *
  * <p>所有上传限额外部化：调整阈值只改配置，不发版。</p>
+ *
+ * <p><b>结构（M1/3.5 归组后）</b>：绝大多数配置已按子域收进嵌套组——{@link Upload}、
+ * {@link Processing}、{@link RateLimit}、{@link Minio}、{@link Presign}、{@link Mq}、
+ * {@link Review}、{@link CommentRisk}、{@link Signal}、{@link BehaviorLog}、
+ * {@link InteractionEvent}、{@link Dedup}。新增配置请放进对应子域，不要往顶层堆。</p>
+ *
+ * <p><b>为什么 keyPrefix / publicUrlBase / localDir / storage 仍留在顶层</b>：子域名与字段名
+ * 会撞车——{@code storage} 既是「存储实现选择」（{@code local|placeholder|minio}）又是这一组的
+ * 自然名字，归组后会变成 {@code turbofeed.media.storage.storage} 这种键。为了消除一个可读性
+ * 问题而造一个更难看的键不值得，故这四个保持顶层，直到有更好的命名（如 {@code store}）再说。
+ * <b>记在这里是为了说明「没做完」是判断而非遗漏。</b></p>
  */
 @Component
 @ConfigurationProperties(prefix = "turbofeed.media")
@@ -26,11 +37,8 @@ public class MediaProperties {
     /** 对象存储 key 前缀，内容按用户隔离：{keyPrefix}/{userId}/{uuid}.{ext}。 */
     private String keyPrefix = "media";
 
-    /** 单文件大小上限（Spring DataSize 语法，如 5MB）。 */
-    private DataSize maxFileSize = DataSize.ofMegabytes(5);
-
-    /** 单次批量上传文件数上限。 */
-    private int maxBatchCount = 9;
+    /** 上传侧限额（turbofeed.media.upload.*）：M1/3.5 从顶层扁平字段归组而来。 */
+    private Upload upload = new Upload();
 
     /**
      * 对外访问基址：存储实现拼装返回 URL 时使用的前缀。
@@ -62,8 +70,6 @@ public class MediaProperties {
     /** 上传限流阈值（turbofeed.media.rate-limit.*；机器维度 Sentinel + 用户维度 Redis 分工）。 */
     private RateLimit rateLimit = new RateLimit();
 
-    /** 上传幂等去重 TTL（秒）：同一 X-Request-Id 在该窗口内重复提交直接返回首次结果（结合 userId 防越权）。 */
-    private int idempotentTtlSeconds = 5;
 
     /** MQ 审核事件 topic / consumerGroup（turbofeed.media.mq.*；可被 application.yml 覆盖，保留与代码常量一致的默认名）。 */
     private Mq mq = new Mq();
@@ -86,12 +92,8 @@ public class MediaProperties {
     /** 上传内容去重配置（#6 per-user SHA-256 去重）：开关 + 维度。默认开、per-user。 */
     private Dedup dedup = new Dedup();
 
-    /** 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
-     *  开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。 */
-    private boolean processingEnabled = false;
-
-    /** 缩略图长边上限（px），超过则等比缩放（turbofeed.media.thumbnail-max-dimension）。 */
-    private long thumbnailMaxDimension = 2048;
+    /** 图片处理链（Decorator：缩略图缩放）（turbofeed.media.processing.*）：M1/3.5 从顶层扁平字段归组而来。 */
+    private Processing processing = new Processing();
 
     /** 预签名直传配置（turbofeed.media.presign.*）：仅对象存储实现（MinIO/S3）支持该链路。 */
     private Presign presign = new Presign();
@@ -267,12 +269,111 @@ public class MediaProperties {
         this.mq = mq;
     }
 
-    public int getIdempotentTtlSeconds() {
-        return idempotentTtlSeconds;
+    public Upload getUpload() {
+        return upload;
     }
 
+    public void setUpload(Upload upload) {
+        this.upload = upload;
+    }
+
+    public Processing getProcessing() {
+        return processing;
+    }
+
+    public void setProcessing(Processing processing) {
+        this.processing = processing;
+    }
+
+    // ===== 旧扁平键的兼容代理（deprecated）=====
+    //
+    // 这几个键在 M1/3.5 被归入 upload.* / processing.* 子域。配置是【对外契约】：线上 yml、
+    // 运维脚本、K8s ConfigMap 都在用旧键，直接删等于强制所有环境同步发版。因此旧键保留为
+    // 委托访问器——getter 读新组、setter 写新组，两者永远指向同一份值，不存在「两处配置漂移」。
+    //
+    // ⚠️ 不要同时配置新旧键：Spring 的绑定顺序不保证，同时配置且值不同时以最后绑定者为准。
+
+    /**
+     * @deprecated 用 {@code turbofeed.media.upload.max-file-size}（{@link Upload#getMaxFileSize()}）。
+     *     保留仅为兼容旧配置键，内部已委托到新组。
+     */
+    @Deprecated
+    public DataSize getMaxFileSize() {
+        return upload.getMaxFileSize();
+    }
+
+    /**
+     * @deprecated 用 {@code turbofeed.media.upload.max-file-size}。写入会同步进 {@link Upload}。
+     */
+    @Deprecated
+    public void setMaxFileSize(DataSize maxFileSize) {
+        upload.setMaxFileSize(maxFileSize);
+    }
+
+    /**
+     * @deprecated 用 {@code turbofeed.media.upload.max-batch-count}（{@link Upload#getMaxBatchCount()}）。
+     */
+    @Deprecated
+    public int getMaxBatchCount() {
+        return upload.getMaxBatchCount();
+    }
+
+    /**
+     * @deprecated 用 {@code turbofeed.media.upload.max-batch-count}。
+     */
+    @Deprecated
+    public void setMaxBatchCount(int maxBatchCount) {
+        upload.setMaxBatchCount(maxBatchCount);
+    }
+
+    /**
+     * @deprecated 用 {@code turbofeed.media.upload.idempotent-ttl-seconds}
+     *     （{@link Upload#getIdempotentTtlSeconds()}）。
+     */
+    @Deprecated
+    public int getIdempotentTtlSeconds() {
+        return upload.getIdempotentTtlSeconds();
+    }
+
+    /**
+     * @deprecated 用 {@code turbofeed.media.upload.idempotent-ttl-seconds}。
+     */
+    @Deprecated
     public void setIdempotentTtlSeconds(int idempotentTtlSeconds) {
-        this.idempotentTtlSeconds = idempotentTtlSeconds;
+        upload.setIdempotentTtlSeconds(idempotentTtlSeconds);
+    }
+
+    /**
+     * @deprecated 用 {@code turbofeed.media.processing.enabled}（{@link Processing#isEnabled()}）。
+     */
+    @Deprecated
+    public boolean isProcessingEnabled() {
+        return processing.isEnabled();
+    }
+
+    /**
+     * @deprecated 用 {@code turbofeed.media.processing.enabled}。
+     */
+    @Deprecated
+    public void setProcessingEnabled(boolean processingEnabled) {
+        processing.setEnabled(processingEnabled);
+    }
+
+    /**
+     * @deprecated 用 {@code turbofeed.media.processing.thumbnail-max-dimension}
+     *     （{@link Processing#getThumbnailMaxDimension()}）。
+     */
+    @Deprecated
+    public long getThumbnailMaxDimension() {
+        return processing.getThumbnailMaxDimension();
+    }
+
+    /**
+     * @deprecated 用 {@code turbofeed.media.processing.thumbnail-max-dimension}。
+     */
+    @Deprecated
+    public void setThumbnailMaxDimension(long thumbnailMaxDimension) {
+        processing.setThumbnailMaxDimension(thumbnailMaxDimension);
     }
 
     public Minio getMinio() {
@@ -281,22 +382,6 @@ public class MediaProperties {
 
     public void setMinio(Minio minio) {
         this.minio = minio;
-    }
-
-    public boolean isProcessingEnabled() {
-        return processingEnabled;
-    }
-
-    public void setProcessingEnabled(boolean processingEnabled) {
-        this.processingEnabled = processingEnabled;
-    }
-
-    public long getThumbnailMaxDimension() {
-        return thumbnailMaxDimension;
-    }
-
-    public void setThumbnailMaxDimension(long thumbnailMaxDimension) {
-        this.thumbnailMaxDimension = thumbnailMaxDimension;
     }
 
     public Presign getPresign() {
@@ -356,22 +441,6 @@ public class MediaProperties {
 
     public void setKeyPrefix(String keyPrefix) {
         this.keyPrefix = keyPrefix;
-    }
-
-    public DataSize getMaxFileSize() {
-        return maxFileSize;
-    }
-
-    public void setMaxFileSize(DataSize maxFileSize) {
-        this.maxFileSize = maxFileSize;
-    }
-
-    public int getMaxBatchCount() {
-        return maxBatchCount;
-    }
-
-    public void setMaxBatchCount(int maxBatchCount) {
-        this.maxBatchCount = maxBatchCount;
     }
 
     public String getPublicUrlBase() {
@@ -1302,6 +1371,84 @@ public class MediaProperties {
 
         public void setScope(DedupScope scope) {
             this.scope = scope;
+        }
+    }
+
+    /**
+     * 上传侧限额（{@code turbofeed.media.upload.*}）。
+     *
+     * <p><b>M1/3.5 归组</b>：这三个字段原先散在顶层（{@code turbofeed.media.max-file-size} 等），
+     * 与存储、审核、限流等十几个键平铺在一起，找「上传能传多大」要在 1300 行里翻。归组后
+     * 配置树按子域收敛：<b>新增上传相关开关有明确归属</b>，而不是继续往顶层堆。旧键保留为
+     * deprecated 委托访问器（见 {@link #getMaxFileSize()}），线上配置无需同步发版。</p>
+     */
+    public static class Upload {
+
+        /** 单文件大小上限（Spring DataSize 语法，如 5MB）。 */
+        private DataSize maxFileSize = DataSize.ofMegabytes(5);
+
+        /** 单次批量上传文件数上限。 */
+        private int maxBatchCount = 9;
+
+        /** 上传幂等去重 TTL（秒）：同一 X-Request-Id 在该窗口内重复提交直接返回首次结果（结合 userId 防越权）。 */
+        private int idempotentTtlSeconds = 5;
+
+        public DataSize getMaxFileSize() {
+            return maxFileSize;
+        }
+
+        public void setMaxFileSize(DataSize maxFileSize) {
+            this.maxFileSize = maxFileSize;
+        }
+
+        public int getMaxBatchCount() {
+            return maxBatchCount;
+        }
+
+        public void setMaxBatchCount(int maxBatchCount) {
+            this.maxBatchCount = maxBatchCount;
+        }
+
+        public int getIdempotentTtlSeconds() {
+            return idempotentTtlSeconds;
+        }
+
+        public void setIdempotentTtlSeconds(int idempotentTtlSeconds) {
+            this.idempotentTtlSeconds = idempotentTtlSeconds;
+        }
+    }
+
+    /**
+     * 图片处理链（{@code turbofeed.media.processing.*}）。
+     *
+     * <p><b>M1/3.5 归组</b>：原为顶层 {@code processing-enabled} / {@code thumbnail-max-dimension}。
+     * 归组理由同 {@link Upload}。开关与它的参数放在一起，避免「开了处理链却找不到长边上限在哪配」。</p>
+     */
+    public static class Processing {
+
+        /**
+         * 图片处理链开关（Decorator：缩略图缩放）。默认关闭以保持流式零内存路径；
+         * 开启后经 ImageIO 解码重编码，会引入解码内存开销（12MP ARGB ≈ 48MB/张），需评估 QPS 与堆内存。
+         */
+        private boolean enabled = false;
+
+        /** 缩略图长边上限（px），超过则等比缩放。 */
+        private long thumbnailMaxDimension = 2048;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public long getThumbnailMaxDimension() {
+            return thumbnailMaxDimension;
+        }
+
+        public void setThumbnailMaxDimension(long thumbnailMaxDimension) {
+            this.thumbnailMaxDimension = thumbnailMaxDimension;
         }
     }
 

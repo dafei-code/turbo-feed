@@ -156,7 +156,7 @@ public class MediaUploadFinalizer {
      * ——所以默认仍关闭（{@code processing-enabled=false}），保持零额外 IO。</p>
      */
     private void maybeReprocess(UploadReservation reservation) {
-        if (!properties.isProcessingEnabled()) {
+        if (!properties.getProcessing().isEnabled()) {
             return;
         }
         for (UploadReservation.Slot slot : reservation.slots()) {

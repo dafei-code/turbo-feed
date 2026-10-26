@@ -66,7 +66,7 @@ public class UploadIdempotency {
         String key = KEY_PREFIX + userId + ":" + requestId;
         try {
             Boolean acquired = redisTemplate.opsForValue()
-                    .setIfAbsent(key, PENDING, Duration.ofSeconds(properties.getIdempotentTtlSeconds()));
+                    .setIfAbsent(key, PENDING, Duration.ofSeconds(properties.getUpload().getIdempotentTtlSeconds()));
             if (Boolean.TRUE.equals(acquired)) {
                 return IdempotencyOutcome.proceed();
             }
@@ -90,7 +90,7 @@ public class UploadIdempotency {
         String key = KEY_PREFIX + userId + ":" + requestId;
         try {
             String json = objectMapper.writeValueAsString(post);
-            redisTemplate.opsForValue().set(key, json, Duration.ofSeconds(properties.getIdempotentTtlSeconds()));
+            redisTemplate.opsForValue().set(key, json, Duration.ofSeconds(properties.getUpload().getIdempotentTtlSeconds()));
         } catch (Exception e) {
             log.warn("幂等结果写回 Redis 异常，忽略: userId={}, requestId={}, {}", userId, requestId, e.getMessage());
         }

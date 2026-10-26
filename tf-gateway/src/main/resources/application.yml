@@ -135,8 +135,12 @@ turbofeed:
   # 媒体上传限额：调整阈值只改配置不发版
   media:
     key-prefix: media
-    max-file-size: 5MB
-    max-batch-count: 9
+    # 上传侧限额（M1/3.5 归组；旧键 turbofeed.media.max-file-size / max-batch-count /
+    # idempotent-ttl-seconds 仍兼容，内部已委托到 upload.*，但不要新旧同时配置）
+    upload:
+      max-file-size: 5MB
+      max-batch-count: 9
+      idempotent-ttl-seconds: 5
     # 对外访问基址：存储实现拼装返回 URL 时的前缀。
     # local 模式下须指向本服务（含端口），使返回的图片 URL 可被浏览器直接加载；
     # 切到对象存储后改为其公网域名 / CDN 域名。
@@ -155,9 +159,11 @@ turbofeed:
       secret-key: ${TURBOFEED_MINIO_SECRET_KEY:}
       bucket: turbo-feed-media
     # 图片处理链（Decorator：缩略图缩放）。默认关闭保持流式零内存路径；
-    # 开启后经 ImageIO 解码重编码（12MP ARGB ≈ 48MB/张），需评估上传 QPS 与堆内存
-    processing-enabled: false
-    thumbnail-max-dimension: 2048
+    # 开启后经 ImageIO 解码重编码（12MP ARGB ≈ 48MB/张），需评估上传 QPS 与堆内存。
+    # M1/3.5 归组（旧键 turbofeed.media.processing-enabled / thumbnail-max-dimension 仍兼容）
+    processing:
+      enabled: false
+      thumbnail-max-dimension: 2048
     # 预签名直传（客户端直传对象存储，网关不收字节流）：上传凭证有效期（秒）。
     # 过期后客户端需重新申请；重签会复用同一批对象名，不会让孤儿对象随重试翻倍。
     presign:

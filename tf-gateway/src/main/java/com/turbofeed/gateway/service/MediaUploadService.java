@@ -430,16 +430,16 @@ public class MediaUploadService {
         try {
             List<PresignRequest.FileMeta> files = request != null && request.files() != null
                     ? request.files() : List.of();
-            if (files.isEmpty() || files.size() > properties.getMaxBatchCount()) {
+            if (files.isEmpty() || files.size() > properties.getUpload().getMaxBatchCount()) {
                 throw new BizException(ErrorCode.UPLOAD_INVALID,
-                        "上传数量不合法（1.." + properties.getMaxBatchCount() + "）");
+                        "上传数量不合法（1.." + properties.getUpload().getMaxBatchCount() + "）");
             }
 
             String rawCaption = request != null && request.caption() != null ? request.caption() : "";
             contentSecurityService.requireClean(ContentScene.CAPTION, rawCaption, Long.parseLong(userId));
             CaptionMarkParser.ParseResult captionMark = captionMarkParser.parse(rawCaption);
 
-            long maxBytes = properties.getMaxFileSize().toBytes();
+            long maxBytes = properties.getUpload().getMaxFileSize().toBytes();
             List<UploadReservation.Slot> slots = new ArrayList<>(files.size());
             for (int seq = 0; seq < files.size(); seq++) {
                 PresignRequest.FileMeta meta = files.get(seq);
@@ -527,7 +527,7 @@ public class MediaUploadService {
         }
 
         try {
-            long maxBytes = properties.getMaxFileSize().toBytes();
+            long maxBytes = properties.getUpload().getMaxFileSize().toBytes();
             for (UploadReservation.Slot slot : reservation.slots()) {
                 long size = storageClient.sizeOf(slot.mediaId());
                 if (size <= 0 || size > maxBytes) {
@@ -648,7 +648,7 @@ public class MediaUploadService {
      * 绝不因处理失败阻断上传。webp（无 ImageIO 编解码）与 gif（保留动图）跳过处理。
      */
     private byte[] maybeProcess(MultipartFile file, ImageFormat format) {
-        if (!properties.isProcessingEnabled()) {
+        if (!properties.getProcessing().isEnabled()) {
             return null;
         }
         if (format == ImageFormat.WEBP || format == ImageFormat.GIF) {
