@@ -477,17 +477,19 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 
 ***
 
-## 7. 改进落地追踪（2026-10-15 更新）
+## 7. 改进落地追踪（2026-10-26 更新）
 
 > 本节追踪 §3 问题诊断各改进项的实施进展。**评审快照（基于 `0e1403f`）的原结论与诊断保持不变**，仅补充后续落地状态，避免读者被快照结论误导。
-> 全部已落地项均经真启动 / e2e 验证；截至本更新仍未 push（按项目纪律先验证再推送，推送需显式确认）。
+> 已落地项均经编译 + 全仓 `mvn test` 验证（关键项另做真启动 / e2e），并已推送 `origin/main`。
+
+### 7.1 评审原始项（§3 诊断）
 
 | 项 | 状态 | 落地说明 |
 | --- | --- | --- |
 | P0-2 `/internal/**` 服务间鉴权 | ✅ 已落地（#186） | 网关 + 引擎双端 `InternalTokenInterceptor` 校验 `X-Internal-Token`；值来自 `TURBOFEED_INTERNAL_TOKEN`，未配置即 fail-open 放行（克隆即跑），本地 yml 写死 `local-dev-internal-token` 开启校验。e2e 三态（无 / 错 / 正确 token）全绿 |
 | P0-3 Flyway schema 版本管理 | ✅ 已落地 | 仅版本化「单表」(SINGLE 登记的 5 张：sensitive_word/sensitive_whitelist/user_phone_router/outbox_event/review_task)；分片表(540 张)仍走 init-local.sql 模板。Spring Boot 3.4.x 无 spring-boot-starter-flyway(仅 4.x 起)，改用 BOM 托管 flyway-core(10.20.1)+flyway-mysql；默认关闭(TURBOFEED_FLYWAY_ENABLED)，直连物理库 turbo_feed_1 绕过 ShardingSphere。编译通过 + 直连 DB 只读 info 校验(V1 被发现、MySQL 方言加载) 全绿 |
 | P0-4 可观测性 | ✅ 已落地（metrics） | 两服务均引 `micrometer-registry-prometheus` 且暴露 `health,info,prometheus,metrics` 端点：gateway 补依赖 + 两服务补 `metrics` 端点（对齐 §3 P0-4 建议原文）；`/actuator/prometheus` 可被 Grafana 拉取。tracing（micrometer-tracing-bridge-otel + zipkin/OTLP）因需采集后端（zipkin/OTLP Collector），未擅自加依赖，列为阶段B 演进项 |
-| P0-1 自动化测试 | 🔧 进行中（2026-10-22） | ADR-001 已落（`docs/architecture/adr-001-testing.md`）；6 靶心就位——①审核 CAS 状态机 `MediaReviewServiceTest`(4) ②时间线 append-remove-promote `FeedTimelineStoreTest`(4) ③outbox 中继 `OutboxRelayTest`(4) ④用户分片路由 `UserJdbcRepositoryRoutingTest`(Testcontainers 真 MySQL，@RequiresDocker 守卫) ⑤处罚写路径缓存失效契约 `PenaltyServiceTest`(10) ⑥信用写路径缓存失效契约 `AccountCreditServiceTest`(5，均为 P2-6 把 AccountStateCache 委托 tf-hotspot SDK 后的 `stateCache.invalidate` 契约回归护栏，覆盖 canWrite 封禁推导与三路信用写失效)。**本地 `mvn test` 已全绿**：网关 74/74（8 个需 Docker 集成测 skip）+ 引擎 62/62 + 计数器/共享/热点 SDK 单测；CI 门禁 `.github/workflows/ci.yml`(`mvn -B clean test`，ubuntu 自带 Docker) 已加；根 pom 显式带 surefire 3.2.5 + testcontainers-bom。集成测的「真 MySQL 跑通」需 CI/Docker 环境确认（本地沙箱无 Docker，无法执行验证） |
+| P0-1 自动化测试 | 🔧 进行中（2026-10-26） | ADR-001 已落（`docs/architecture/adr-001-testing.md`）；靶心由 6 扩至 **10**，全仓 **49 个测试类 / 360 例**（tf-shared 32、tf-redis 5、tf-hotspot 8、tf-feed-engine 112、tf-counter 8、tf-gateway 195，skip 8 为需 Docker 的集成测），`mvn test` 全绿。原 6 靶心——①审核 CAS 状态机 `MediaReviewServiceTest`(4) ②时间线 append-remove-promote `FeedTimelineStoreTest`(4) ③outbox 中继 `OutboxRelayTest`(4) ④用户分片路由 `UserJdbcRepositoryRoutingTest`(Testcontainers 真 MySQL，@RequiresDocker 守卫) ⑤处罚写路径缓存失效契约 `PenaltyServiceTest`(10) ⑥信用写路径缓存失效契约 `AccountCreditServiceTest`(5，均为 P2-6 把 AccountStateCache 委托 tf-hotspot SDK 后的 `stateCache.invalidate` 契约回归护栏，覆盖 canWrite 封禁推导与三路信用写失效）。**新增 4 靶心（M1/M2 期间）**——⑦跨服务契约 JSON golden `SharedContractJsonTest`(13，锁字段漂移 + 版本协商三边界) ⑧worker-id 租约 `WorkerIdLeaseManagerTest`(15) + 装配互斥 `SnowflakeConfigTest`(4) ⑨审核配置键契约 `ReviewPropertiesBindingTest`(5) ⑩计数落库事务闭合 `PostCounterRepositoryH2Test`(6，含故障注入反证)。CI 门禁 `.github/workflows/ci.yml`(`mvn -B clean test`，ubuntu 自带 Docker) 已加；根 pom 显式带 surefire 3.2.5 + testcontainers-bom。**缺口**：集成测的「真 MySQL 跑通」需 CI/Docker 环境确认（本地沙箱无 Docker）；CI 尚无覆盖率门槛与静态检查（M3）；2.6 万行主体中大量路径仍无自动化覆盖，「覆盖率偏低」的定性未变，只是关键路径已布防 |
 | P0-5 服务发现 / 配置中心 | 🟡 部分（2026-10-19 第一批已落） | 服务发现(双向 opt-in)+Sentinel 规则 Nacos 数据源(opt-in) 已落：依赖 + `@LoadBalanced RestClient` + `service-name` 切换 + 本地规则让位；`mvn compile` 通过、默认配置(Nacos 全关)真启动零回归。worker-id 集中分配经评审回退 phase-2（雪花 env-var 硬失败已保不撞号，短期够用）。真链路(多实例注册/LB/故障摘除、Sentinel 规则热推)待有 Nacos 的环境确认 |
 | P1-2 tf-counter 计数服务 | ✅ 已落地（收敛底座）+ 🔧 分布式增强 | 新增独立部署单元 `tf-counter`：点赞/评论/分享「增量事件」→ 缓冲 → 定时批量落 `post_counter`（最终一致）；三级读缓存 Caffeine L1/Redis L2(opt-in)/DB L3；传输 HTTP 兜底 + RocketMQ 顺序键 `postId`(opt-in) 互斥。默认关闭零回归。→ **分布式增强（2026-10-19，编译+单测全绿、未 push）**：抽 `CounterBuffer` 接口（内存默认 / 共享 Redis 双实现）；`CounterFlushService` 批量 UPSERT + `batch_id` 去重（`counter_flush_dedup`）实现 flush 幂等；`StandaloneCounterFlushScheduler`（默认无锁）/ `ClusteredCounterFlushScheduler`（ShedLock 选主独占 drain，配对共享 Redis 缓冲，多副本不丢不重）；新增 H2 集成测试（`applyBatch` 同 batch_id 重放计数不变、不同 batch_id 各落、ShedLock JDBC 锁在 H2 可用）全绿。`mvn compile`+`mvn test` 通过；Redis 真链路（共享缓冲 drain + ShedLock 选主）需本机 Redis 起后才能 e2e。详见 ADR-003 §6 |
 | P1-3 容器化部署 | ✅ 已落地（#187） | 参数化 `Dockerfile`（多阶段，按 `build.args.MODULE` 选子模块）+ 全栈 `docker-compose.yml`（mysql/redis/minio/三服务，RocketMQ 收进 `mq` profile）+ `.env.example`；所有凭据经环境变量注入，`docker compose config` 通过 |
@@ -495,4 +497,41 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 | 关注关系（follow/fans，P0-2 业务） | ✅ 已落地 | `FollowService`/`SocialController` + `user_follow`/`user_fans`（hashMod128）双写 + Redis ZSET `tf:follow:{uid}` 读源，G6 关注流已接入；属产品功能，非评审原始项 |
 | P2-6 tf-hotspot 热 Key L1 SDK | ✅ 已落地（SDK + AccountStateCache 重构 + 第二消费者） | 抽 `LocalCacheWithBroadcast<K,V>` + `CacheInvalidationPublisher` 契约到 tf-hotspot（零 Spring/Redis 依赖），封装「本地缓存+pub/sub 失效广播+version stamp 防脏窗口+自动退化」；`AccountStateCache` 重构为薄装配层（level/write 两路委托），公共 API 与 `INVALIDATE_CHANNEL`/订阅不变、行为零变更；第二消费者 `HotTimelineKeyCache`（引擎热点榜 L1，TTL 失效、广播关闭，因写源为行为事件）已落地；配套 8+4 单测全绿（见 ADR-004）；另 P0-1 补 `PenaltyServiceTest`(10)/`AccountCreditServiceTest`(5) 锁定重构后 `stateCache.invalidate` 调用契约，作为该重构的回归护栏 |
 
-**待办（按优先级）**：P0-1 测试🔧（6 靶心单测就位，本地 gateway 74 + 引擎 62 全绿、集成测真 MySQL 跑通待 CI/Docker 确认）、P0-5 Nacos🔧（服务发现+Sentinel→Nacos 已落、worker-id phase-2；真链路待 Nacos 环境验证）、P1-1 FeedTimelineStore 拆分、P1-5 前端工程化；P2-6 SDK 已落地（见上），时间线热 Key 复用待排期，P2 其余（A/B、向量库、HTTPS/CDN、API 版本前缀）为演进优化。
+### 7.2 工业级升级方案（M0~M2）落地追踪
+
+> 依据 `/Volumes/D/workbuddy/TurboFeed工业级升级方案.md` 与配套的威胁模型 / ADR 推进。M0（凭据与失效模式显式化）与 M1、M2 已全部完成并推送 `origin/main`。
+
+| 里程碑 | 项 | 状态 | 落地说明 |
+| --- | --- | --- | --- |
+| M0/R1 | 内部令牌缺失启动失败 | ✅ | 非 dev/local profile 下 `TURBOFEED_INTERNAL_TOKEN` 缺失即启动失败（`89e93e3`） |
+| M0/R3 | compose 凭据默认值清零 | ✅ | 全部敏感值改 `${VAR:?}` 强制必填（`f73e03e`） |
+| M0/R4 | 完成度声明订正 | ✅ | counter/hotspot/benchmark 三处「已完成」声明按实际兑现度改写（`bd7b31c`） |
+| M0/R10 | 失效模式显式化 | ✅ | `TokenBlacklist` 失效模式显式化 + 威胁模型与降级矩阵文档（`5a574a4`） |
+| M1/3.1 | 架构决策固化为构建期门禁 | ✅ | 引入 ArchUnit（`79552cf`），规则覆盖分层依赖 / 双写收敛 / 投递通道；`AdminMediaController` 改走 Service 后**取消白名单**（`6ae1d95`）；新增「config 包配置类不得反向依赖业务包」规则（`4264bc6`）。每条规则均做过非空洞性反证（临时探针 → 变红 → 删除 → 转绿） |
+| M1/3.2 | tf-counter 回归 Redis 单一事实源 | ✅ | 删除 tf-counter 私有 Redis 配置，`RedissonClient` 由 tf-redis 统一装配（`d2cfd7d`）；修复 Redis 开关属性名与 `@ConditionalOnProperty` 字面量不匹配导致「开关不动且不报错」（`1d74afa`，补了装配测试） |
+| M1/3.3 | 审核状态机收敛 | ✅ | 散落各处的状态流转收敛为显式流转表 `MediaStatusMachine`（`621dd34`） |
+| M1/3.4 | 双投递通道副作用收敛 | ✅ | 时间线双投递通道的副作用收敛为唯一入口 `FeedTimelineDeliveryService#deliver`（`c6665be`），两个投递门面改调该入口（`b632003`）——这也为 4.1 的契约校验只需挂一处打下基础 |
+| M1/3.5 | 巨型类 / 巨型配置拆分 | ✅ | ①跨服务 Redis key 前缀收敛为 `RedisKeys` 门面（`1987be5`）②引擎私有 key 前缀收敛 + Redis 持久化加固（`7581a29`）③`MediaProperties` 按子域归组 `upload.*`/`processing.*` 且**旧键保留为 deprecated 委托访问器**（`fb2b72a`）④审核配置独立为 `ReviewProperties`，**prefix `turbofeed.media.review` 一字未改**（`815020d`）。`MediaProperties` 1462 → 815 行 |
+| M2/4.1 | 跨服务契约演进 | ✅ | 三个跨服务 record（`FeedItemView`/`FeedTimelineEvent`/`FeedBehaviorEvent`）加 `schemaVersion` + `ContractVersion.requireConsumable` 协商（写路径拒绝留痕、读路径跳过该条）；`SharedContractJsonTest`(13) 用 golden 串锁字段漂移；修掉 `Result#isSuccess()` 的 Jackson 幽灵字段（改名 `succeeded()`）。详见 `docs/architecture/contract-evolution.md` |
+| M2/4.2 | 计数落库事务闭合 | ✅ | `PostCounterRepository#applyBatch` 的去重登记与批量 UPSERT 并入同一 `TransactionTemplate`；`DuplicateKeyException` 退化为逐条 `safeApply`，其它异常不吞（事务已回滚，下个周期用新 `batch_id` 重放）。消除「登记成功 + UPSERT 失败 → 该批增量永久丢失且不报错」窗口。已做故障注入反证（`ALTER TABLE ... RENAME` 使断言如期变红后恢复） |
+| M2/4.3 | 雪花 worker-id 自租约 | ✅ | `WorkerIdLeaseManager`：Redis `SET NX EX` 抢占 + Lua 比对 instanceId 续约/释放 + 独立 daemon 线程池保活；`SnowflakeIdGenerator` 持 `IdLease`，租约失效即 **fail-closed 拒绝发号**。开关 `turbofeed.snowflake.lease-enabled`（默认 false 走原显式配置）。**刻意不做**「Redis 不可用静默退化为显式配置」 |
+| M2/4.4 | 全链路失败模式对账 | ✅ | `docs/architecture/failure-mode-ledger.md`：六条链路逐条登记丢失窗口、降级口径、对账能力现状与缺口、症状→证据排查手册，并写明「变更本文即需补对账」的规则 |
+
+**M2 的已知偏离与未收口项**（转入 M3/M4）：
+
+| 项 | 说明 |
+| --- | --- |
+| 契约 §7 旁路 | 仍有 4 处 `readValue` 未走版本协商（存量内部调用，风险低）→ M3 收口 |
+| `lease-enabled=true` 真启动 | 需 Redis，本机 6379 未监听，仅编译 + 单测验证，未做真启动 |
+| RocketMQ DLQ 巡检 | 完全无巡检；`LogDeadLetterAlert` 只打日志无计数 → M4 补指标 |
+| Outbox 积压水位 | 只有日志无指标 → M4 |
+| CI 门禁 | 只有 `mvn -B clean test`，缺覆盖率门槛与静态检查 → M3 |
+
+**待办（按优先级）**：
+
+1. **M3 质量工程**：CI 升级为 `mvn -Pci verify`（ArchUnit + JaCoCo 覆盖率门槛 + SpotBugs/Checkstyle + `docker compose config` 冒烟）；收口契约 §7 的 4 处旁路。
+2. **M4 可观测性**：网关 / 引擎 / 计数埋 Micrometer 指标（DLQ 深度、Outbox 积压水位、flush 批次大小、dedup 命中数）；`DeadLetterAlert` 升级为「日志 + 计数」；MDC traceId 透传。
+3. **M5 文档体系**：ADR 体系化（迁 `docs/adr/`）、C4 架构图、CONTRIBUTING.md、README 完成度防漂移脚本。
+4. **M6**：`tf-benchmark` 兑现或诚实撤下 README 承诺。
+5. 评审原始项剩余：P0-5 Nacos🔧（真链路待 Nacos 环境验证）、P1-1 `FeedTimelineStore` 拆分、P1-5 前端工程化；P2 其余（A/B、向量库、HTTPS/CDN、API 版本前缀）为演进优化。
+6. 工程卫生：`.workbuddy/` 仍未跟踪，建议加入 `.gitignore`。
