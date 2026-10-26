@@ -73,7 +73,8 @@
 |---|---|---|---|
 | `FeedTimelineDeliveryService#deliver` | `FeedTimelineEvent` + 内嵌 `FeedItemView` | HTTP 兜底 + MQ 顺序 | 见下 |
 | `FeedBehaviorConsumer#onMessage` | `FeedBehaviorEvent` | MQ 并发 | 抛异常 → 重试耗尽进 DLQ |
-| `TimelineSupport#parse` | `FeedItemView` | 时间线读路径 | 返回 `null`（跳过这一条） |
+| `ItemViewCodec#parse` / `#parseList` | `FeedItemView` | 引擎全部读路径（M3 收口，见 §7） | 返回 `null` / 剔除该条（跳过） |
+| `FeedEngineClient`（网关） | `FeedItemView` | 网关解析引擎响应（M3 收口，见 §7） | 剔除该条 |
 
 **为什么挂在 `FeedTimelineDeliveryService` 而不是两个门面**：它是 M1/R7 建立的
 **两个通道的唯一副作用入口**。若把版本校验放在各自门面（Controller / Consumer），
@@ -135,25 +136,66 @@
 
 ---
 
-## 7. 已知未收口的旁路解析点
+## 7. 旁路解析点（M3 已收口）
 
-`FeedItemView` 除 `TimelineSupport#parse` 外，还有 4 处直接 `objectMapper.readValue(..., FeedItemView.class)`，
-它们**没有**走版本协商：
+> **本节已重写**。M2 定稿时这里登记了「4 处未收口旁路」，但那份清单<b>本身就不完整</b>
+> ——实际有 6 处（漏登了 `FeedTimelineStore` 的扫描路径与网关侧 `FeedEngineClient`）。
+> 这恰好印证了本节的教训：**靠人肉列举「还有几处没做」是不可靠的**，收口要靠
+> 「唯一入口 + 构建期门禁」，而不是靠一份清单。
 
-| 位置 | 路径 | 性质 |
+### 7.1 收口后的形态
+
+| 位置 | 路径 | 收口方式 |
 |---|---|---|
-| `recall/VectorIndexWriter` | 向量索引离线写入 | 旁路，异常 fail-open 跳过 |
-| `recall/TagCooccurrenceTrainer` | 标签共现离线训练 | 旁路（离线），异常 fail-open 跳过 |
-| `timeline/RecommendationPipeline` | 推荐漏斗内解析 | 在线读路径 |
-| `timeline/RecommendedFeedService` | 推荐流缓存反序列化 | 在线读路径 |
+| `contract/ItemViewCodec#parse` | **唯一**反序列化入口（引擎） | 新增，其余 5 处全部委托它 |
+| `timeline/FeedTimelineStore` | 分页读 + 扫描删除 | 改调 `ItemViewCodec#parse` |
+| `timeline/RecommendationPipeline` | 推荐漏斗内解析 | 私有 `parseMember` 改为委托 |
+| `timeline/RecommendedFeedService` | 推荐流缓存（集合形态） | 改调 `ItemViewCodec#parseList` |
+| `recall/VectorIndexWriter` | 向量索引 payload | 改调 `ItemViewCodec#parse` |
+| `recall/TagCooccurrenceTrainer` | 标签共现离线训练 | 私有 `parse` 改为委托 |
+| `FeedEngineClient`（网关） | 解析引擎 HTTP 响应 | `ContractVersion.filterConsumable` 过滤 |
 
-**为什么暂未收口**：这几处分布在召回 / 训练 / 推荐三个包，`TimelineSupport` 是 `timeline` 包可见，
-提升可见性或新建公共解析入口属于「再抽一层」的重构，与 M2 当前批次（契约可靠性）边界不符，
-且它们各自的 fail-open 语义需要先逐一确认。
+**为什么是新包 `contract` 而不是放进 `timeline`**：`TimelineSupport` 是 `timeline` 包的
+**包可见**工具类（刻意不外泄，它同时持有大量时间线内部常量）。把 `recall` 包也要用的解析
+塞进去，只有两条路——提升可见性，或在 `recall` 里复制一份；前者让时间线内部常量对外暴露，
+后者重新制造「两份真值」。因此解析上提到 `contract` 包：它只依赖 tf-shared 的契约与 Jackson，
+任何包都能用，且不牵出任何一方的内部实现。`TimelineSupport#parse` 已删除（不是废弃保留——
+留着就是留第二个入口）。
 
-**风险评级：低**。这几条路径的共同点是失败即跳过该条（不影响整页、不写坏数据），
-与 `parse` 的处置一致；真正需要「拒绝并留痕」的是写路径，而写路径已 100% 覆盖。
-列为 M3 收口项。
+**集合形态为什么只能事后过滤**：推荐流缓存是「一整个 JSON 数组一次反序列化」，没有逐条
+try/catch 的时机。好在版本不兼容不会让 Jackson 报错（那只是个偏大的数字），所以先整体解析、
+再按版本号过滤，效果等价于逐条跳过。过滤逻辑放在 tf-shared 的
+`ContractVersion.filterConsumable`，网关与引擎共用一份。
+
+> **一处设计取舍**：`filterConsumable` 的版本取值回调刻意用 `Function<T, Integer>` 而不是
+> `ToIntFunction<T>`。版本号**本来就可空**（存量数据没有这个字段），若用 `ToIntFunction`，
+> 方法引用 `FeedItemView::schemaVersion` 会在每一条存量数据上触发**隐式拆箱 NPE**——
+> 一个只在老数据上炸、而单测用新数据全绿的隐蔽坑。让「可空」在签名上可见。
+
+### 7.2 构建期门禁（防止旁路再生）
+
+`tf-feed-engine` 的 `ArchitectureTest` 新增规则：**除 `ItemViewCodec` 外，引擎内任何类都不得
+调用 `ObjectMapper#readValue` / `#convertValue`**。
+
+**规则为什么按方法签名而不是按参数值**：ArchUnit 读的是字节码，方法调用的实参
+（那个 `FeedItemView.class` 字面量）在方法签名里不可见，无法精确判定「解析的是不是契约类」。
+退而求其次禁止整个签名，代价是误伤面略大（新增其它 DTO 的同签名解析也会红），
+收益是引擎的序列化入口彻底收敛——与「Redis 客户端单一装配点」是同一思路。
+
+**误伤时的正确处置**：不是给规则开白名单，而是给 `ItemViewCodec` 加一个方法，让版本协商
+继续只存在一份。
+
+**已做非空洞性反证**：临时新增 `ArchProbe` 类裸调 `readValue(json, FeedItemView.class)`
+→ 规则如期变红并点名 `ArchProbe.bypass(ArchProbe.java:13)` → 删除探针与编译残留 → 转绿。
+（删源文件后必须同步清理 `target/classes` 里的 `.class` 残留，否则 ArchUnit 仍会扫到——
+本次清理了 2 处残留：`ArchProbe`、`TimelineSupportTest`。）
+
+### 7.3 残余风险
+
+- **网关侧没有等价门禁**：网关里 `ObjectMapper` 的用途太多（Result 解析、各类 DTO），
+  按签名禁会误伤严重。目前只有 1 处解析点，靠 §8 的操作清单约束。
+- **`tf-shared` 的 `filterConsumable` 是可选的**：它只是工具，调用方不调用就不会生效。
+  真正的强制性来自引擎侧的架构规则。
 
 ---
 
@@ -165,3 +207,6 @@
 3. 无论哪种，都**不要**给契约类加 Jackson 注解——命中 Jackson 默认行为的坑一律从命名上绕开
    （`is`/`get` 前缀会被当属性，见 `Result#succeeded()`），以保住 tf-shared 的零第三方依赖定位。
 4. 跑 `mvn -o test`：`SharedContractJsonTest` 的「幽灵字段护栏」会拦住任何多出来/少掉的字段。
+5. **新增解析点必须走 `ItemViewCodec`**（引擎侧由 `ArchitectureTest` 强制，见 §7.2）。
+   若需要的形态不存在（比如从 `JsonNode` 解析、或需要带日志的变体），**给它加方法**，
+   不要就地写一行 `readValue`——那正是 §7 全部 6 处旁路的来源。
