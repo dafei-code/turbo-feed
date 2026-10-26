@@ -182,7 +182,7 @@ public class MediaReviewService {
         }
 
         MediaStatus existing = mediaRepository.getStatus(representativeId, userId);
-        if (existing != null && existing != MediaStatus.PENDING) {
+        if (existing != null && !MediaStatusMachine.isInitial(existing)) {
             // 重复投递：已是终态，幂等返回；APPROVED 兜底补齐时间线（按信用池）
             if (existing == MediaStatus.APPROVED) {
                 CreditLevel level = accountCreditService.ensure(userId);
@@ -292,11 +292,13 @@ public class MediaReviewService {
         if (current == null) {
             throw new BizException(ErrorCode.INTERNAL_ERROR, "未找到待审核记录: mediaId=" + mediaId);
         }
-        if (current != MediaStatus.PENDING) {
-            log.info("审核终态幂等返回（不重复流转）: mediaId={}, status={}", mediaId, current);
+        MediaStatus target = approved ? MediaStatus.APPROVED : MediaStatus.REJECTED;
+        // 合法性由状态机裁决（M1/3.3），不再就地拼 cur != PENDING：
+        // 非 PENDING 前置态一律走「幂等返回」，CAS 落空同理——两条路径的语义由同一张表定义。
+        if (!MediaStatusMachine.isLegal(current, target)) {
+            log.info("审核终态幂等返回（不重复流转）: mediaId={}, status={}, target={}", mediaId, current, target);
             return new ReviewOutcome(current, false);
         }
-        MediaStatus target = approved ? MediaStatus.APPROVED : MediaStatus.REJECTED;
         int rows = mediaRepository.updateStatusCas(mediaId, userId, current, target);
         if (rows == 0) {
             // 读状态与 CAS 之间，帖子被另一条路径流转了：本次什么都没改，
@@ -760,6 +762,8 @@ public class MediaReviewService {
      */
     private int takeDownAndPenalize(String mediaId, long authorId, ViolationSource source,
                                     String operator, String reason, ViolationSeverity severity) {
+        // APPROVED -> TAKEN_DOWN：合法流转见 MediaStatusMachine（CAS 的 expected 必须与表一致，
+        // 由 MediaStatusMachineTest 的「CAS 流转对一致性」用例反向锁定，避免两处各写一遍后漂移）。
         int rows = mediaRepository.updateStatusCas(mediaId, authorId, MediaStatus.APPROVED, MediaStatus.TAKEN_DOWN);
         if (rows > 0) {
             removeFromTimeline(mediaId, authorId);
@@ -781,8 +785,9 @@ public class MediaReviewService {
     @Transactional(rollbackFor = Exception.class)
     public void appeal(String mediaId, long authorUserId) {
         MediaStatus cur = mediaRepository.getStatus(mediaId, authorUserId);
-        if (cur == null || (cur != MediaStatus.REJECTED && cur != MediaStatus.TAKEN_DOWN)) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "仅被驳回/下架内容可申诉");
+        // 合法前置态由状态机裁决（isLegal 对 null 返回 false，故「查不到」与「状态不对」同源拒绝）。
+        if (!MediaStatusMachine.canAppeal(cur)) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "仅被驳回/下架内容可申诉（当前状态: " + cur + "）");
         }
         int rows = mediaRepository.updateStatusCas(
                 mediaId, authorUserId, cur, MediaStatus.APPEALING);
@@ -804,6 +809,7 @@ public class MediaReviewService {
         if (upheld) {
             // CAS 前置态为 APPEALING：只有真正完成「申诉中 → 已发布」的那一次才恢复公域与加信用，
             // 避免管理员重复点击导致同帖被投递多次、信用被重复加回。
+            // APPEALING -> APPROVED（翻案）/ APPEALING -> TAKEN_DOWN（维持）：见 MediaStatusMachine
             int rows = mediaRepository.updateStatusCas(
                     mediaId, authorId, MediaStatus.APPEALING, MediaStatus.APPROVED);
             if (rows > 0) {
@@ -822,6 +828,7 @@ public class MediaReviewService {
                 log.info("申诉翻案 CAS 落空（内容不在申诉中态，不重复恢复/加信用）: mediaId={}", mediaId);
             }
         } else {
+            // 同上：APPEALING -> TAKEN_DOWN，合法流转以 MediaStatusMachine 为准
             int rows = mediaRepository.updateStatusCas(
                     mediaId, authorId, MediaStatus.APPEALING, MediaStatus.TAKEN_DOWN);
             log.info("申诉维持原状: mediaId={}, rows={}", mediaId, rows);
