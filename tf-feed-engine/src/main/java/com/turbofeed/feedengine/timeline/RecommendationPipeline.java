@@ -1,7 +1,7 @@
 package com.turbofeed.feedengine.timeline;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.turbofeed.feedengine.contract.ItemViewCodec;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.feedengine.client.ReviewSignalClient;
 import com.turbofeed.feedengine.interest.InterestService;
@@ -754,15 +754,14 @@ public class RecommendationPipeline {
         }
     }
 
+    /**
+     * 解析时间线成员串。
+     *
+     * <p>委托 {@link ItemViewCodec}：本方法原先是裸 {@code readValue}，属 M3 收口的 4 处
+     * 版本协商旁路之一。管道里所有候选都经这里进入，漏一处就等于整条推荐流绕过协商。</p>
+     */
     private FeedItemView parseMember(String json) {
-        if (json == null) {
-            return null;
-        }
-        try {
-            return objectMapper.readValue(json, FeedItemView.class);
-        } catch (Exception ignore) {
-            return null;
-        }
+        return ItemViewCodec.parse(objectMapper, json);
     }
 
     /**

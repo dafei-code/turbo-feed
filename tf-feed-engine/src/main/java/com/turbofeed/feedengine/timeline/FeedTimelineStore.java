@@ -2,6 +2,7 @@ package com.turbofeed.feedengine.timeline;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.turbofeed.feedengine.contract.ItemViewCodec;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.feedengine.client.ReviewSignalClient;
 import com.turbofeed.feedengine.interest.InterestService;
@@ -253,7 +254,7 @@ public class FeedTimelineStore {
             long offset = (long) Math.max(page, 0) * limit;
             List<FeedItemView> items = new ArrayList<>(merged.size());
             for (ZSetOperations.TypedTuple<String> tuple : merged) {
-                FeedItemView it = TimelineSupport.parse(objectMapper, tuple == null ? null : tuple.getValue());
+                FeedItemView it = ItemViewCodec.parse(objectMapper, tuple == null ? null : tuple.getValue());
                 if (it != null) {
                     items.add(it);
                 }
@@ -545,12 +546,11 @@ public class FeedTimelineStore {
                     continue;
                 }
                 for (String json : jsons) {
-                    FeedItemView it;
-                    try {
-                        it = objectMapper.readValue(json, FeedItemView.class);
-                    } catch (JsonProcessingException e) {
-                        // 单条成员串损坏：数据问题而非基础设施故障，重试无意义 → 跳过继续
-                        log.warn("时间线成员串损坏，跳过该条: key={}, {}", key, e.getMessage());
+                    FeedItemView it = ItemViewCodec.parse(objectMapper, json);
+                    if (it == null) {
+                        // 格式损坏 / 版本不兼容：数据问题而非基础设施故障，重试无意义 → 跳过继续。
+                        // 走统一入口而非裸 readValue：本处原是 4 处绕过版本协商的旁路之一（M3 收口）。
+                        log.warn("时间线成员串不可用（格式损坏或版本不兼容），跳过该条: key={}", key);
                         continue;
                     }
                     // 用帖身份比对（历史单图成员串没有 postId，timelineKey() 会回退到 mediaId），

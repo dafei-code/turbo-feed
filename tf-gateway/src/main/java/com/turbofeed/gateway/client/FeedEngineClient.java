@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.gateway.config.FeedEngineProperties;
 import com.turbofeed.gateway.service.feed.FeedDeliveryHealth;
 import com.turbofeed.gateway.service.query.MediaItem;
+import com.turbofeed.shared.model.ContractVersion;
 import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.model.PlayableView;
@@ -155,7 +156,10 @@ public class FeedEngineClient {
             }
             List<FeedItemView> items = objectMapper.convertValue(data,
                     objectMapper.getTypeFactory().constructCollectionType(List.class, FeedItemView.class));
-            return Optional.of(items.stream().map(FeedItemMapper::toView).toList());
+            // 版本协商（M3）：引擎可能已先升级并写出更高版本的条目，按错误语义渲染等于静默出错。
+            // 口径与引擎侧 ItemViewCodec 一致——不可消费的条目跳过，而不是让整页失败。
+            return Optional.of(ContractVersion.filterConsumable(items, FeedItemView.SCHEMA_VERSION,
+                    FeedItemView::schemaVersion).stream().map(FeedItemMapper::toView).toList());
         } catch (Exception e) {
             health.recordReadFailure(e.toString());
             log.warn("Feed 引擎读取失败（由调用方按 degraded-mode 决定降级口径）: page={}, size={}, {}",

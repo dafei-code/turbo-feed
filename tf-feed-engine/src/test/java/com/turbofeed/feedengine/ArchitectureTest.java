@@ -1,9 +1,12 @@
 package com.turbofeed.feedengine;
 
+import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
 import com.tngtech.archunit.lang.ArchRule;
+import com.turbofeed.feedengine.contract.ItemViewCodec;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.cluster.RedisClusterClient;
 import org.redisson.Redisson;
@@ -65,4 +68,33 @@ class ArchitectureTest {
                     "com.turbofeed.counter..")
             .because("引擎 / 网关 / 计数服务是独立部署单元：直接依赖会把它们焊死成一个，"
                     + "发布要同步、故障会传导。跨服务只走 HTTP / MQ，共享契约放 tf-shared。");
+
+    /**
+     * 契约条目 {@code FeedItemView} 的反序列化只能经 {@link ItemViewCodec}（M3 契约旁路收口）。
+     *
+     * <p><b>为什么需要门禁而不是靠自觉</b>：M2/4.1 引入了版本协商，但它只挂在了一个入口上；
+     * 引擎里另有 4 处裸 {@code readValue} 在解析同一个契约对象。这不是谁写错了，而是
+     * 「加了协商」和「协商覆盖了所有解析点」本来就是两件事——前者靠一次提交，后者靠持续约束。
+     * 没有门禁，下一次有人在新召回源里写一行 {@code readValue(json, FeedItemView.class)}，
+     * 协商就又漏了一处，且<b>不会有任何报错</b>。</p>
+     *
+     * <p><b>规则为什么按方法签名而不是按参数值</b>：ArchUnit 读的是字节码，方法调用的实参
+     * （那个 {@code FeedItemView.class} 字面量）在方法签名里不可见，无法精确判定「解析的是不是
+     * 契约类」。退而求其次：禁止引擎内除 {@code ItemViewCodec} 外的任何类调用
+     * ObjectMapper 的反序列化入口。代价是误伤面略大（新增其它 DTO 的同签名解析也会红），
+     * 收益是引擎的序列化入口彻底收敛——与「Redis 客户端单一装配点」是同一个思路。</p>
+     *
+     * <p><b>误伤时的正确处置</b>：不是给本规则开白名单，而是把解析委托给 {@code ItemViewCodec}
+     * （若它缺少对应形态，就给它加一个方法，让版本协商继续只存在一份）。</p>
+     */
+    @ArchTest
+    static final ArchRule 契约条目只能由统一入口反序列化 = noClasses()
+            .that().resideInAPackage("com.turbofeed.feedengine..")
+            .and().areNotAssignableTo(ItemViewCodec.class)
+            .should().callMethod(ObjectMapper.class, "readValue", String.class, Class.class)
+            .orShould().callMethod(ObjectMapper.class, "readValue", String.class, JavaType.class)
+            .orShould().callMethod(ObjectMapper.class, "convertValue", Object.class, JavaType.class)
+            .because("FeedItemView 的反序列化只能经 ItemViewCodec，否则会绕过契约版本协商"
+                    + "——M2 加协商时就有 4 处裸 readValue 漏网，且完全不报错。"
+                    + "需要新形态的解析请给 ItemViewCodec 加方法，而不是在这里开白名单。");
 }

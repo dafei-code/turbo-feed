@@ -1,5 +1,9 @@
 package com.turbofeed.shared.model;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Function;
+
 /**
  * 跨服务契约的版本协商（M2 / 4.1）。
  *
@@ -58,5 +62,42 @@ public final class ContractVersion {
      */
     public static boolean isConsumable(int supported, Integer seen) {
         return seen == null || seen <= 0 || seen <= supported;
+    }
+
+    /**
+     * 批量版（M3 契约旁路收口）：剔除一批契约数据里当前代码无法安全解释的条目。
+     *
+     * <p><b>为什么需要批量版</b>：单条解析（{@code readValue(..., Xxx.class)}）可以在解析后逐条判定，
+     * 但<b>集合解析</b>是一条 JSON 数组一次反序列化出来的（网关解析引擎返回的推荐流、引擎读本地
+     * 推荐流缓存都是这种形态）。此时没有「逐条 try/catch」的时机，只能在解析完成后按版本号过滤。
+     * 若每个调用方各写一遍过滤，就会出现「这边过滤了、那边没过滤」的静默分歧——与
+     * {@link #isConsumable(int, Integer)} 分处两地的老问题同构。因此把过滤收敛到这里。</p>
+     *
+     * <p><b>为什么取版本号用回调</b>：本类在 tf-shared，必须保持<b>零第三方依赖</b>，
+     * 而各契约 record 的版本字段名统一但所属类型各异。用 {@code Function} 取值既能共享过滤逻辑，
+     * 又不让 tf-shared 反向依赖具体契约类。</p>
+     *
+     * <p><b>为什么回调返回 {@code Integer} 而不是 {@code int}</b>：版本号<b>本来就可空</b>
+     * （存量数据没有这个字段）。若用 {@code ToIntFunction}，方法引用 {@code FeedItemView::schemaVersion}
+     * 会在每一条存量数据上触发<b>隐式拆箱 NPE</b>——一个只在老数据上炸、单测用新数据全绿的隐蔽坑。
+     * 保持包装类型，让「可空」这件事在签名上就可见。</p>
+     *
+     * @param items         待过滤的一批契约数据；{@code null} 视为空
+     * @param supported     当前代码能解释的最高版本
+     * @param versionGetter 从一条数据上取版本号的函数（如 {@code FeedItemView::schemaVersion}）
+     * @param <T>           契约数据类型
+     * @return 只含可消费条目的新列表；入参为空或全被剔除时返回不可变空列表
+     */
+    public static <T> List<T> filterConsumable(List<T> items, int supported, Function<T, Integer> versionGetter) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        List<T> out = new ArrayList<>(items.size());
+        for (T item : items) {
+            if (item != null && isConsumable(supported, versionGetter.apply(item))) {
+                out.add(item);
+            }
+        }
+        return out;
     }
 }

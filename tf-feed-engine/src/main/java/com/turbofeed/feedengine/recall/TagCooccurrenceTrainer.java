@@ -1,6 +1,7 @@
 package com.turbofeed.feedengine.recall;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.turbofeed.feedengine.contract.ItemViewCodec;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.recall.EmbeddingCodec;
 import org.slf4j.Logger;
@@ -244,14 +245,8 @@ public class TagCooccurrenceTrainer {
     }
 
     private FeedItemView parse(String json) {
-        if (json == null) {
-            return null;
-        }
-        try {
-            return objectMapper.readValue(json, FeedItemView.class);
-        } catch (Exception ignore) {
-            return null;
-        }
+        // 委托统一入口：本方法原先是裸 readValue 的旁路（M3 收口）。离线训练同样不能按错误语义学向量
+        return ItemViewCodec.parse(objectMapper, json);
     }
 
     /** Skip-Gram Negative Sampling：在标签共现上训 dim 维向量。 */

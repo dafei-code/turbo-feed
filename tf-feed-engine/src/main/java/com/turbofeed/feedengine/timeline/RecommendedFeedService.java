@@ -1,6 +1,7 @@
 package com.turbofeed.feedengine.timeline;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.turbofeed.feedengine.contract.ItemViewCodec;
 import com.turbofeed.shared.model.FeedItemView;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -131,8 +132,8 @@ public class RecommendedFeedService {
             try {
                 String cached = redisTemplate.opsForValue().get(key);
                 if (cached != null) {
-                    return objectMapper.readValue(cached,
-                            objectMapper.getTypeFactory().constructCollectionType(List.class, FeedItemView.class));
+                    // 走统一入口：本处原是裸 readValue 的旁路，缓存里若混入了高版本条目会按错误语义渲染
+                    return ItemViewCodec.parseList(objectMapper, cached);
                 }
             } catch (Exception e) {
                 log.warn("推荐流缓存读取失败，回落时间线实时读取: key={}, {}", key, e.getMessage());

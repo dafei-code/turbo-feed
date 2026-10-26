@@ -1,7 +1,5 @@
 package com.turbofeed.feedengine.timeline;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.turbofeed.shared.model.ContractVersion;
 import com.turbofeed.shared.model.FeedItemView;
 
 import java.util.Set;
@@ -14,8 +12,13 @@ import java.util.Set;
  * 若各自复制一份，就会形成「改了写路径、漏了读路径」的静默分歧——这恰是本类要消灭的问题。
  * 因此把它们收敛到一处，双方静态导入，<b>只保留一份真值</b>。</p>
  *
- * <p><b>只放纯函数与常量</b>：无状态、无 Spring 依赖、无 I/O（{@code parse} 只做反序列化，
- * 不碰 Redis），因此可被写路径、读路径与单测自由复用。</p>
+ * <p><b>只放纯函数与常量</b>：无状态、无 Spring 依赖、无 I/O，因此可被写路径、读路径与
+ * 单测自由复用。</p>
+ *
+ * <p><b>M3 变更</b>：原先挂在本类的 {@code parse} 已上移到 {@link com.turbofeed.feedengine.contract.ItemViewCodec}
+ * ——它不只被 {@code timeline} 包用，{@code recall} 包也在解析 {@code FeedItemView}，而本类是
+ * 包可见的。留在包内就等于让另外 4 处解析点继续裸调 Jackson、绕过版本协商。见
+ * {@code docs/architecture/contract-evolution.md} §7。</p>
  */
 final class TimelineSupport {
 
@@ -134,32 +137,4 @@ final class TimelineSupport {
         return second > 0 ? pk.substring(first + 1, second) : null;
     }
 
-    /**
-     * 反序列化时间线成员串（{@code ObjectMapper} 由调用方注入，本类不持有状态）。
-     *
-     * <p>任何异常一律返回 {@code null}：成员串可能是历史格式（缺 postId/images），
-     * 也可能被人为写坏，读路径宁可丢这一条也不能整页失败（fail-open）。</p>
-     *
-     * <p><b>M2/4.1 契约版本协商（读路径专用口径）</b>：版本不兼容的成员串同样返回 {@code null}
-     * ——即<b>跳过这一条</b>，而不是让整页失败。这是读路径与写路径的关键差别：
-     * 写路径（{@code FeedTimelineDeliveryService}）要拒绝并留痕进 DLQ，读路径则只要保证
-     * 「不按错误语义把条目渲染给用户」，丢一条是可接受的代价。
-     * 两者都遵循同一条底线：<b>绝不硬解</b>。</p>
-     */
-    static FeedItemView parse(ObjectMapper objectMapper, String json) {
-        if (json == null) {
-            return null;
-        }
-        FeedItemView item;
-        try {
-            item = objectMapper.readValue(json, FeedItemView.class);
-        } catch (Exception ignore) {
-            return null;
-        }
-        if (!ContractVersion.isConsumable(FeedItemView.SCHEMA_VERSION,
-                item == null ? null : item.schemaVersion())) {
-            return null;
-        }
-        return item;
-    }
 }

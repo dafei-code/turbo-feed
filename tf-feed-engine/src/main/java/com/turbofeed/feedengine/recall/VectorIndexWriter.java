@@ -1,6 +1,7 @@
 package com.turbofeed.feedengine.recall;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.turbofeed.feedengine.contract.ItemViewCodec;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.recall.EmbeddingCodec;
 import io.lettuce.core.RedisFuture;
@@ -272,7 +273,7 @@ public class VectorIndexWriter {
             if (payload == null) {
                 return null;
             }
-            return objectMapper.readValue(payload, FeedItemView.class);
+            return ItemViewCodec.parse(objectMapper, payload);
         } catch (Exception e) {
             log.warn("向量 hash 读取失败: key={}, {}", fullKey, e.getMessage());
             return null;
