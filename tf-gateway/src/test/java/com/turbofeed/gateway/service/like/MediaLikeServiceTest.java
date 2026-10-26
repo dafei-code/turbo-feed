@@ -175,6 +175,60 @@ class MediaLikeServiceTest {
         verify(redisTemplate, never()).execute(any(RedisScript.class), anyList(), any(), any());
     }
 
+    // ===== ①-c 去重集合回收兜底：集合没了，红心态可以错，计数不能虚增 =====
+
+    @Test
+    void slotMissingAndDbHasRecord_doesNotBumpCount() {
+        // 去重集合被 TTL 回收（hasKey=false），但灾备表证明该用户此前赞过
+        when(redisTemplate.hasKey(anyString())).thenReturn(false);
+        when(setOps.add(anyString(), eq("42"))).thenReturn(1L);
+        when(likeRepository.existsLike(POST_ID, 42L)).thenReturn(true);
+
+        assertTrue(service.apply(POST_ID, 42L, true), "红心态仍应为已赞（成员已恢复）");
+
+        // 关键：不重复计数、不重复发增量、不重复落库
+        verify(redisTemplate, never()).execute(any(RedisScript.class), anyList(), any(), any());
+        verify(valueOps, never()).increment(anyString(), anyLong());
+        verify(likeRepository, never()).insert(any());
+    }
+
+    @Test
+    void slotExists_doesNotQueryDb() {
+        // 热路径：槽集合仍在 → 去重可信，绝不付灾备查询的代价
+        when(redisTemplate.hasKey(anyString())).thenReturn(true);
+        when(setOps.add(anyString(), eq("42"))).thenReturn(1L);
+
+        assertTrue(service.apply(POST_ID, 42L, true));
+
+        verify(likeRepository, never()).existsLike(anyString(), anyLong());
+        verify(redisTemplate).execute(any(RedisScript.class), eq(List.of(COUNT_KEY)), eq("1"), anyString());
+    }
+
+    @Test
+    void slotMissingButDbEmpty_stillBumpsCount() {
+        // 新帖首赞：集合不存在、灾备表也无记录 → 正常计数（不能因为加了兜底而漏计）
+        when(redisTemplate.hasKey(anyString())).thenReturn(false);
+        when(setOps.add(anyString(), eq("42"))).thenReturn(1L);
+        when(likeRepository.existsLike(POST_ID, 42L)).thenReturn(false);
+
+        assertTrue(service.apply(POST_ID, 42L, true));
+
+        verify(redisTemplate).execute(any(RedisScript.class), eq(List.of(COUNT_KEY)), eq("1"), anyString());
+        verify(likeRepository).insert(any());
+    }
+
+    @Test
+    void dbLookupThrows_treatsAsNewLike() {
+        // 灾备查询不可用 → fail-open 按新赞放行（= 兜底前的既有行为），绝不因兜底故障拒绝点赞
+        when(redisTemplate.hasKey(anyString())).thenReturn(false);
+        when(setOps.add(anyString(), eq("42"))).thenReturn(1L);
+        when(likeRepository.existsLike(POST_ID, 42L)).thenThrow(new RuntimeException("db down"));
+
+        assertTrue(service.apply(POST_ID, 42L, true));
+
+        verify(redisTemplate).execute(any(RedisScript.class), eq(List.of(COUNT_KEY)), eq("1"), anyString());
+    }
+
     // ===== ①-b 冷启动校正：计数 Key 缺失时不得从 0 起算 =====
 
     @Test

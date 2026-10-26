@@ -49,4 +49,30 @@ public class MediaLikeJdbcRepository {
         return jdbcTemplate.queryForList(
                 "SELECT user_id FROM media_like WHERE post_id = ?", Long.class, postId);
     }
+
+    /**
+     * 某用户是否已赞过某内容（去重集合 TTL 回收后的兜底校验，带分片键单分片命中）。
+     *
+     * <p><b>为什么需要它</b>：去重集合是「Redis 为权威」的幂等保证，但它有 TTL
+     * （{@code MediaLikeService#SET_TTL}）。连续 N 天无人访问的内容，64 槽集合会被回收；
+     * 此后曾点赞的用户再点一次，{@code SADD} 会返回 1 而被误判为「新赞」→ 计数 +1，
+     * <b>计数虚增且红心态失真</b>。本方法用持久化的灾备表确认「此前到底赞没赞过」，
+     * 让去重在集合回收后仍有据可依。</p>
+     *
+     * <p><b>口径：只用于「拦截」，不用于「放行」</b>。本表由点赞主链路<b>异步</b>写入
+     * （fail-open，落库失败仅告警），因此「查不到」<b>不能</b>断言用户没赞过——只能按新赞放行
+     * （即回到改造前的行为）。所以这条兜底是<b>单调改善</b>：能拦住多少算多少，拦不住也不会
+     * 比现在更差。</p>
+     */
+    public boolean existsLike(String postId, long userId) {
+        try {
+            Integer n = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(1) FROM media_like WHERE post_id = ? AND user_id = ?",
+                    Integer.class, postId, userId);
+            return n != null && n > 0;
+        } catch (Exception e) {
+            // fail-open：灾备表不可用时按「没赞过」放行（= 改造前行为），绝不因兜底查询失败而拒绝点赞
+            return false;
+        }
+    }
 }

@@ -84,11 +84,15 @@ public class CommentLikeService {
      * <p><b>刻意不做的续期</b>：批量路径的<b>热命中项</b>（计数 Key 存在）不续期——那是 QPS 最高处，
      * 为续期再加 N×64 个 {@code EXPIRE} 会把 A2 省下的开销全还回去。</p>
      *
-     * <p><b>残余漂移窗口（已知取舍，非缺陷隐藏）</b>：某评论连续 8 天只被批量热命中读取、
-     * 且无任何新点赞时，其去重集合会到期；此后曾点赞的用户再点一次，{@code SADD} 返回 1 被当作
-     * 「新赞」→ 计数 Key 多 +1。该漂移<b>有界</b>（每用户每评论至多 1）且可修复：
-     * {@link #recountFromSlots(String)} 用集合重算、{@link #rebuildFromDb(String, long)} 用灾备表
-     * {@code comment_like} 权威重建。彻底消除需在热路径续期，代价与收益不成比例，故不采用。</p>
+     * <p><b>残余漂移窗口已关闭（原为「已知取舍」，本次补齐）</b>：某评论连续 8 天只被批量热命中
+     * 读取、且无任何新点赞时，其去重集合会到期；此后曾点赞的用户再点一次，{@code SADD} 返回 1
+     * 会被当作「新赞」→ 计数 Key 多 +1。原来判定「彻底消除需在<b>热路径</b>续期，代价与收益不成
+     * 比例」；实际只需把校验放在<b>冷路径</b>——{@link #toggle} 在「槽集合原本不存在」时用灾备表
+     * {@code comment_like} 确认一次，确认已赞过就只恢复成员、不重复计数。热路径零额外代价。</p>
+     *
+     * <p>注意兜底是<b>单调改善</b>：灾备表异步写入（fail-open），查不到不代表没赞过，只能放行
+     * （回到改造前行为）；查得到则拦住。{@link #recountFromSlots(String)} 与
+     * {@link #rebuildFromDb(String, long)} 仍是精确重建入口。</p>
      */
     private static final Duration SET_TTL = Duration.ofDays(8);
     /**
@@ -129,6 +133,22 @@ public class CommentLikeService {
     }
 
     /**
+     * 去重集合已不可信时，用灾备表确认「此前是否赞过」（fail-open）。
+     *
+     * <p>同 {@code MediaLikeService#alreadyLikedInDb}：兜底查询若抛到 {@link #toggle} 的 catch 里，
+     * 会变成「成员已 SADD 但计数没加、增量没发、灾备没落库」——比不兜底更糟。
+     * 兜底只能改善不能恶化，故查不动就按新赞放行。</p>
+     */
+    private boolean alreadyLikedInDb(String mediaId, long commentId, long userId) {
+        try {
+            return likeRepository.existsLike(mediaId, commentId, userId);
+        } catch (Exception e) {
+            log.warn("评论去重兜底查询失败（按新赞放行）: commentId={}, userId={}, {}", commentId, userId, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * 切换点赞状态（抖音式 toggle）。
      *
      * <p>入口限流由 {@link com.turbofeed.gateway.service.comment.CommentService#like} 统一负责，
@@ -143,9 +163,17 @@ public class CommentLikeService {
         String uid = String.valueOf(userId);
         String key = slotKey(String.valueOf(commentId), slotOf(userId));
         try {
+            // 同 MediaLikeService：槽集合原本不存在 = 去重状态不可信（新评论 / TTL 回收），
+            // 此时才查灾备表确认真实点赞史；集合存在的热路径不付这次 DB 查询代价。
+            Boolean slotExisted = redisTemplate.hasKey(key);
             Long added = redisTemplate.opsForSet().add(key, uid);
             if (added != null && added == 1L) {
                 redisTemplate.expire(key, SET_TTL);
+                if (!Boolean.TRUE.equals(slotExisted) && alreadyLikedInDb(mediaId, commentId, userId)) {
+                    log.info("评论去重集合已回收，据灾备表判定为重复赞（不计入计数）: commentId={}, userId={}",
+                            commentId, userId);
+                    return true;
+                }
                 // A2：与去重集合同步维护计数 Key（读权威）；fail-open，失败仅告警
                 bumpCount(String.valueOf(commentId), 1);
                 // 实际新增赞：通知 tf-counter 聚合底座（opt-in，fail-open）

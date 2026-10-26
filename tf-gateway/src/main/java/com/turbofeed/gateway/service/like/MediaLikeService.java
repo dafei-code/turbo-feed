@@ -98,6 +98,12 @@ public class MediaLikeService {
      *
      * <p><b>列表批量路径（{@link #likeCounts}）刻意不续期</b>：那里 QPS 最高，为续期再加 N×64 个
      * {@code EXPIRE} 会把 A1 省下的开销又还回去。详情页续期已足够覆盖「内容仍活跃」的判定。</p>
+     *
+     * <p><b>滑动续期也覆盖不到的窗口，由灾备表兜底（本次补齐）</b>：连续 8 天无人打开详情页
+     * 也无人点赞的内容，64 槽仍会到期；此后曾点赞的用户再点一次，{@code SADD} 返回 1 会被
+     * 误判为「新赞」→ 计数 +1。{@link #apply} 因此在「槽集合原本不存在」这一<b>冷路径</b>上
+     * 查一次 {@code media_like} 灾备表：确实赞过则只恢复成员、不重复计数。
+     * 把成本放在冷路径而非热路径，是这个兜底能落地的关键。</p>
      */
     private static final Duration SET_TTL = Duration.ofDays(8);
     /**
@@ -143,6 +149,23 @@ public class MediaLikeService {
     }
 
     /**
+     * 去重集合已不可信时，用灾备表确认「此前是否赞过」（fail-open）。
+     *
+     * <p><b>为什么这里还要再包一层 try</b>：{@link MediaLikeJdbcRepository#existsLike} 内部已
+     * fail-open，但那只是「当前实现」的保证。若这层兜底查询抛到 {@link #apply} 的 catch 里，
+     * 结果是「成员已 SADD（红心亮了）但计数没加、增量没发、灾备没落库」——比不做兜底还糟。
+     * 兜底必须<b>只能改善、不能恶化</b>，因此在调用点再兜一次：查不动就按新赞放行。</p>
+     */
+    private boolean alreadyLikedInDb(String postId, long userId) {
+        try {
+            return likeRepository.existsLike(postId, userId);
+        } catch (Exception e) {
+            log.warn("去重兜底查询失败（按新赞放行）: postId={}, userId={}, {}", postId, userId, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * 切换点赞状态（抖音式 toggle）。
      *
      * @param postId 被赞内容身份（{@code postId} = 时间线幂等键；也是引擎统计/热点榜的键）
@@ -160,9 +183,20 @@ public class MediaLikeService {
         String key = slotKey(postId, slotOf(userId));
         try {
             if (like) {
+                // 去重集合回收兜底：先记下这个槽「原本在不在」。集合不存在 = 该帖的去重状态
+                // 已经不可信（新帖从未被赞，或老帖的 64 槽被 TTL 回收了），此时才需要查灾备表
+                // 确认真实点赞史——热路径（集合存在）不付这次 DB 查询的代价。
+                Boolean slotExisted = redisTemplate.hasKey(key);
                 Long added = redisTemplate.opsForSet().add(key, uid);
                 if (added != null && added == 1L) {
                     redisTemplate.expire(key, SET_TTL);
+                    if (!Boolean.TRUE.equals(slotExisted) && alreadyLikedInDb(postId, userId)) {
+                        // 去重集合已被回收，但灾备表证明该用户此前赞过 → 判为「重复赞」：
+                        // 成员已由上面的 SADD 恢复（红心态正确），但不重复计数、不重复发增量、不重复落库。
+                        log.info("去重集合已回收，据灾备表判定为重复赞（不计入计数）: postId={}, userId={}",
+                                postId, userId);
+                        return true;
+                    }
                     // A1：与去重集合同步维护计数 Key（读权威）；fail-open，失败仅告警
                     bumpCount(postId, 1);
                     publish(postId, userId, "LIKE");

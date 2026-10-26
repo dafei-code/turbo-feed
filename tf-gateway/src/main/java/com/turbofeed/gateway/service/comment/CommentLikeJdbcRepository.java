@@ -50,4 +50,24 @@ public class CommentLikeJdbcRepository {
                 "SELECT user_id FROM comment_like WHERE media_id = ? AND comment_id = ?",
                 Long.class, mediaId, commentId);
     }
+
+    /**
+     * 某用户是否已赞过某评论（去重集合 TTL 回收后的兜底校验，带分片键 {@code media_id} 单分片命中）。
+     *
+     * <p>用途与口径同 {@code MediaLikeJdbcRepository#existsLike}：去重集合是 Redis 侧权威，
+     * 但有 TTL；集合被回收后曾点赞的用户再点一次会被误判为新赞 → 计数虚增。
+     * <b>只用于「拦截」不用于「放行」</b>——本表异步写入（fail-open），查不到不代表没赞过，
+     * 只能按新赞放行（即回到改造前行为），因此是单调改善。</p>
+     */
+    public boolean existsLike(String mediaId, long commentId, long userId) {
+        try {
+            Integer n = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(1) FROM comment_like WHERE media_id = ? AND comment_id = ? AND user_id = ?",
+                    Integer.class, mediaId, commentId, userId);
+            return n != null && n > 0;
+        } catch (Exception e) {
+            // fail-open：灾备不可用时按「没赞过」放行（= 改造前行为）
+            return false;
+        }
+    }
 }
