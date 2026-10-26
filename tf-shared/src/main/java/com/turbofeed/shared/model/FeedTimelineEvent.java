@@ -16,8 +16,10 @@ import java.time.Instant;
  * 否则反查索引对不上，下架会静默失效。</p>
  *
  * <p><b>零依赖定位</b>：本类落在 tf-shared，<b>不引入任何 Jackson 注解</b>——
- * 反序列化依赖 tf-shared 的 {@code -parameters} 编译参数（形参名随 .class 暴露），
- * 与 {@link FeedItemView} 同机制。{@code Instant} 由 Spring Boot 默认注册的 JavaTimeModule 序列化。</p>
+ * record 的（反）序列化由 Jackson 2.12+ 经 {@code Class#getRecordComponents()} 完成，
+ * <b>不依赖</b> {@code -parameters} 编译参数（2026-10-26 实测，见
+ * {@code SharedContractJsonTest#record不依赖编译期形参名}；旧注释称「依赖形参名」是错的，已订正）。
+ * {@code Instant} 由 Spring Boot 默认注册的 JavaTimeModule 序列化。</p>
  *
  * @param timelineKey 帖身份（顺序消息 hashKey，保证同一帖严格有序）；
  *                    见 {@link FeedItemView#timelineKey()} 的回退口径
@@ -25,18 +27,38 @@ import java.time.Instant;
  * @param poolLevel   流量池层级（仅 APPEND 有值；REMOVE 为 null）
  * @param item        帖子条目（仅 APPEND 有值；REMOVE 为 null）
  * @param occurredAt  事件发生时间
+ * @param schemaVersion 契约版本号（M2 / 4.1），协商规则见 {@link ContractVersion}。
+ *                    MQ 里未被消费的存量消息没有本字段（反序列化为 {@code null}），按首版语义容忍。
+ *                    生产侧请用 5 参便捷构造器，由本类统一填 {@link #SCHEMA_VERSION}
  */
 public record FeedTimelineEvent(
         String timelineKey,
         String action,
         Integer poolLevel,
         FeedItemView item,
-        Instant occurredAt) {
+        Instant occurredAt,
+        Integer schemaVersion) {
 
     /** 入流（审核通过 / 申诉翻案）。 */
     public static final String ACTION_APPEND = "APPEND";
     /** 下架（删除 / 举报下架 / 申诉中暂不可见）。 */
     public static final String ACTION_REMOVE = "REMOVE";
+
+    /**
+     * 当前代码产生的契约版本（首版 = 1）。只在不兼容变更时递增，
+     * 详见 {@link FeedItemView#SCHEMA_VERSION} 的同名常量说明。
+     */
+    public static final int SCHEMA_VERSION = 1;
+
+    /**
+     * 生产侧便捷构造器：版本号由本类统一填 {@link #SCHEMA_VERSION}，
+     * 理由见 {@link FeedItemView#FeedItemView(String, String, String, java.util.List, String,
+     * java.time.Instant, String, String, java.util.List)}——契约版本属于契约自身，不该散到调用点。
+     */
+    public FeedTimelineEvent(String timelineKey, String action, Integer poolLevel, FeedItemView item,
+                             Instant occurredAt) {
+        this(timelineKey, action, poolLevel, item, occurredAt, SCHEMA_VERSION);
+    }
 
     // ⚠️ 刻意【不提供】isAppend() / isRemove() 这类 is 前缀布尔方法。
     // 实测：Jackson 会把 isXxx() 当作 boolean getter 序列化出去，线上 body 里因此多出

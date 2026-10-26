@@ -1,6 +1,7 @@
 package com.turbofeed.feedengine.timeline;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.turbofeed.shared.model.ContractVersion;
 import com.turbofeed.shared.model.FeedItemView;
 
 import java.util.Set;
@@ -138,15 +139,27 @@ final class TimelineSupport {
      *
      * <p>任何异常一律返回 {@code null}：成员串可能是历史格式（缺 postId/images），
      * 也可能被人为写坏，读路径宁可丢这一条也不能整页失败（fail-open）。</p>
+     *
+     * <p><b>M2/4.1 契约版本协商（读路径专用口径）</b>：版本不兼容的成员串同样返回 {@code null}
+     * ——即<b>跳过这一条</b>，而不是让整页失败。这是读路径与写路径的关键差别：
+     * 写路径（{@code FeedTimelineDeliveryService}）要拒绝并留痕进 DLQ，读路径则只要保证
+     * 「不按错误语义把条目渲染给用户」，丢一条是可接受的代价。
+     * 两者都遵循同一条底线：<b>绝不硬解</b>。</p>
      */
     static FeedItemView parse(ObjectMapper objectMapper, String json) {
         if (json == null) {
             return null;
         }
+        FeedItemView item;
         try {
-            return objectMapper.readValue(json, FeedItemView.class);
+            item = objectMapper.readValue(json, FeedItemView.class);
         } catch (Exception ignore) {
             return null;
         }
+        if (!ContractVersion.isConsumable(FeedItemView.SCHEMA_VERSION,
+                item == null ? null : item.schemaVersion())) {
+            return null;
+        }
+        return item;
     }
 }

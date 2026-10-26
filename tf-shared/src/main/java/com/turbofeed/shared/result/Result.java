@@ -67,8 +67,17 @@ public final class Result<T> {
         return new Result<>(code, message, null);
     }
 
-    /** 是否成功（code == 0） */
-    public boolean isSuccess() {
+    /**
+     * 是否成功（code == 0）。
+     *
+     * <p>⚠️ <b>方法名刻意不是 {@code isSuccess()}</b>：Jackson 会把 {@code isXxx()} 当作
+     * boolean getter 序列化出去，那样每个响应体都会凭空多出一个 {@code "success": true} 字段；
+     * 而本类既无 {@code success} 字段也无对应 setter，写得出、读不回——一旦有人打开
+     * {@code FAIL_ON_UNKNOWN_PROPERTIES}，反序列化 {@code Result} 会整体失败。
+     * 本模块零第三方依赖（不能用 {@code @JsonIgnore}），因此从命名上绕开：去掉 {@code is} 前缀后
+     * Jackson 不再把它当属性。由 {@code SharedContractJsonTest} 的「幽灵字段护栏」锁死。</p>
+     */
+    public boolean succeeded() {
         return code == ErrorCode.SUCCESS.getCode();
     }
 

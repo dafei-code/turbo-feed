@@ -22,11 +22,14 @@ import java.util.List;
  * 业务概念，把它提升到契约层会让引擎被网关的状态机演进绑死。契约只承诺「状态的字符串表示」，
  * 网关侧负责双向映射，引擎侧只需判断是否等于 {@link #STATUS_APPROVED}。</p>
  *
- * <p><b>为什么没有 Jackson 注解（重要）</b>：record 的反序列化走规范构造器，Jackson 需要知道
- * 形参名；而形参名默认被编译成 {@code arg0/arg1}（根 pom 未开启 {@code -parameters}）。
- * 本模块的 {@code pom.xml} 单独开启 {@code maven-compiler-plugin} 的 {@code -parameters}，
- * 形参名随 {@code FeedItemView.class} 一起被下游读取——因此既不需要 {@code @JsonProperty}
- * （会破坏本模块「零第三方依赖」定位），也不需要把编译参数扩散到其他模块。</p>
+ * <p><b>为什么没有 Jackson 注解（重要）</b>：Jackson 2.12+ 通过 {@code Class#getRecordComponents()}
+ * 取 record 组件名，<b>不需要</b> {@code -parameters} 编译参数——2026-10-26 用裸
+ * {@code ObjectMapper}（连 ParameterNamesModule 都不注册）实测六个契约完整往返通过，
+ * 此前「依赖形参名」的说法是把普通类的经验套到 record 上，属<b>错误结论，已订正</b>
+ * （由 {@code SharedContractJsonTest} 固化，误关编译参数会在 CI 变红）。
+ * 因此既不需要 {@code @JsonProperty}（那会破坏本模块「零第三方依赖」定位，把 Jackson 传递
+ * 给所有引用方），也不需要为契约去动任何编译参数。命中 Jackson 默认行为的坑
+ * （如 {@code is} 前缀被当属性）一律从命名上绕开，见 {@code Result#succeeded()}。</p>
  *
  * <p><b>「一个成员 = 一个帖子」</b>：B2 之后的公域时间线按<b>帖子</b>物化——同一次上传批次的
  * N 张图共用一条成员串（{@link #images}），而不是一张图一条。因此本记录的两个回退方法
@@ -48,6 +51,12 @@ import java.util.List;
  * @param tags        caption 中解析出的话题标签（小写、去重、按出现顺序；见
  *                   {@code com.turbofeed.shared.caption.CaptionTagParser}）。入流时由网关解析
  *                   并随条目物化进时间线成员串，供引擎做兴趣画像与个性化召回/排序。无标签为 {@code null}
+ * @param schemaVersion 契约版本号（M2 / 4.1）。本记录的<b>持久化寿命远长于事件</b>——它被序列化进
+ *                   {@code tf:feed:tl:*} 成员串长期驻留 Redis，而承载它的 MQ 事件早已被消费掉，
+ *                   因此不能只靠外层事件信封的版本：半年后读这条成员串时，信封早就没了。
+ *                   版本协商规则见 {@link ContractVersion}；存量成员串没有本字段（反序列化为
+ *                   {@code null}），按首版语义容忍。生产侧请用 9 参便捷构造器，由本类统一填
+ *                   {@link #SCHEMA_VERSION}，不要把版本号散到各个调用点
  */
 public record FeedItemView(
         String postId,
@@ -58,10 +67,33 @@ public record FeedItemView(
         Instant createdAt,
         String caption,
         String captionMark,
-        List<String> tags) {
+        List<String> tags,
+        Integer schemaVersion) {
 
     /** 唯一允许进入公域时间线的状态值（引擎侧写入闸门）。 */
     public static final String STATUS_APPROVED = "APPROVED";
+
+    /**
+     * 当前代码产生的契约版本（首版 = 1）。
+     *
+     * <p><b>只在不兼容变更时递增</b>：加可空字段不必递增（未知字段默认忽略，新旧双向安全）。
+     * 递增时的发布顺序是先升消费者、再升生产者，否则中间窗口里新数据会被旧代码拒绝——
+     * 这条顺序没有机制保证，必须写进发布手册。</p>
+     */
+    public static final int SCHEMA_VERSION = 1;
+
+    /**
+     * 生产侧便捷构造器：版本号由本类统一填 {@link #SCHEMA_VERSION}。
+     *
+     * <p><b>为什么提供它而不是让调用点各自传版本号</b>：契约的版本属于契约自身，不属于调用方。
+     * 若每个生产点都写一遍 {@code FeedItemView.SCHEMA_VERSION}，一旦有 10 个调用点就变成
+     * 「同一事实十处表述」——漏改一处不报错，只表现为线上静默错版。收敛到本构造器后只有一份真值。
+     * 需要构造<b>历史版本</b>数据（测试兼容矩阵）时才用全参规范构造器。</p>
+     */
+    public FeedItemView(String postId, String mediaId, String url, List<String> images, String status,
+                        Instant createdAt, String caption, String captionMark, List<String> tags) {
+        this(postId, mediaId, url, images, status, createdAt, caption, captionMark, tags, SCHEMA_VERSION);
+    }
 
     /** 是否可进入公域时间线。 */
     public boolean approved() {

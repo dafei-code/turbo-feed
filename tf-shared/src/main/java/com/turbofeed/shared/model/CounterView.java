@@ -11,8 +11,9 @@ package com.turbofeed.shared.model;
  * 新增维度一律追加在末尾（顺序即缓冲数组下标与落库列顺序，中间插入会造成存量数据错位）。</p>
  *
  * <p>JSON 序列化依赖 record 组件名（postId/likeCount/...），与下游字段名一致；
- * 本模块零第三方依赖，不加 @JsonProperty，由下游 Jackson ParameterNamesModule 通过
- * -parameters 形参名完成（反）序列化。</p>
+ * 本模块零第三方依赖，不加 {@code @JsonProperty}——Jackson 2.12+ 通过
+ * {@code getRecordComponents()} 取组件名，<b>不依赖</b> {@code -parameters}
+ * （2026-10-26 实测订正，详见 tf-shared pom 注释）。</p>
  */
 public record CounterView(String postId, long likeCount, long commentCount, long shareCount, long commentLikeCount) {
 

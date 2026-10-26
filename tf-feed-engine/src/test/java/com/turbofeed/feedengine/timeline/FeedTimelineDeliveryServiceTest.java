@@ -3,6 +3,7 @@ package com.turbofeed.feedengine.timeline;
 import com.turbofeed.feedengine.interest.TagIndexService;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.model.FeedTimelineEvent;
+import com.turbofeed.shared.model.UnsupportedContractVersionException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
@@ -172,5 +173,62 @@ class FeedTimelineDeliveryServiceTest {
         FeedItemView it = item("p1");
         delivery().apply(new FeedTimelineEvent("p1", FeedTimelineEvent.ACTION_APPEND, null, it, Instant.now()));
         verify(feedTimelineStore).append(it, 1);
+    }
+
+    // ==================== 契约版本协商（M2 / 4.1） ====================
+
+    /**
+     * 高版本消息在<b>严格通道</b>必须上抛 → RocketMQ 重试耗尽后进 DLQ，留痕可巡检。
+     *
+     * <p>最危险的反面行为是「静默按当前语义处理」：生产者升了版本、消费者没升，
+     * 消息照样解析得出来（Jackson 不会因为数字大而报错），却会被按错误的字段语义写进时间线。</p>
+     */
+    @Test
+    void applyStrict_futureSchemaVersion_throwsAndChangesNothing() {
+        FeedTimelineEvent future = new FeedTimelineEvent("p1", FeedTimelineEvent.ACTION_REMOVE, null, null,
+                Instant.now(), FeedTimelineEvent.SCHEMA_VERSION + 1);
+
+        assertThrows(UnsupportedContractVersionException.class, () -> delivery().applyStrict(future));
+        verifyNoInteractions(feedTimelineStore, tagIndexService, recommendedFeedService);
+    }
+
+    /** 高版本消息在<b>HTTP 兜底通道</b>只告警、不改动数据（该通道本就是 best-effort）。 */
+    @Test
+    void apply_futureSchemaVersion_doesNotThrowAndChangesNothing() {
+        FeedTimelineEvent future = new FeedTimelineEvent("p1", FeedTimelineEvent.ACTION_APPEND, 1, item("p1"),
+                Instant.now(), FeedTimelineEvent.SCHEMA_VERSION + 1);
+
+        assertDoesNotThrow(() -> delivery().apply(future));
+        verifyNoInteractions(feedTimelineStore, tagIndexService, recommendedFeedService);
+    }
+
+    /**
+     * 存量消息（本字段引入前产生，反序列化为 {@code null}）必须被正常消费——
+     * MQ 里未被消费的旧消息与已物化的成员串都补不回版本号，把它们拒掉等于上线即事故。
+     */
+    @Test
+    void apply_unversionedLegacyEvent_isTolerated() {
+        FeedTimelineEvent legacy = new FeedTimelineEvent("p1", FeedTimelineEvent.ACTION_REMOVE, null, null,
+                Instant.now(), null);
+
+        delivery().apply(legacy);
+
+        verify(feedTimelineStore).remove("p1");
+        verify(tagIndexService).remove("p1");
+        verify(recommendedFeedService).invalidate();
+    }
+
+    /** 信封版本一致但内嵌条目版本更高：同样必须拒绝（条目会被持久化进成员串，错得更久）。 */
+    @Test
+    void applyStrict_futureItemSchemaVersion_throwsAndChangesNothing() {
+        FeedItemView futureItem = new FeedItemView("p1", "m-p1", "http://img", null,
+                FeedItemView.STATUS_APPROVED, Instant.now(), null, null, null,
+                FeedItemView.SCHEMA_VERSION + 1);
+        // 信封用便捷构造器（当前版本），只有内嵌条目是高版本
+        FeedTimelineEvent event = new FeedTimelineEvent("p1", FeedTimelineEvent.ACTION_APPEND, 1, futureItem,
+                Instant.now(), FeedTimelineEvent.SCHEMA_VERSION);
+
+        assertThrows(UnsupportedContractVersionException.class, () -> delivery().applyStrict(event));
+        verifyNoInteractions(feedTimelineStore, tagIndexService, recommendedFeedService);
     }
 }

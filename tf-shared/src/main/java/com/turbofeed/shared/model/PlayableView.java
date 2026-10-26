@@ -8,8 +8,9 @@ package com.turbofeed.shared.model;
  * 正是捕捉「预取 → 滚动」之间的状态翻转），又会污染历史成员串。故播放前复校走独立轻量端点，
  * 本记录只承载「某一刻的复校结论」。</p>
  *
- * <p><b>序列化</b>：与 {@link FeedItemView} 同处 tf-shared（已开启 {@code -parameters}），record 构造器
- * 形参名随 class 暴露，下游 Jackson 可直接反序列化，无需 {@code @JsonProperty}。</p>
+ * <p><b>序列化</b>：与 {@link FeedItemView} 同处 tf-shared。Jackson 2.12+ 经
+ * {@code getRecordComponents()} 取组件名，<b>不依赖</b> {@code -parameters} 编译参数
+ * （2026-10-26 实测订正），下游 Jackson 可直接反序列化，无需 {@code @JsonProperty}。</p>
  *
  * @param postId   帖子唯一标识（与时间线 {@code timelineKey} 一致）
  * @param playable 是否可播放：false = 内容已下架 / 作者被封禁或健康分过低，客户端应渲染占位 + 5s 跳下一条

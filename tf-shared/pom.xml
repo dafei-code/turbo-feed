@@ -38,21 +38,49 @@
             <artifactId>archunit-junit5</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!-- JSON 往返回归测试（M2/4.1）：契约 record 的字段名就是跨服务协议本身，
+             必须有一条测试把「序列化出来的 JSON」写死，字段漂移即红。
+             test scope，不向引用方传递——本模块对外的「零第三方依赖」定位不变。
+
+             ⚠️ 为什么测试需要一个序列化器：契约测试验的是「JSON 长什么样」，
+             不验 Jackson 本身。用真实的 Jackson 跑，才能覆盖 Instant 时间格式、
+             record 反序列化、未知字段这些真正会炸的地方。
+             jackson-datatype-jsr310 用于 java.time.Instant（契约里有 createdAt/occurredAt）。 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
         <plugins>
-            <!-- 开启 -parameters：契约 record（如 FeedItemView）的 JSON 反序列化依赖「类文件中
-                 保留形参名」——Jackson 的 ParameterNamesModule 通过 Parameter#getName() 读取
-                 record 规范构造器的形参名，而未经此配置时形参名只编译为 arg0/arg1，反序列化
-                 会抛 InvalidDefinitionException（网关侧 MediaItem 当初为此才加了 @JsonProperty）。
+            <!-- 开启 -parameters：保留形参名（M2/4.1 实测更正过结论，勿再照抄旧注释）。
 
-                 为什么只在 tf-shared 开：形参名随 FeedItemView.class 一并被下游
-                 （tf-feed-engine / tf-gateway）读取，本刀范围内下游无需各自开启；同时避免为
-                 一个契约问题去改根 pom 的全局编译参数。
+                 ⚠️ 更正（2026-10-26 实测）：本模块【所有契约都是 record】，而 Jackson 2.12+
+                 通过 Class#getRecordComponents() 拿组件名，【不依赖】本参数——用裸 ObjectMapper
+                 （连 ParameterNamesModule 都不注册）完整往返六个契约全部通过。此前「反序列化依赖
+                 -parameters、不开就抛 InvalidDefinitionException」的说法是把【普通类】的经验
+                 套到了 record 上，是错的，代码注释与文档已同步订正。该结论由
+                 SharedContractJsonTest#record不依赖编译期形参名 固化，误关本参数会立刻在 CI 变红。
 
-                 为什么不加 jackson-annotations：本模块定位「零第三方依赖」，加注解等于给所有
-                 引用方（含 tf-counter）引入一个非必要传递依赖。 -->
+                 为什么仍然保留：① 非 record 类（若将来新增走构造器绑定的普通类）仍需要它；
+                 ② 反射诊断与框架内省场景需要真实形参名；③ 零运行时成本。保留但不再声称它是
+                 record 序列化的前提——不写清楚，下一个人又不敢删、也不敢信。
+
+                 为什么只在 tf-shared 开：契约类都在这里，形参名随 .class 一并被下游读取，
+                 无需为它去改根 pom 的全局编译参数。
+
+                 为什么不加 jackson-annotations（@JsonProperty/@JsonIgnore）：本模块定位
+                 「零第三方依赖」，加注解等于给所有引用方（含 tf-counter）引入一个非必要传递依赖。
+                 命中 Jackson 默认行为的坑（如 is 前缀被当属性）一律【从命名上绕开】，
+                 而不是加注解——Result#succeeded() 与 FeedTimelineEvent 的常量比较都是这么处理的。 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>

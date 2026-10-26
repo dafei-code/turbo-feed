@@ -1,5 +1,6 @@
 package com.turbofeed.feedengine.timeline;
 
+import com.turbofeed.shared.model.ContractVersion;
 import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.feedengine.interest.InterestService;
 import com.turbofeed.feedengine.interest.SessionSequenceService;
@@ -48,6 +49,11 @@ public class FeedBehaviorConsumer implements RocketMQListener<FeedBehaviorEvent>
         if (msg == null) {
             return;
         }
+        // M2/4.1 契约版本协商：行为埋点会被累进兴趣画像与 session 序列，属于「写进去就难撤回」
+        // 的派生数据——按错误语义解释一条高版本消息，污染的是用户画像，比丢掉一条埋点严重得多。
+        // 抛异常 → RocketMQ 重试耗尽后进 DLQ，留痕可巡检（绝不静默按当前语义处理）。
+        ContractVersion.requireConsumable("FeedBehaviorEvent",
+                FeedBehaviorEvent.SCHEMA_VERSION, msg.schemaVersion());
         if ("WATCH".equalsIgnoreCase(msg.type())) {
             postStatService.recordWatch(msg.timelineKey(), msg.watchDuration(), msg.mediaDuration());
         } else if ("UNLIKE".equalsIgnoreCase(msg.type())) {

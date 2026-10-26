@@ -3,8 +3,10 @@ package com.turbofeed.shared.model;
 /**
  * 行为埋点事件（网关 → 引擎；经 RocketMQ 或同步 HTTP 承载）。
  *
- * <p><b>零 Jackson 注解</b>：依赖 tf-shared 模块单独开启的 {@code -parameters} 编译参数做反序列化
- * （与 {@link FeedItemView} / {@link FeedTimelineEvent} 同机制），保持本模块零三方依赖定位。</p>
+ * <p><b>零 Jackson 注解</b>：record 的（反）序列化由 Jackson 2.12+ 经 {@code getRecordComponents()}
+ * 完成，<b>不依赖</b> {@code -parameters} 编译参数（与 {@link FeedItemView} /
+ * {@link FeedTimelineEvent} 同机制；旧注释称依赖形参名，2026-10-26 实测证伪并订正）。
+ * 保持本模块零三方依赖定位。</p>
  *
  * <p><b>刻意不用 is/get 前缀方法</b>：record 上任何 is/get 前缀方法会被 Jackson 当属性序列化，
  * 污染消息体（与 {@code FeedTimelineEvent} 同款陷阱）。</p>
@@ -31,5 +33,20 @@ package com.turbofeed.shared.model;
  * 这也是特征存储要解决的核心问题（训练- serving 一致性）。</p>
  */
 public record FeedBehaviorEvent(String timelineKey, String type, Integer watchDuration, Integer mediaDuration,
-                                String userId, String requestId, Integer position) {
+                                String userId, String requestId, Integer position, Integer schemaVersion) {
+
+    /**
+     * 当前代码产生的契约版本（首版 = 1）。只在不兼容变更时递增，
+     * 详见 {@link FeedItemView#SCHEMA_VERSION} 的同名常量说明。
+     */
+    public static final int SCHEMA_VERSION = 1;
+
+    /**
+     * 生产侧便捷构造器：版本号由本类统一填 {@link #SCHEMA_VERSION}
+     * （契约版本属于契约自身，不该散到各个生产点）。
+     */
+    public FeedBehaviorEvent(String timelineKey, String type, Integer watchDuration, Integer mediaDuration,
+                             String userId, String requestId, Integer position) {
+        this(timelineKey, type, watchDuration, mediaDuration, userId, requestId, position, SCHEMA_VERSION);
+    }
 }

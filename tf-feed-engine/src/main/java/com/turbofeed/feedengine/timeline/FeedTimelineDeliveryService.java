@@ -1,6 +1,7 @@
 package com.turbofeed.feedengine.timeline;
 
 import com.turbofeed.feedengine.interest.TagIndexService;
+import com.turbofeed.shared.model.ContractVersion;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.model.FeedTimelineEvent;
 import lombok.RequiredArgsConstructor;
@@ -91,7 +92,17 @@ public class FeedTimelineDeliveryService {
         if (event == null) {
             throw new IllegalArgumentException("时间线事件为 null");
         }
+        // M2/4.1 契约版本协商：放在本方法（两个通道的唯一入口）是为了让两条通道自动都覆盖——
+        // 若放在各自的门面里，就会出现「HTTP 通道校验了、MQ 通道忘了」的静默分歧，
+        // 那正是本类被创造出来要消灭的缺陷形状。
+        // 抛 UnsupportedContractVersionException（IllegalArgumentException 子类）后：
+        //   - apply()（HTTP 兜底）→ 被 catch 只告警，不改动任何数据；
+        //   - applyStrict()（MQ）→ 上抛 → RocketMQ 重试耗尽后进 DLQ，留痕可巡检。
+        ContractVersion.requireConsumable("FeedTimelineEvent",
+                FeedTimelineEvent.SCHEMA_VERSION, event.schemaVersion());
         if (FeedTimelineEvent.ACTION_APPEND.equals(event.action())) {
+            ContractVersion.requireConsumable("FeedItemView",
+                    FeedItemView.SCHEMA_VERSION, event.item() == null ? null : event.item().schemaVersion());
             FeedItemView item = event.item();
             if (item == null) {
                 throw new IllegalArgumentException("APPEND 事件缺少 item: timelineKey=" + event.timelineKey());
