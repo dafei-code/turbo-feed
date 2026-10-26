@@ -192,11 +192,53 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
             </plugin>
+            <!-- JaCoCo（M3 质量工程）：0.8.11 为本地 .m2 已有版本，离线可跑。
+                 未选更新版本是因为本机不联网，而「能在本机复现 CI 结果」比版本号新更重要。 -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.11</version>
+            </plugin>
         </plugins>
     </pluginManagement>
     </build>
 
     <profiles>
+        <!-- ci：CI 专属的额外门禁（覆盖率）。**只在 CI 激活，本地默认不激活**——
+             两个原因：① JaCoCo 会对所有测试做字节码插桩，让本地日常构建明显变慢；
+             ② 本机 .m2 里 JaCoCo 的传递依赖不完整（asm / plexus-utils 等缺失），离线跑会直接失败，
+             放进 profile 可保证「本地离线构建永远不被覆盖率工具拖垮」。CI 有网，能正常解析。
+             代价是本地跑不出覆盖率报告；想看时手动 `mvn -Pci verify`（需联网）。 -->
+        <profile>
+            <id>ci</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.jacoco</groupId>
+                        <artifactId>jacoco-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>prepare-agent</id>
+                                <goals>
+                                    <goal>prepare-agent</goal>
+                                </goals>
+                            </execution>
+                            <!-- report 绑 prepare-package 而非 test：surefire 的 test goal 也绑在 test 阶段，
+                                 同阶段内执行顺序取决于 POM 声明顺序，绑 test 有「报告先于测试执行、
+                                 结果全零」的风险；prepare-package 稳在 test 之后、package 之前。 -->
+                            <execution>
+                                <id>report</id>
+                                <phase>prepare-package</phase>
+                                <goals>
+                                    <goal>report</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
         <!-- local：在 /Volumes/D（APFS protect 卷）上构建时，spring-boot-maven-plugin 的 repackage
              会对 mmap 打开的 jar 执行 renameTo，而该挂载下 rename() 对 mmap 文件返回失败
              （"Unable to rename ... to ...jar.original"）。本地运行用 -cp target/classes 不需要 fat jar，

@@ -44,9 +44,126 @@ jobs:
           java-version: '17'
           cache: maven
 
+      - name: 工作区卫生检查
+        # 三条检查都对应真实踩过的坑：
+        #  ① sed -i '' / perl -pi -e 在 APFS protect 卷（/Volumes/D）上会留下随机名残留文件，
+        #     且改名回写会被文件策略拒绝——残留一旦被 git add -A 提交就很难发现；
+        #  ② .workbuddy 是本地会话目录，绝不能进仓；
+        #  ③ 裸 @Disabled 等于悄悄关掉一条门禁（本仓库的 Docker 集成测用的是自定义
+        #     @RequiresDocker 守卫，不是 @Disabled，故当前应为空）。
+        run: |
+          set -euo pipefail
+          fail=0
+
+          echo "— 检查编辑工具残留文件 —"
+          leftovers=$(find . -path ./.git -prune -o -path ./target -prune -o -type f \
+            \( -name '*.orig' -o -name '*.rej' -o -name '*.bak' -o -name '*~' -o -name '*.tmp' \) -print || true)
+          if [ -n "$leftovers" ]; then
+            echo "::error::发现编辑残留文件（sed -i / perl -i 产物），请删除后再提交"
+            echo "$leftovers"
+            fail=1
+          fi
+
+          echo "— 检查 .workbuddy 是否被误提交 —"
+          if git ls-files --error-unmatch .workbuddy >/dev/null 2>&1; then
+            echo "::error::.workbuddy/ 是本地会话目录，不应被 git 跟踪"
+            git ls-files .workbuddy | head -20
+            fail=1
+          fi
+
+          echo "— 检查无理由跳过的测试 —"
+          disabled=$(grep -rn --include='*.java' -E '^[[:space:]]*@Disabled[[:space:]]*$' . || true)
+          if [ -n "$disabled" ]; then
+            echo "::error::发现裸 @Disabled（未写明原因）。需要临时跳过请写明理由与恢复条件"
+            echo "$disabled"
+            fail=1
+          fi
+
+          exit $fail
+
       - name: Build & verify
-        # clean 保证无残留；verify = test(22 单测 + @RequiresDocker 集成测) + package(repackage 出 fat jar) + verify。
+        # -Pci：激活 CI 专属门禁（JaCoCo 覆盖率报告）。本地默认不激活——插桩会拖慢日常构建，
+        #   且本机 .m2 里 JaCoCo 传递依赖不完整、离线会直接失败（见根 pom 的 ci profile 注释）。
+        # clean 保证无残留；verify = test + package(repackage 出 fat jar)。
         # 本地 D 盘构建才需 `mvn -Plocal package`（跳过 repackage，见根 pom 的 local profile，因 APFS protect 卷
         # 对 mmap 打开的 jar 执行 renameTo 会失败）；本 CI 在 Linux 上跑完整 repackage，验证可执行 jar 可构建。
-        # -DfailIfNoTests=false：允许个别库模块零测试（如 tf-shared/tf-redis）不报错。
-        run: mvn -B clean verify -DfailIfNoTests=false
+        # -DfailIfNoTests=false：允许个别库模块零测试（如 tf-redis）不报错。
+        run: mvn -B -Pci clean verify -DfailIfNoTests=false
+
+      - name: 汇总覆盖率
+        # JaCoCo 默认只写文件、不在日志里报数，而「覆盖率到底是多少」是设定门禁门槛的前提。
+        # 这里把各模块的 jacoco.csv 汇总成一行行摘要打到日志，便于直接读取（也便于观察趋势）。
+        # 只打印、不判失败：门槛（check）等看到真实数字、确认合理后再单独引入。
+        if: always()
+        run: |
+          set -euo pipefail
+          found=0
+          for f in */target/site/jacoco/jacoco.csv; do
+            [ -f "$f" ] || continue
+            found=1
+            awk -F, -v mod="${f%%/*}" 'NR>1 {lm+=$8; lc+=$9; bm+=$6; bc+=$7} END {
+              lt=lm+lc; bt=bm+bc;
+              printf "%-16s 行覆盖率 %6.2f%% (%d/%d)   分支覆盖率 %6.2f%% (%d/%d)\n",
+                     mod, (lt? lc/lt*100 : 0), lc, lt, (bt? bc/bt*100 : 0), bc, bt
+            }' "$f"
+          done
+          [ "$found" -eq 1 ] || echo "未找到 jacoco.csv（-Pci 未生效或 report 未执行）"
+
+      - name: 上传测试报告（仅失败时）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: '**/target/surefire-reports/**'
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # 编排配置冒烟：只校验 compose 文件本身，不真的拉镜像起容器（秒级反馈）。
+  # 与 build 并行跑，避免「代码没问题、但部署配置坏了」要等到发布才发现。
+  # ---------------------------------------------------------------------------
+  compose-smoke:
+    runs-on: ubuntu-latest
+
+    env:
+      # 仅用于 `docker compose config` 的变量插值校验，全是占位值、不接触任何真实环境。
+      # 真正的强制必填性由 compose 内的 ${VAR:?} 保证，并由下面的反证步骤验证。
+      TURBOFEED_DB_USERNAME: ci-placeholder
+      TURBOFEED_DB_PASSWORD: ci-placeholder
+      TURBOFEED_JWT_SECRET: ci-placeholder-secret-at-least-32-chars
+      TURBOFEED_MINIO_ACCESS_KEY: ci-placeholder
+      TURBOFEED_MINIO_SECRET_KEY: ci-placeholder
+      TURBOFEED_INTERNAL_TOKEN: ci-placeholder
+      TURBOFEED_SNOWFLAKE_WORKER_ID: '1'
+      TURBOFEED_SNOWFLAKE_DATACENTER_ID: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 反证——缺凭据时 compose 必须失败
+        # M0/R3 把 compose 里的凭据从「有默认值」改成了 ${VAR:?} 强制必填，
+        # 目的是杜绝「没配也能起、生产裸奔」。这条检查防止有人图省事改回兜底值。
+        # 手法与 ArchUnit 规则的反证一致：先确认门禁真的会拦，再确认正常输入能过。
+        env:
+          TURBOFEED_DB_USERNAME: ''
+          TURBOFEED_DB_PASSWORD: ''
+          TURBOFEED_JWT_SECRET: ''
+          TURBOFEED_MINIO_ACCESS_KEY: ''
+          TURBOFEED_MINIO_SECRET_KEY: ''
+          TURBOFEED_INTERNAL_TOKEN: ''
+        run: |
+          if docker compose config --quiet 2>/dev/null; then
+            echo "::error::缺少必填凭据时 compose 竟然通过了——\${VAR:?} 强制必填被回退，"
+            echo "::error::这等于允许未配置的凭据静默使用兜底值（M0/R3 要消灭的正是这个）"
+            exit 1
+          fi
+          echo "已确认：缺凭据时 compose 如期失败"
+
+      - name: 冒烟——默认 profile 配置可解析
+        run: docker compose config --quiet
+
+      - name: 冒烟——mq profile 配置可解析
+        # 单独校验：mq 下的 namesrv/broker 平时不在默认编排里，
+        # 语法或变量写错不会被默认 profile 的检查发现。
+        run: docker compose --profile mq config --quiet
