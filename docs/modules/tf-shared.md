@@ -31,8 +31,10 @@
 
 约定：`code = 0` 成功；非 0 失败。工厂方法 `ok()` / `ok(data)` / `fail(ErrorCode)` / `fail(ErrorCode, message)` / `fail(code, message)`。
 
-> ⚠️ **已知非对称陷阱**：`isSuccess()` 会被 Jackson 当作 boolean getter 序列化出去，线上响应里因此多出一个 `"success": true` 字段；但**本类没有对应的反序列化路径**（无 setter、无 `@JsonCreator`），所以 `success` 是"写得出去、读不回来"的字段。当前 Boot 默认 `FAIL_ON_UNKNOWN_PROPERTIES=false`，因此能正常跑；一旦有人打开严格校验，**反序列化 `Result` 会整体失败**。
-> 处置约定：**跨服务读取不要直接反序列化成 `Result<T>`**，用 `JsonNode` 取 `data` 字段（日志与检索务必与 `FeedItemView` 内部的同类规避保持一致）。对外已发布的 `Result` JSON 结构**不改**，避免破坏既有调用方。
+> ✅ **原「非对称陷阱」已修复（M2 / 4.1）**：原 `isSuccess()` 会被 Jackson 当作 boolean getter 序列化出去，线上响应里多出一个 `"success": true`；而本类既无该字段也无 setter，`success` 是"写得出去、读不回来"的字段——一旦打开严格校验，反序列化 `Result` 会整体失败。
+> **处置**：方法改名为 `succeeded()`（去掉 `is` 前缀后 Jackson 不再当属性）。**没有**用 `@JsonIgnore`——那需要给 tf-shared 引入 `jackson-annotations`，等于把 Jackson 传递给所有引用方，与「零第三方依赖」定位冲突（该定位由 `ArchitectureTest` 强制）。对外已发布的 `Result` JSON 结构**仍不改**（`code/message/data/timestamp` 四字段，与改动前线上响应逐字一致）。
+> **仍保留的约定**：跨服务读取依旧不直接反序列化成 `Result<T>`，用 `JsonNode` 取 `code`/`data`——本类没有公开的构造入口，也不该被当消息契约使用。
+> 幽灵字段由 `SharedContractJsonTest` 的「幽灵字段护栏」锁死（key 集合必须恰好等于四字段）。
 
 ## 2. 错误码 ErrorCode
 

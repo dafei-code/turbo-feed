@@ -104,12 +104,20 @@ curl -X POST "http://localhost:8083/internal/feed/timeline/remove?mediaId=media/
    否则引擎抖动会把"假空"写进缓存或触发无谓回源。客户端用 `Optional` 显式表达该差异。
 3. **降级默认不回源**：`degraded-mode=empty`（默认）返回空列表 + WARN；`local-scan` 才回源
    `MediaApprovedGlobal` 广播查全部分片。把跨分片广播挂在生产故障路径上，等于用一次引擎抖动引爆存储层。
-4. **契约不吞 Result 的坑**：`Result.isSuccess()` 会被序列化成 `"success":true`，但它既无字段也无 setter，
-   反序列化时属未知属性。Boot 默认关闭 `FAIL_ON_UNKNOWN_PROPERTIES` 所以能跑，但打开即全空——
-   客户端因此显式用 `JsonNode` 取 `code`/`data`，不依赖 Boot 的容错默认值，也不改动已发布的 `Result` 结构。
-5. **契约归 tf-shared 且保持零依赖**：`FeedItemView` 放在 tf-shared，其 `pom.xml` **单独**开启
-   `maven-compiler-plugin` 的 `-parameters`，使 Jackson 能按 record 形参名反序列化，
-   从而无需引入 `jackson-annotations`。字段名与网关原 `MediaItem` 逐字一致，**历史 Redis 数据无需迁移**。
+4. **契约不吞 Result 的坑（已在 M2/4.1 修复）**：原 `Result.isSuccess()` 会被序列化成 `"success":true`，
+   但它既无字段也无 setter，反序列化时属未知属性——Boot 默认关闭 `FAIL_ON_UNKNOWN_PROPERTIES` 所以能跑，
+   打开即全空。修复方式是**方法改名 `succeeded()`**（去掉 `is` 前缀），而非加 `@JsonIgnore`
+   （后者要给 tf-shared 引入 `jackson-annotations`，破坏「零第三方依赖」定位）。
+   客户端仍显式用 `JsonNode` 取 `code`/`data`，不依赖 Boot 的容错默认值；已发布的 `Result` 结构不变。
+5. **契约归 tf-shared 且保持零依赖**：`FeedItemView` 放在 tf-shared，不引入 `jackson-annotations`。
+   > ⚠️ **结论更正（2026-10-26 实测）**：原文档称「tf-shared 单独开启 `-parameters`，
+   > 使 Jackson 能按 record **形参名**反序列化」——**这是错的**。Jackson 2.12+ 通过
+   > `Class#getRecordComponents()` 取 record 组件名，用裸 `ObjectMapper`（连
+   > `ParameterNamesModule` 都不注册）实测六个契约完整往返全部通过。**`-parameters` 对 record
+   > 不是必需条件**（该参数仍在 tf-shared 保留，但理由已改为「非 record 类的构造器绑定与反射诊断」，
+   > 详见 pom 注释）。结论由 `SharedContractJsonTest#record不依赖编译期形参名` 固化。
+   >
+   > 字段名与网关原 `MediaItem` 逐字一致，**历史 Redis 数据无需迁移**。
 
 **已知取舍（B1 明确接受）**：
 
@@ -122,9 +130,12 @@ curl -X POST "http://localhost:8083/internal/feed/timeline/remove?mediaId=media/
 **解决的问题**：B1 写侧是"同步 HTTP + fail-open"，引擎抖动时内容静默不入流（无重试、无削峰、调用方拿不到失败）。
 B2 把 append / remove 改成 RocketMQ 可靠投递，消除该静默丢失窗口。
 
-**事件契约**：`tf-shared` 新增 `FeedTimelineEvent`（零依赖 record，无 Jackson 注解，靠 `-parameters` 反序列化）：
-`mediaId / action / poolLevel / item(FeedItemView) / occurredAt`，常量 `ACTION_APPEND` / `ACTION_REMOVE`，
-工厂 `append(item, poolLevel)` / `remove(mediaId)`（remove 时 item 为 null）。
+**事件契约**：`tf-shared` 新增 `FeedTimelineEvent`（零依赖 record，无 Jackson 注解；record 的（反）序列化
+由 Jackson 2.12+ 经 `getRecordComponents()` 完成，**不依赖** `-parameters`——原注释称依赖形参名，
+2026-10-26 实测证伪并订正）：
+`timelineKey / action / poolLevel / item(FeedItemView) / occurredAt / schemaVersion`，常量 `ACTION_APPEND` /
+`ACTION_REMOVE`，工厂 `append(item, poolLevel)` / `remove(timelineKey)`（remove 时 item 为 null）。
+`schemaVersion` 为 M2/4.1 新增的契约版本字段，协商规则见 `docs/architecture/contract-evolution.md`。
 **刻意不提供 `isAppend()` / `isRemove()` 这类 is 前缀布尔方法**：record 的布尔方法会被 Jackson 当作 getter
 序列化出多余的 `"append":true,"remove":false` 字段，污染消息格式并埋下严格反序列化失败的隐患
 （与 `Result<T>.isSuccess()` 同类问题）。判断动作请直接比较 `ACTION_APPEND` / `ACTION_REMOVE` 常量。
