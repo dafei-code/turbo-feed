@@ -8,12 +8,22 @@ import org.springframework.stereotype.Component;
  *
  * <ul>
  *   <li>{@code flush-interval-ms}：内存增量缓冲定时批量落库间隔（默认 5s，最终一致窗口）。</li>
- *   <li>{@code redis-enabled}：是否启用 Redis L2（默认关；本地无 Redis 直接走 DB L3）。</li>
- *   <li>{@code redis.*}：Redis L2 连接（仅 {@code redis-enabled=true} 时用于建 RedissonClient）。</li>
+ *   <li>{@code redis-enabled}：是否启用 Redis L2 读缓存（默认关；本地无 Redis 直接走 DB L3）。</li>
  *   <li>{@code redis-buffer-enabled}：是否启用<b>共享 Redis 缓冲 + ShedLock 选主</b>的集群模式
  *       （默认关）。开启后缓冲从进程内 {@code ConcurrentHashMap} 切换为 Redis，多副本只有一个
- *       leader 落库。<b>必须与 {@code redis-enabled=true} 同时开启</b>（需要 RedissonClient）。</li>
+ *       leader 落库。<b>必须与 {@code redis-enabled=true} 同时开启</b>。</li>
  * </ul>
+ *
+ * <p><b>连接参数不在此处（M1 / R2）</b>：Redis 的<b>地址与口令只有一份</b>，由 tf-redis 的
+ * {@code turbofeed.redis.*} 统一持有（{@code mode} / {@code cluster-nodes} / {@code spring.data.redis.*}）。
+ * 本类过去自带 {@code turbofeed.counter.redis.addresses/password} 私有配置空间，等于同一套 Redis
+ * 两套连接参数——切集群时改了 Lettuce 侧、Redisson 侧没改，不报错，只表现成「计数 L2 读不到」
+ * 这类静默失效。现由 tf-redis 按统一拓扑装配 {@code RedissonClient} 后注入本服务。</p>
+ *
+ * <p><b>前提：{@code turbofeed.redis.redisson-enabled=true}</b>——Redisson 客户端由 tf-redis
+ * 显式开关装配（默认关，因为 {@code Redisson.create()} 会立即建连、Redis 不可达即启动失败）。
+ * 本类两个 Redis 开关置 true 而该开关未开时，上下文创建即因缺少 {@code RedissonClient} 而失败，
+ * 属<b>启动期显式报错</b>，不会静默退化。</p>
  *
  * <p>注意：本服务的「是否启用」由网关侧 {@code turbofeed.counter.enabled} 决定（控制网关是否发增量）；
  * tf-counter 自身始终作为独立进程运行，本类不含自闸开关。</p>
@@ -28,29 +38,6 @@ public class CounterProperties {
     private boolean redisEnabled = false;
     /** 是否启用共享 Redis 缓冲 + ShedLock 选主（集群模式，默认关 = standalone 进程内缓冲）。 */
     private boolean redisBufferEnabled = false;
-    /** Redis L2 连接配置（仅 redis-enabled=true 时生效）。 */
-    private Redis redis = new Redis();
-
-    public static class Redis {
-        private String addresses = "redis://127.0.0.1:6379";
-        private String password = "";
-
-        public String getAddresses() {
-            return addresses;
-        }
-
-        public void setAddresses(String addresses) {
-            this.addresses = addresses;
-        }
-
-        public String getPassword() {
-            return password;
-        }
-
-        public void setPassword(String password) {
-            this.password = password;
-        }
-    }
 
     public long getFlushIntervalMs() {
         return flushIntervalMs;
@@ -74,13 +61,5 @@ public class CounterProperties {
 
     public void setRedisBufferEnabled(boolean redisBufferEnabled) {
         this.redisBufferEnabled = redisBufferEnabled;
-    }
-
-    public Redis getRedis() {
-        return redis;
-    }
-
-    public void setRedis(Redis redis) {
-        this.redis = redis;
     }
 }

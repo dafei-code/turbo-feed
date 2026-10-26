@@ -1,1 +1,2 @@
 com.turbofeed.redis.RedisTopologyConfig
+com.turbofeed.redis.RedissonTopologyConfig

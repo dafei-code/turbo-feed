@@ -2,16 +2,6 @@
 spring:
   application:
     name: tf-counter
-  # Redis L2 为 opt-in：turbofeed.counter.redis.enabled=false 时，本服务自带的
-  # CounterRedisConfig / RedisCounterStore 均受 @ConditionalOnProperty 门控而不创建。
-  # 排除 redisson-spring-boot-starter 的自动配置（RedissonAutoConfigurationV2，Boot 3 下
-  # 它是真实自动配置类，会在无 Redis 时启动即连 127.0.0.1:6379 失败）——tf-counter 的
-  # RedissonClient 由 CounterRedisConfig 按 redis.enabled 自行构造，不依赖 starter 自动配置。
-  # 注意：只排除 V2；非 V2 的 RedissonAutoConfiguration 在本 Boot 版本不是自动配置类，
-  # 列进 exclude 反而会让整个排除清单校验失败。
-  autoconfigure:
-    exclude:
-      - org.redisson.spring.starter.RedissonAutoConfigurationV2
   # H2 兜底（克隆即跑）；生产切 MySQL 8
   datasource:
     url: jdbc:h2:mem:tf-counter;MODE=MySQL
@@ -22,22 +12,41 @@ spring:
   sql:
     init:
       mode: always
+  # Redis L1/L2 连接参数走 Boot 标准命名空间（spring.data.redis.*），与网关 / 引擎完全一致。
+  # 集群 / 哨兵拓扑另需 turbofeed.redis.mode 与节点地址，见下方 turbofeed.redis 段。
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      password:
 
 server:
   port: 8081
 
-# 计数服务运行参数（绑定 CounterProperties）
 turbofeed:
+  # ── Redis 接入（单一事实源，M1 / R2）──────────────────────────────────────────
+  # 地址 / 口令 / 拓扑只在 turbofeed.redis.* + spring.data.redis.* 定义一次，由 tf-redis
+  # 装配后注入；本服务不再有 turbofeed.counter.redis.* 私有空间（历史教训：同一套 Redis
+  # 两套连接参数，切集群时只改一侧 → 「计数 L2 读不到」这类静默失效）。
+  redis:
+    # Redisson 客户端开关（tf-redis 的 RedissonTopologyConfig）。默认关：Redisson.create()
+    # 会立即建连，Redis 不可达即启动失败，故按需开启而非默认装配。
+    # 下方 counter.redis-enabled / redis-buffer-enabled 任一为 true 时【必须同时】开此项，
+    # 否则上下文因缺少 RedissonClient 而启动失败（显式报错，不会静默退化）。
+    redisson-enabled: false
+    # 拓扑：single（默认，一个额外 Bean 都不建，交 Boot 自动装配）/ cluster / sentinel。
+    # cluster 需补 turbofeed.redis.cluster-nodes: host:port[,host:port]
+    # sentinel 需补 turbofeed.redis.sentinel-master + sentinel-nodes
+    mode: single
+  # ── 计数服务运行参数（绑定 CounterProperties）────────────────────────────────
   counter:
     flush-interval-ms: 5000          # 内存增量缓冲定时批量落库间隔
-    redis-enabled: false             # Redis L2 默认关（本地无 Redis 走 DB L3）；启用需补 redis.*
+    redis-enabled: false             # Redis L2 读缓存（默认关，本地无 Redis 走 DB L3）
     redis-buffer-enabled: false      # 集群模式开关（默认关 = standalone 进程内缓冲）。
                                      # 设为 true 时【必须同时】把上方 redis-enabled 设为 true
                                      # （RedisCounterBuffer 依赖 RedissonClient），并会激活
                                      # ShedLock 选主（多副本仅 leader 落库，不丢不重）。
-    redis:
-      addresses: redis://127.0.0.1:6379
-      password:
+                                     # 两个开关都要求 turbofeed.redis.redisson-enabled=true。
 # 生产启用 MQ 削峰时取消注释并配置 name-server（CounterMqConsumer 随之激活）：
 # rocketmq:
 #   name-server: 127.0.0.1:9876

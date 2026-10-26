@@ -41,6 +41,14 @@
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-pool2</artifactId>
         </dependency>
+        <!-- Redisson 核心库（M1/3.2）：tf-redis 同时暴露 RedissonClient 装配，使「拓扑参数共用、
+             客户端各取所需」——需要 Redisson 特有能力的模块（如 tf-counter 的 Lua drain）
+             不再自建客户端。刻意用 core 而非 redisson-spring-boot-starter：starter 带来的
+             RedissonAutoConfigurationV2 会在无 Redis 时也尝试连接并导致启动失败。 -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

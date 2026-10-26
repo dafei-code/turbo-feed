@@ -77,10 +77,15 @@
                 <artifactId>commons-lang3</artifactId>
                 <version>3.18.0</version>
             </dependency>
-            <!-- Redisson -->
+            <!-- Redisson 核心库（不含 Spring Boot 自动配置）：M1/3.2 起由 tf-redis 统一装配
+                 RedissonClient，引用方只依赖 core，避免 starter 的 RedissonAutoConfigurationV2
+                 在"没配 Redis 也尝试连 127.0.0.1:6379"导致启动失败。
+                 ⚠️ 刻意【不】托管 redisson-spring-boot-starter：已经没有模块用它（tf-counter 的
+                 私有 CounterRedisConfig 已删）。不留版本托管 = 谁再写这个 dependency 都会因
+                 "version 缺失"编译失败，把"别引 starter"从口头约定变成构建期硬约束。 -->
             <dependency>
                 <groupId>org.redisson</groupId>
-                <artifactId>redisson-spring-boot-starter</artifactId>
+                <artifactId>redisson</artifactId>
                 <version>${redisson.version}</version>
             </dependency>
             <!-- RocketMQ：钉死 2.3.5（2.3.x 最新，对 Spring Boot 3.4.x 的 @ConfigurationProperties 绑定兼容）。

@@ -38,9 +38,12 @@
             <groupId>com.github.ben-manes.caffeine</groupId>
             <artifactId>caffeine</artifactId>
         </dependency>
+        <!-- Redis 接入单一事实源（M1/3.2）：RedissonClient 由 tf-redis 按统一拓扑装配后注入，
+             本模块不再私有配置地址 / 口令（原 turbofeed.counter.redis.* 已删除）。
+             刻意不引 redisson-spring-boot-starter：其自动配置会在无 Redis 时也尝试连接。 -->
         <dependency>
-            <groupId>org.redisson</groupId>
-            <artifactId>redisson-spring-boot-starter</artifactId>
+            <groupId>com.turbofeed</groupId>
+            <artifactId>tf-redis</artifactId>
         </dependency>
         <!-- 落库：默认 H2（克隆即跑），生产切 MySQL -->
         <dependency>
@@ -73,7 +76,7 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- 分布式定时锁（ShedLock）：仅集群模式（redis-buffer.enabled=true）启用，
+        <!-- 分布式定时锁（ShedLock）：仅集群模式（redis-buffer-enabled=true）启用，
              配合共享 Redis 缓冲做「选主独占 drain」，保证多副本下 flush 只执行一次。
              默认 standalone 模式不引入（无 Redis 依赖、无锁开销）。 -->
         <dependency>
