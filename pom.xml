@@ -192,12 +192,60 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
             </plugin>
-            <!-- JaCoCo（M3 质量工程）：0.8.11 为本地 .m2 已有版本，离线可跑。
-                 未选更新版本是因为本机不联网，而「能在本机复现 CI 结果」比版本号新更重要。 -->
+            <!-- JaCoCo（M3 质量工程）：覆盖率报告 + 门槛校验。
+                 门槛值见下方 <configuration> 的注释：按「实测值减去缓冲带」设定，
+                 目的是让覆盖率只能升不能降，而不是一次性拉到某个"好看"的数字。 -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>0.8.11</version>
+                <configuration>
+                    <rules>
+                        <!-- 门槛口径（重要）：**只防下降，不追求达标**。
+                             实测行覆盖率（2026-10-26，全仓 364 例）：
+                               tf-hotspot 88.16% / tf-shared 57.34% / tf-feed-engine 30.22%
+                               tf-counter 19.42% / tf-gateway 21.51% / tf-redis 13.33%（整体 24.75%）
+                             门槛一律取「实测值 - 约 3~5 个百分点」：新代码不写测试会把比例稀释，
+                             跌破缓冲带即 CI 失败；而 3 个百分点的余量能吸收正常的统计抖动。
+                             **为什么不直接定一个"目标值"（比如 60%）**：那只会让 CI 立刻变红，
+                             然后被人要么批量加 @Disabled、要么把门槛改低——门禁一旦被当成障碍绕过，
+                             它就失去了意义。先立住「不再变差」这条底线，再随补测试逐步上调。
+                             **只判行覆盖、不判分支**：分支覆盖率普遍更低（tf-redis 仅 8.82%），
+                             同时设两条会让门槛的约束力落在更难控的指标上，先看住行覆盖。
+                             **已知局限**：覆盖率防不住"只跑不验"的测试（无断言也能刷高行覆盖），
+                             它衡量的是"有没有被执行过"，不是"有没有被验证对"。 -->
+                        <rule>
+                            <element>BUNDLE</element>
+                            <includes><include>tf-hotspot</include></includes>
+                            <limits><limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.83</minimum></limit></limits>
+                        </rule>
+                        <rule>
+                            <element>BUNDLE</element>
+                            <includes><include>tf-shared</include></includes>
+                            <limits><limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.52</minimum></limit></limits>
+                        </rule>
+                        <rule>
+                            <element>BUNDLE</element>
+                            <includes><include>tf-feed-engine</include></includes>
+                            <limits><limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.27</minimum></limit></limits>
+                        </rule>
+                        <rule>
+                            <element>BUNDLE</element>
+                            <includes><include>tf-gateway</include></includes>
+                            <limits><limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.18</minimum></limit></limits>
+                        </rule>
+                        <rule>
+                            <element>BUNDLE</element>
+                            <includes><include>tf-counter</include></includes>
+                            <limits><limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.16</minimum></limit></limits>
+                        </rule>
+                        <rule>
+                            <element>BUNDLE</element>
+                            <includes><include>tf-redis</include></includes>
+                            <limits><limit><counter>LINE</counter><value>COVEREDRATIO</value><minimum>0.10</minimum></limit></limits>
+                        </rule>
+                    </rules>
+                </configuration>
             </plugin>
         </plugins>
     </pluginManagement>
@@ -231,6 +279,15 @@
                                 <phase>prepare-package</phase>
                                 <goals>
                                     <goal>report</goal>
+                                </goals>
+                            </execution>
+                            <!-- 门槛校验放在 verify（report 之后）。规则与门槛值见根 pom
+                                 pluginManagement 里 jacoco 插件的 <configuration> 注释。 -->
+                            <execution>
+                                <id>check</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>check</goal>
                                 </goals>
                             </execution>
                         </executions>

@@ -525,13 +525,37 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 | `lease-enabled=true` 真启动 | 需 Redis，本机 6379 未监听，仅编译 + 单测验证，未做真启动 |
 | RocketMQ DLQ 巡检 | 完全无巡检；`LogDeadLetterAlert` 只打日志无计数 → M4 补指标 |
 | Outbox 积压水位 | 只有日志无指标 → M4 |
-| CI 门禁 | 只有 `mvn -B clean test`，缺覆盖率门槛与静态检查 → M3 |
+| CI 门禁 | 只有 `mvn -B clean test`，缺覆盖率门槛与静态检查 → 见 §7.3 |
 
-**待办（按优先级）**：
+### 7.3 M3 质量工程（进行中）
 
-1. **M3 质量工程**：CI 升级为 `mvn -Pci verify`（ArchUnit + JaCoCo 覆盖率门槛 + SpotBugs/Checkstyle + `docker compose config` 冒烟）；收口契约 §7 的 4 处旁路。
-2. **M4 可观测性**：网关 / 引擎 / 计数埋 Micrometer 指标（DLQ 深度、Outbox 积压水位、flush 批次大小、dedup 命中数）；`DeadLetterAlert` 升级为「日志 + 计数」；MDC traceId 透传。
-3. **M5 文档体系**：ADR 体系化（迁 `docs/adr/`）、C4 架构图、CONTRIBUTING.md、README 完成度防漂移脚本。
-4. **M6**：`tf-benchmark` 兑现或诚实撤下 README 承诺。
-5. 评审原始项剩余：P0-5 Nacos🔧（真链路待 Nacos 环境验证）、P1-1 `FeedTimelineStore` 拆分、P1-5 前端工程化；P2 其余（A/B、向量库、HTTPS/CDN、API 版本前缀）为演进优化。
-6. 工程卫生：`.workbuddy/` 仍未跟踪，建议加入 `.gitignore`。
+| 项 | 状态 | 落地说明 |
+| --- | --- | --- |
+| 契约旁路收口 | ✅ | `FeedItemView` 的解析点由 6 处裸 `readValue` 收敛为唯一入口 `ItemViewCodec`（引擎）+ `ContractVersion.filterConsumable`（网关 / 引擎共用）；`TimelineSupport#parse` 删除而非废弃保留（留着就是留第二个入口）。引擎 `ArchitectureTest` 加规则：除 `ItemViewCodec` 外不得调用 ObjectMapper 的反序列化入口，已做非空洞性反证。详见 `contract-evolution.md` §7 |
+| CI：工作区卫生 | ✅ | 前置三步检查，均对应真实踩过的坑：①`sed -i`/`perl -i` 在 APFS protect 卷上留下的 `*.orig`/`*.rej`/`*.bak` 残留 ②`.workbuddy/` 是否被误提交 ③裸 `@Disabled`（本仓库 Docker 集成测用自定义 `@RequiresDocker` 守卫，不走 `@Disabled`） |
+| CI：编排配置冒烟 | ✅ | 独立 job 与 build 并行。`docker compose config --quiet` 校验默认 + mq 两个 profile；另加**反证步骤**：清空所有凭据后 compose 必须失败——防止有人把 M0/R3 的 `${VAR:?}` 强制必填改回兜底值。本机 Docker 29.4.0 已验证：清空变量时报 `required variable TURBOFEED_DB_PASSWORD is missing a value` |
+| CI：覆盖率门槛 | ✅ | JaCoCo 0.8.11 放在 `ci` profile（本地默认不激活：插桩拖慢日常构建，且本机离线跑会因传递依赖缺失直接失败）。**实测行覆盖率**：tf-hotspot 88.16% / tf-shared 57.34% / tf-feed-engine 30.22% / tf-counter 19.42% / tf-gateway 21.51% / tf-redis 13.33%，**整体 24.75%**（2625/10606）。门槛取「实测值 − 3~5 个百分点」，只判行覆盖、不判分支。**已做非空洞性反证**：临时把 tf-hotspot 门槛调至 0.95 → 报 `lines covered ratio is 0.88, but expected minimum is 0.95` 并 BUILD FAILURE → 恢复后全绿 |
+| 静态检查（Checkstyle / SpotBugs） | ❌ 经评估不引入 | 2.6 万行存量代码会一次性冒出大量告警，整改工作量与「质量工程」当前批次不匹配；且为了过门禁而批量加抑制注解会让信噪比更低、门禁更快被绕过。架构层面的约束已由 ArchUnit 覆盖（它拦的是「结构性问题」，正是静态检查拦不住的）。留作后续有专门批次时再评估 |
+
+**覆盖率门槛的设计取舍（重要）**：
+
+- **为什么是「实测值 − 缓冲带」而不是一个目标值**：直接定 60% 只会让 CI 立刻变红，然后被人要么批量加
+  `@Disabled`、要么把门槛改低——门禁一旦被当成障碍绕过就失去意义。先立住「不再变差」这条底线
+  （新代码不写测试会稀释比例，跌破缓冲带即失败），再随补测试逐步上调。
+- **已知局限**：覆盖率防不住「只跑不验」的测试（无断言也能刷高行覆盖），它衡量的是
+  「有没有被执行过」，不是「有没有被验证对」。所以它是护栏，不是测试质量本身。
+- **只判行覆盖**：分支覆盖率普遍更低（tf-redis 仅 8.82%），同时设两条会让约束力落在更难控的指标上。
+- **未排除任何类**（配置 / 启动类 / DTO 都计入）：排除会让数字好看，但覆盖率的意义就在于如实反映
+  「改动时有多少代码是裸奔的」——把难测的排除掉，等于把风险藏起来。
+
+**待办（M3 剩余 / M4~M6）**：
+
+1. **M4 可观测性**：网关 / 引擎 / 计数埋 Micrometer 指标（DLQ 深度、Outbox 积压水位、flush 批次大小、
+   dedup 命中数）；`DeadLetterAlert` 升级为「日志 + 计数」；MDC traceId 透传。
+2. **M5 文档体系**：ADR 体系化（`docs/adr/`）、C4 架构图、CONTRIBUTING.md、README 完成度防漂移脚本。
+3. **M6**：`tf-benchmark` 兑现或诚实撤下 README 承诺。
+4. 评审原始项剩余：P0-5 Nacos🔧（真链路待 Nacos 环境验证）、P1-1 `FeedTimelineStore` 拆分、
+   P1-5 前端工程化；P2 其余（A/B、向量库、HTTPS/CDN、API 版本前缀）为演进优化。
+5. 工程卫生：`.workbuddy/` 仍未跟踪，建议加入 `.gitignore`。
+
+（M3 之前的旧待办清单已并入上方 §7.3，此处不再重复。）

@@ -34,8 +34,9 @@ jobs:
           --health-retries 5
 
     steps:
+      # v5：v4 仍以 Node 20 为目标运行时，runner 已强制其跑在 Node 24 上并持续告警。
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -139,7 +140,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 反证——缺凭据时 compose 必须失败
         # M0/R3 把 compose 里的凭据从「有默认值」改成了 ${VAR:?} 强制必填，
