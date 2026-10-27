@@ -291,17 +291,25 @@ public class MediaJdbcRepository {
     }
 
     /**
-     * 查询某用户上传的<b>帖子</b>列表（按上传时间倒序，分页）。
+     * 查询某用户上传的<b>帖子</b>列表（按上传时间倒序，keyset 游标分页，P1）。
      *
      * <p>一条帖子只返回一条记录，{@code images} 为该帖全部图片（按 seq 升序）。
      * 分页发生在<b>代表行</b>上（{@code seq = 0}），因此一帖只占一个分页位，
      * 不会出现「9 张图吃掉 9 个位置」的问题。</p>
      *
-     * @param statusFilter 状态过滤（null = 不过滤，供个人中心全量/统计使用）
-     * @param limit        单页帖子数（≤0 由调用方兜底为默认值）
-     * @param offset       偏移量（从 0 开始，单位是<b>帖子</b>）
+     * <p><b>keyset 游标</b>：{@code afterCreatedAt} / {@code afterPostId} 均非空时，以
+     * {@code (created_at < ? OR (created_at = ? AND post_id < ?))} 为排他下界续拉
+     * （锚点取上一页末帖的 (created_at, post_id)）；任一为空则视为首页（无下界）。
+     * 相比 OFFSET 深翻页，本方式 O(索引定位)、不随翻页深度退化，且跨页不重复/不漏（同秒多帖用
+     * {@code post_id} 兜底 tiebreak）。</p>
+     *
+     * @param statusFilter  状态过滤（null = 不过滤，供个人中心全量/统计使用）
+     * @param limit         单页帖子数（≤0 由调用方兜底为默认值）
+     * @param afterCreatedAt 上一页末帖的 created_at（游标下界，null = 首页）
+     * @param afterPostId    上一页末帖的 post_id（同秒 tiebreak，null = 首页）
      */
-    public List<MediaItem> listByUser(long userId, MediaStatus statusFilter, int limit, long offset) {
+    public List<MediaItem> listByUser(long userId, MediaStatus statusFilter, int limit,
+                                      java.time.Instant afterCreatedAt, String afterPostId) {
         StringBuilder sql = new StringBuilder(
                 "SELECT " + ROW_COLUMNS + " FROM media WHERE user_id = ? AND " + REPRESENTATIVE_CONDITION);
         List<Object> args = new ArrayList<>();
@@ -314,9 +322,15 @@ public class MediaJdbcRepository {
             sql.append(" AND status <> ?");
             args.add(toCode(MediaStatus.DELETED));
         }
-        sql.append(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
+        if (afterCreatedAt != null && afterPostId != null && !afterPostId.isBlank()) {
+            sql.append(" AND (created_at < ? OR (created_at = ? AND post_id < ?))");
+            java.sql.Timestamp ts = java.sql.Timestamp.from(afterCreatedAt);
+            args.add(ts);
+            args.add(ts);
+            args.add(afterPostId);
+        }
+        sql.append(" ORDER BY created_at DESC, post_id DESC LIMIT ?");
         args.add(limit);
-        args.add(offset);
         return toPosts(jdbcTemplate.query(sql.toString(), ROW_MAPPER, args.toArray()), userId);
     }
 

@@ -67,18 +67,31 @@ public class MediaQueryService {
     private static final String STATUS_KEY_PREFIX = RedisKeys.MEDIA_STATUS;
 
     /**
-     * 查询指定用户上传的内容列表（按上传时间倒序，分页）。
+     * 查询指定用户上传的内容列表（按上传时间倒序，keyset 游标分页，P1）。
      *
-     * @param userId        归属用户（来自 JWT，非客户端可控）
-     * @param statusFilter  状态过滤（null = 不过滤，供个人中心全量/统计使用）
-     * @param page          页码（从 0 开始）
-     * @param size          单页条数（≤0 兜底为 50）
-     * @return 该用户的内容列表（当前页），从未上传过则返回空列表
+     * <p>以 {@code cursor} 为续拉下界（锚点取上一页末帖的 (created_at, post_id)，见
+     * {@link MediaListCursor}）；{@code cursor} 为空/非法视为首页。返回 {@link MediaListPage}
+     * （含续拉游标与 hasMore），与公域 {@code /api/v1/feed/recommended} 的视图结构对称。</p>
+     *
+     * @param userId       归属用户（来自 JWT，非客户端可控）
+     * @param statusFilter 状态过滤（null = 不过滤，供个人中心全量/统计使用）
+     * @param size         单页条数（≤0 兜底为 50）
+     * @param cursor       续拉游标（空 = 首页）
+     * @return 该用户的帖子分页视图（当前页 + 续拉游标），从未上传过则返回空页
      */
-    public List<MediaItem> listByUser(String userId, MediaStatus statusFilter, int page, int size) {
+    public MediaListPage listByUser(String userId, MediaStatus statusFilter, int size, String cursor) {
         int limit = size <= 0 ? 50 : size;
-        long offset = (long) Math.max(page, 0) * limit;
-        return mediaRepository.listByUser(Long.parseLong(userId), statusFilter, limit, offset);
+        MediaListCursor c = MediaListCursor.decode(cursor);
+        List<MediaItem> items = (c == null)
+                ? mediaRepository.listByUser(Long.parseLong(userId), statusFilter, limit, null, null)
+                : mediaRepository.listByUser(Long.parseLong(userId), statusFilter, limit,
+                        java.time.Instant.ofEpochMilli(c.createdAtMillis()), c.postId());
+        String next = "";
+        if (items.size() == limit) {
+            MediaItem last = items.get(items.size() - 1);
+            next = MediaListCursor.of(last.createdAt().toEpochMilli(), last.postId()).encode();
+        }
+        return new MediaListPage(items, next, items.size() == limit);
     }
 
     /**

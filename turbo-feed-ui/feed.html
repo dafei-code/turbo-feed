@@ -712,7 +712,7 @@
   }
 
   // 无限滚动 / 分页状态
-  let feedPage = 0;          // 当前拉取页码（mine 列表用 offset 分页，page++ 续拉）
+  let feedPage = 0;          // 推荐流首页回退页码（cursor 为空时 recommended 走 ?page=0；mine 已改 keyset 不再使用）
   let feedCursor = "";       // 推荐流 keyset 续拉游标（recommended 用；空串=首页）
   let feedHasMore = true;    // 是否还有下一页
   let feedLoading = false;   // 防重入：同一时刻只发一个续拉请求
@@ -731,10 +731,13 @@
       feedHasMore = true;
     }
     var myToken = ++feedReqToken;   // 代次快照：响应回来时若已被更新的拉取覆盖则丢弃（防竞态覆盖）
-    // mine 走 page 页码分页；recommended 走 keyset cursor 分页（首页 cursor 为空，续拉带上一页 nextCursor）
+    // mine 与 recommended 均走 keyset cursor 分页（首页 cursor 为空，续拉带上一页 nextCursor）
     var url;
     if (mine) {
-      url = API_BASE + '/api/v1/media/mine' + '?page=' + feedPage + '&size=20';
+      url = API_BASE + '/api/v1/media/mine'
+        + (feedCursor
+            ? ('?cursor=' + encodeURIComponent(feedCursor) + '&size=20')
+            : '?size=20');
     } else {
       url = API_BASE + '/api/v1/feed/recommended'
         + (feedCursor
@@ -748,9 +751,11 @@
         if (myToken !== feedReqToken) return;   // 过期响应：被更新的拉取（切 Tab/重拉）覆盖，丢弃
         var items, hasMore;
         if (mine) {
-          items = (res.data || []);
-          hasMore = items.length >= 20;
-          feedPage++;
+          // 我的内容 keyset 分页：data 为 { items, nextCursor, hasMore }（与推荐流同视图结构）
+          var mpage = res.data || {};
+          items = (mpage.items || []);
+          feedCursor = mpage.nextCursor || "";
+          hasMore = mpage.hasMore === true;
         } else {
           // 推荐流 keyset 分页：data 为 { items, nextCursor, hasMore }
           var page = res.data || {};
