@@ -639,7 +639,7 @@
   // 后端网关地址：静态页与后端不同源，故写全址。换端口 / 部署时只改这一处。
   var API_BASE = 'http://localhost:8080';
 
-  // 登录守卫：/api/admin/** 后端按 JWT 权限二次校验，页面层先做快捷拦截。
+  // 登录守卫：/api/v1/admin/** 后端按 JWT 权限二次校验，页面层先做快捷拦截。
   // 仅 ADMIN（系统管理员）可进入本管理后台；REVIEWER 仅能进审核工作台 review.html；USER 回退普通用户页。
   // 旧令牌未写入 role 时放行（由后端兜底校验），避免锁死历史会话。
   var TOKEN = localStorage.getItem('turbofeed:token');
@@ -656,7 +656,7 @@
   function logout() {
     var access = localStorage.getItem('turbofeed:token');
     var refresh = localStorage.getItem('turbofeed:refresh');
-    fetch(API_BASE + '/api/auth/logout?refreshToken=' + encodeURIComponent(refresh || ''), {
+    fetch(API_BASE + '/api/v1/auth/logout?refreshToken=' + encodeURIComponent(refresh || ''), {
       method: 'POST',
       headers: access ? { 'Authorization': 'Bearer ' + access } : {}
     }).catch(function () {}).finally(function () {
@@ -693,7 +693,7 @@
 
   // 拉取全平台待审核内容（跨分片广播，演示/小数据量）
   function loadReviewQueue() {
-    fetch(API_BASE + '/api/admin/media/pending?size=50', {
+    fetch(API_BASE + '/api/v1/admin/media/pending?size=50', {
       headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
     }).then(function (r) { return r.json(); })
       .then(function (res) {
@@ -738,7 +738,7 @@
 
   // 审核执行：通过 / 驳回（真审核闸的翻转点）
   function reviewMedia(mediaId, approve) {
-    fetch(API_BASE + '/api/admin/media/review?mediaId=' + encodeURIComponent(mediaId) + '&approve=' + approve, {
+    fetch(API_BASE + '/api/v1/admin/media/review?mediaId=' + encodeURIComponent(mediaId) + '&approve=' + approve, {
       method: 'POST',
       headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
     }).then(function (r) { return r.json(); })

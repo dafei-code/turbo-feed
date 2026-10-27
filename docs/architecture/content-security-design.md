@@ -233,7 +233,7 @@ AC 自动机（HashMap 子节点，不可变 + 原子引用整体替换 + 零锁
 
 ## 10. 本次验证证据（真实 HTTP 写路径，非单测）
 
-走 `/api/comments` → `CommentService` → `ContentSecurityService`，词库含
+走 `/api/v1/comments` → `CommentService` → `ContentSecurityService`，词库含
 `测试敏感词(TEST)`、`赌博(GAMBLING)`、`abc(AD)`，白名单含 `abc@COMMENT@GLOBAL`。
 
 | 用例 | 期望 | 实际 |

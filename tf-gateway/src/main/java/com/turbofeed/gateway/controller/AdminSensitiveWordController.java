@@ -4,6 +4,7 @@ import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
 import com.turbofeed.gateway.service.moderation.SensitiveWord;
 import com.turbofeed.gateway.service.moderation.SensitiveWordService;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,7 +19,7 @@ import java.util.Map;
 /**
  * 敏感词管理后台（运营 / 管理员维护词库）。
  *
- * <p><b>权限（RBAC）</b>：{@code /api/admin/**} 由 {@link com.turbofeed.gateway.security.PermissionInterceptor}
+ * <p><b>权限（RBAC）</b>：{@code /api/v1/admin/**} 由 {@link com.turbofeed.gateway.security.PermissionInterceptor}
  * 拦截；方法级 {@link RequirePermission} 声明所需权限为 {@link Permission#SYSTEM_CONFIG}，
  * 仅有 ADMIN 角色持有该权限——审核员(REVIEWER)与普通用户(USER)一律 {@code 40301}。</p>
  *
@@ -31,7 +32,7 @@ import java.util.Map;
  * 减少前端调用时的格式顾虑。</p>
  */
 @RestController
-@RequestMapping("/api/admin/moderation/words")
+@RequestMapping(ApiVersion.V1 + "/admin/moderation/words")
 @RequiredArgsConstructor
 public class AdminSensitiveWordController {
 

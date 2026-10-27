@@ -4,6 +4,7 @@ import com.turbofeed.gateway.client.FeedEngineClient;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.query.MediaQueryService;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.model.PlayableView;
 import com.turbofeed.shared.result.Result;
 
@@ -18,9 +19,9 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 公域推荐流接口（与「个人中心 /api/media/mine」职责分离）。
+ * 公域推荐流接口（与「个人中心 /api/v1/media/mine」职责分离）。
  *
- * <p><b>职责边界</b>：{@code /api/media/mine} 面向登录用户本人、按 {@code user_id} 分片查询
+ * <p><b>职责边界</b>：{@code /api/v1/media/mine} 面向登录用户本人、按 {@code user_id} 分片查询
  * 自己的内容；本控制器面向公域、不依赖用户身份，提供全平台可消费的推荐流。</p>
  *
  * <p><b>数据来源（B1 服务拆分后）</b>：本接口是<b>对外契约的稳定锚点</b>——路径、参数、
@@ -37,7 +38,7 @@ import java.util.Set;
  * ④ 媒体 URL 走 CDN，网关不过字节流。</p>
  */
 @RestController
-@RequestMapping("/api/feed")
+@RequestMapping(ApiVersion.V1 + "/feed")
 @RequiredArgsConstructor
 public class FeedController {
 

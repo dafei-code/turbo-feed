@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
- * 预签名上传凭证申请（{@code POST /api/media/presign} 请求体）。
+ * 预签名上传凭证申请（{@code POST /api/v1/media/presign} 请求体）。
  *
  * <p>只携带<b>元数据</b>，不含字节流——字节由客户端拿到凭证后直传对象存储。
  * 因此本阶段的校验只覆盖「数量 / 声明大小 / 声明类型」三项可作弊的声明值，

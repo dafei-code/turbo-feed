@@ -1,6 +1,7 @@
 package com.turbofeed.gateway.controller;
 
 import com.turbofeed.gateway.service.AuthService;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.Result;
 
 import lombok.RequiredArgsConstructor;
@@ -20,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 并支持 refresh token。</p>
  */
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping(ApiVersion.V1 + "/auth")
 @RequiredArgsConstructor
 public class AuthController {
 

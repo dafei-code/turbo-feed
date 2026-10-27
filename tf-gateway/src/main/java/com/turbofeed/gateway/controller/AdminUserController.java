@@ -3,6 +3,7 @@ package com.turbofeed.gateway.controller;
 import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
 import com.turbofeed.gateway.service.AuthService;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -12,13 +13,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 用户管理后台接口（RBAC 已落地，{@code /api/admin/**} 由 PermissionInterceptor 按注解鉴权）。
+ * 用户管理后台接口（RBAC 已落地，{@code /api/v1/admin/**} 由 PermissionInterceptor 按注解鉴权）。
  *
  * <p>当前提供「角色调整」：改库 + 吊销该用户全部刷新令牌，使角色变更即时收敛
  * （见 {@link AuthService#changeRole}）。需 {@link Permission#USER_MANAGE} 权限（ADMIN 持有）。</p>
  */
 @RestController
-@RequestMapping("/api/admin/user")
+@RequestMapping(ApiVersion.V1 + "/admin/user")
 @RequiredArgsConstructor
 public class AdminUserController {
 

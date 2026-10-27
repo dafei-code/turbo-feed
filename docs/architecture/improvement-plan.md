@@ -653,9 +653,35 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 ### 7.8 M0~M6 之后的待办
 
 1. 评审原始项剩余：P0-5 Nacos🔧（真链路待 Nacos 环境验证）、P1-5 前端工程化；
-   P2 其余（A/B 实验、独立向量库、HTTPS/CDN、API 版本前缀）属演进优化。P1-1 见 §7.7。
+   P2 其余（A/B 实验、独立向量库、HTTPS/CDN）属演进优化。P1-1 见 §7.7，P2-3 API 版本前缀见 §7.9。
 2. M4 登记的三处观测缺口（RocketMQ DLQ 深度 / MQ 消费侧 traceId / tf-counter 入站 traceId），
    均需外部环境或契约版本演进。
 3. `lease-enabled=true` 的真启动（需 Redis）。
 
 （M3 之前的旧待办清单已并入 §7.3 与本节，不再重复；`.workbuddy/` 未跟踪的问题已随 M6 加入 `.gitignore` 解决。）
+
+### 7.9 P2-3 API 版本前缀（已落地，2026-10-27）
+
+> 主题：给 `/api/**` 加路径版本，且**不让任何老客户端在发布当天失效**。
+
+| 项 | 处理 |
+| --- | --- |
+| 版本常量 | `com.turbofeed.gateway.web.ApiVersion`：`V1 = "/api/v1"`、`LEGACY = "/api"`、`INTERNAL = "/internal"`。17 个控制器的类级 `@RequestMapping` 改为 `ApiVersion.V1 + "/xxx"` |
+| 老路径兼容 | `LegacyApiPathFilter`（`HIGHEST_PRECEDENCE + 10`）：`/api/**` 内部重写到 `/api/v1/**` 后继续走链；响应带 `Deprecation`（RFC 9745，`@<epoch 秒>`）+ `Link: </api/v1/...>; rel="successor-version"`。**刻意不发 `Sunset`**——没有承诺移除日期，发假日期会让客户端据此排期然后被打脸 |
+| 防二次加前缀 | 显式识别 `/api/v{N}...` 并原样放行。少了这一步会叠成 `/api/v1/v1/xxx`，症状是「新路径 404、老路径正常」，而重写逻辑本身看起来完全正确 |
+| 构建期门禁 | `ApiPathGateTest`：扫到全部 `@RestController`，逐个校验类级前缀必须是 `/api/v1/` 或 `/internal/`。带「确实扫到 ≥17 个控制器」的反空洞断言，防止包名重构后门禁变成一句永远通过的废话。**已做非空洞性反证**：临时把 `MediaReportController` 改回 `/api/media` → 精确报出该类与错误路径 → 恢复后转绿 |
+| 路由验证 | `LegacyApiPathFilterRoutingTest`：`standaloneSetup` 起最小 MVC + 真实过滤器，验证「重写后的包装请求确实能被路由到处理器」。这是整个实现里最可能悄悄失败的一环，且失败即**所有老客户端 404**，发布时最难第一时间归因 |
+| 前端迁移 | `turbo-feed-ui` 6 个页面共 24 处 `/api/` → `/api/v1/`（含注释），自家 demo 不再演示已弃用路径 |
+| 文档 | `docs/api/gateway-api.md` 新增 §2「版本前缀与兼容策略」并顺延后续章节；README / service-split / c4-model / 模块文档 / deployment 的路径前缀同步更新。`docs/changelog/**` 按「历史快照不回头改」不动 |
+
+**顺带堵住一个安全洞**：RBAC 的 `PermissionInterceptor` 注册的是 Ant 模式 `/api/admin/**`，
+而 `/api/v1/admin/**` **不匹配**它（`**` 跨段但不吞掉中间多出来的一段）。不改的话上线后
+所有后台接口会**静默失去鉴权**——请求照样返回 200，只是不再校验权限，没有任何既有测试会红。
+`WebConfig` 现同时注册新旧两个模式，老模式保留作为纵深防御（万一重写过滤器被摘掉，RBAC 仍在）。
+
+这也是「版本化不是加个字符串」的证明：**任何按路径生效的横切逻辑都要跟着过一遍**。
+本例中 CORS 恰好安全（`/api/**` 的 `**` 能跨段覆盖 `/api/v1/...`），而 RBAC 的模式更具体、恰好不安全——
+两者只差一个模式字符串，靠人眼看是看不出来的。
+
+**未做**：`tf-counter` 的 HTTP 端点（`/internal/counter`）不纳入版本演进——它只对网关内部提供，
+与 `/internal/review` 同类，双侧同仓同版本发布，没有「改不动的老客户端」。

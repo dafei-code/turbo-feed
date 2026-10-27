@@ -454,8 +454,8 @@
   <aside class="sidebar" data-page-node-id="kOmM8YFXzhkXD8U0Bk1W1X">
     <div class="logo" data-page-node-id="hKlvubXBTIhgIGTacjNoPw"><span class="t" data-page-node-id="GvsJwdC6PnZnoauhGZ6mR8">Turbo</span>Feed</div>
 
-    <!-- P0-4：双 Tab。推荐 = 公域发现流（/api/feed/recommended，依赖 feed-engine）；
-         我的 = 本人作品（/api/media/mine，按 user_id 分片直查库，不依赖 feed-engine）。
+    <!-- P0-4：双 Tab。推荐 = 公域发现流（/api/v1/feed/recommended，依赖 feed-engine）；
+         我的 = 本人作品（/api/v1/media/mine，按 user_id 分片直查库，不依赖 feed-engine）。
          两者刻意分开：抖音里「自己发的」也不在推荐流里，而在个人中心。 -->
     <div class="nav-item active" id="navRecommend" data-tab="recommend" data-page-node-id="pg0ddR7BBH8KiCzrm93g58">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" data-page-node-id="CFb1kBJ8rMDaHKA38LToa1"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" data-page-node-id="iYMU93MHYzEaWWuqxDZB07"/></svg>
@@ -565,8 +565,8 @@
 
 <script>
   // ========== 模拟视频数据 ==========
-  // ========== 真实内容数据（来自后端 /api/feed/recommended，仅返回 APPROVED） ==========
-  // 说明：P1.5 起公域推荐流与「个人中心 /api/media/mine」解耦，feed 走独立接口；
+  // ========== 真实内容数据（来自后端 /api/v1/feed/recommended，仅返回 APPROVED） ==========
+  // 说明：P1.5 起公域推荐流与「个人中心 /api/v1/media/mine」解耦，feed 走独立接口；
   // 后端已只返回 APPROVED，前端无需再内存过滤。演示阶段推荐接口返回当前 APPROVED 内容。
   let videos = [];
 
@@ -584,7 +584,7 @@
    *
    * 为什么必须分开：抖音里「自己发的」不在推荐流里，而在个人中心——推荐流是算法分发的
    * 公域池，自己的内容要先过审、进池才可能出现，用它看自己的作品既慢又不可靠。
-   * 「我的」走 /api/media/mine（按 user_id 分片直查库），因此即便 feed-engine 没起也能看到
+   * 「我的」走 /api/v1/media/mine（按 user_id 分片直查库），因此即便 feed-engine 没起也能看到
    * 自己发过什么（含 PENDING/REJECTED 等非终态），这正是排查"我发了却看不到"的第一现场。
    */
   var currentTab = 'recommend';
@@ -609,7 +609,7 @@
   // ⚠️ 在此之前前端**完全没有埋点上报**——后端已有的曝光/完播计数（PostStatService）、
   // 兴趣画像（InterestService）与行为明细落盘（BehaviorLogSink）因为没有客户端上报而恒为空，
   // 也就是说流量池赛马与个性化此前是**空转**的。埋点不是装饰，它是整条推荐链的输入源。
-  var BEHAVIOR_API = 'http://localhost:8080/api/feed/behavior';
+  var BEHAVIOR_API = 'http://localhost:8080/api/v1/feed/behavior';
   var BEHAVIOR_FLUSH_MS = 2000;          // 批量上报间隔（攒批，别一条一请求）
   var BEHAVIOR_MAX_BUFFER = 50;          // 缓冲上限，到量即发
   var IMAGE_EXPECTED_DWELL_SEC = 8;      // 图文"期望驻留时长"：图文没有真实时长，用它当分母算完播率
@@ -688,8 +688,8 @@
     // 一次拉取 = 一个 requestId：本次结果里所有条目的曝光/互动都归到它下面
     currentRequestId = newRequestId();
     var url = mine
-      ? 'http://localhost:8080/api/media/mine?page=0&size=20'
-      : 'http://localhost:8080/api/feed/recommended?page=0&size=20';
+      ? 'http://localhost:8080/api/v1/media/mine?page=0&size=20'
+      : 'http://localhost:8080/api/v1/feed/recommended?page=0&size=20';
 
     fetch(url, { headers: { 'Authorization': 'Bearer ' + TOKEN } })
       .then(function (r) { return r.json(); })

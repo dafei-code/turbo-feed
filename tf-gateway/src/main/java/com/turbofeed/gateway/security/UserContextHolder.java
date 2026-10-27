@@ -53,7 +53,7 @@ public final class UserContextHolder {
      *   <li>匿名（未登录）-> {@code UNAUTHORIZED}（请先登录）；</li>
      *   <li>已登录但非管理员 -> {@code FORBIDDEN}（无权限访问）。</li>
      * </ul>
-     * 供 {@code /api/admin/**} 鉴权使用（{@link AdminAuthInterceptor} 在 preHandle 调用）。
+     * 供 {@code /api/v1/admin/**} 鉴权使用（{@link AdminAuthInterceptor} 在 preHandle 调用）。
      */
     public static void requireAdmin() {
         UserContext context = CONTEXT.get();

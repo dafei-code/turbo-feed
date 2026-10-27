@@ -7,6 +7,7 @@ import com.turbofeed.gateway.service.search.HotSearchService;
 import com.turbofeed.gateway.service.search.SearchPage;
 import com.turbofeed.gateway.service.search.SearchService;
 import com.turbofeed.gateway.service.search.SuggestResult;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.Result;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,7 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * 搜索接口（对外 {@code /api/**}）。
+ * 搜索接口（对外 {@code /api/v1/**}）。
  *
  * <p><b>鉴权</b>：匿名可读/可上报——与评论列表同款。搜索是浏览行为的前置，强制登录会挡住内容发现；
  * 但结果<b>必然经过审核过滤</b>（见 {@link SearchService}），不存在「匿名就能搜到违规内容」的路径。</p>
@@ -32,7 +33,7 @@ import java.util.List;
  * 埋点失败在这里是纯 fail-open，不影响返回。</p>
  */
 @RestController
-@RequestMapping("/api/search")
+@RequestMapping(ApiVersion.V1 + "/search")
 public class SearchController {
 
     private final SearchService searchService;

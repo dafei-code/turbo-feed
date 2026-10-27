@@ -59,7 +59,7 @@
                          │  正常：候选集打分
                          │  降级：feed-engine 时间倒序（现有读模型原样保留）
                          ▼
-                    /api/feed/recommended
+                    /api/v1/feed/recommended
 ```
 
 要点：

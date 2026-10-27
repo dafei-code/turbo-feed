@@ -280,7 +280,7 @@
     btn.disabled = true;
     btn.textContent = '注册中...';
     try {
-      var resp = await fetch(API_BASE + '/api/auth/register', {
+      var resp = await fetch(API_BASE + '/api/v1/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ phone: phone, password: password, nickname: nickname })

@@ -3,7 +3,7 @@ package com.turbofeed.gateway.service.feed;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
- * 行为埋点上报载体（前端 → 网关 {@code POST /api/feed/behavior}）。
+ * 行为埋点上报载体（前端 → 网关 {@code POST /api/v1/feed/behavior}）。
  *
  * <p>{@code postId} 即帖身份，与 {@code FeedItemView#timelineKey()} 口径一致（新内容都有 postId）。
  * {@code type} 取值：{@code IMPRESSION / WATCH / PLAY_COMPLETE / LIKE / COMMENT / SHARE / DISLIKE}；

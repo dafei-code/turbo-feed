@@ -1,6 +1,7 @@
 # tf-gateway HTTP 接口文档
 
-> Base URL：`http://localhost:8080`（tf-gateway 服务）。
+> Base URL：`http://localhost:8080`（tf-gateway 服务）；**对外接口统一前缀 `/api/v1`**
+> （版本化前的老前缀 `/api` 仍兼容，见 §2）。
 > 所有响应体为统一结构 `Result`（见 tf-shared 文档）：`{ code, message, data, timestamp }`，`code=0` 成功。
 > 后台类接口按 **RBAC 权限**校验（`@RequirePermission`），已登录但权限不足返回 `40301`。
 
@@ -12,7 +13,7 @@
 Authorization: Bearer <JWT>
 ```
 
-令牌经 `POST /api/auth/login` 获取（HS256，默认有效期 86400 秒）。令牌缺失时受保护接口返回 `40101 UNAUTHORIZED`；携带无效令牌在任何接口直接返回 `40101`（不静默降级匿名）。
+令牌经 `POST /api/v1/auth/login` 获取（HS256，默认有效期 86400 秒）。令牌缺失时受保护接口返回 `40101 UNAUTHORIZED`；携带无效令牌在任何接口直接返回 `40101`（不静默降级匿名）。
 
 令牌载荷携带 `sub`（userId）与 `role`。角色由 **`user` 表 `role` 列**派生，**不在配置里维护任何手机号白名单**。角色 → 权限映射：
 
@@ -26,12 +27,50 @@ Authorization: Bearer <JWT>
 
 > **身份来源**：`userId` 由 `JwtAuthenticationFilter` 验签后绑定 `ThreadLocal`，业务层经 `UserContextHolder.requireUserId()` 获取。**任何接口都不接受客户端传入 userId**（防越权）。
 
-## 2. 接口明细
+## 2. 版本前缀与兼容策略
+
+所有对外接口一律挂在 **`/api/v1/**`**。版本号放在**路径**里，客户端不需要协商请求头
+（很多客户端改不了请求头，而 URL 一定能改）。
+
+### 2.1 老前缀 `/api/**` 仍可用
+
+版本化之前的老客户端调用 `/api/x` 时，网关在过滤器链里把它**内部重写成** `/api/v1/x` 再路由，
+响应体与状态码完全一致，无需客户端改动。为了让调用方能自己发现落后，响应额外带两个标准头：
+
+| 响应头 | 示例 | 含义 |
+|---|---|---|
+| `Deprecation` | `@1793001600` | RFC 9745：**自该时刻起**该路径被视为弃用（不是移除时刻） |
+| `Link` | `</api/v1/feed/recommended>; rel="successor-version"` | 应当迁移到的目标 URL |
+
+**刻意不发 `Sunset` 头**：本仓库暂未承诺老路径的移除日期，发一个假日期会让客户端据此排期然后被打脸。
+真到要移除时会补 `Sunset`（RFC 8594）——客户端应把「响应里出现 `Sunset`」当作必须迁移的信号。
+
+### 2.2 不参与版本演进的部分
+
+| 路径 | 原因 |
+|---|---|
+| `/internal/**`（当前 `/internal/review`） | 服务间内部接口：网关与引擎同仓同版本发布，不存在「改不动的老客户端」。它的演进由跨服务契约的 `schemaVersion` 负责（[ADR-0005](../adr/0005-contract-versioning.md)），不靠 URL |
+| `/actuator/**` | Spring Boot 运维端点，不属业务 API |
+| `/media/**` | 上传文件的静态资源映射，不属 API |
+
+### 2.3 加新版本时的约束
+
+1. **不要**把 `ApiVersion.V1` 改成 `/api/v2`——那会让所有老客户端在发布当天全部失效。
+2. 新增 `ApiVersion.V2` 常量 + 一组挂在 `/api/v2/**` 的控制器，v1 控制器原样保留。
+3. 老路径重写只指向 v1，因此 `/api/x` 与 `/api/v1/x` 永远等价；想用 v2 必须显式写 `/api/v2/x`。
+4. 构建期门禁 `ApiPathGateTest` 会拦住任何未挂版本前缀的新控制器（违反即构建失败）。
+
+> **一个容易漏的连带改动**：新增版本前缀后，按路径注册的拦截器模式必须同步。
+> RBAC 的 Ant 模式若仍只写 `/api/admin/**`，就匹配不到 `/api/v1/admin/**`——
+> 后台接口会**静默失去鉴权**且没有任何测试会红。`WebConfig` 因此同时注册新旧两个模式
+> （老模式保留作纵深防御：万一重写过滤器被摘掉，RBAC 仍在）。
+
+## 3. 接口明细
 
 ### 2.1 注册
 
 ```
-POST /api/auth/register        Content-Type: application/x-www-form-urlencoded
+POST /api/v1/auth/register        Content-Type: application/x-www-form-urlencoded
 ```
 
 | 参数 | 位置 | 必填 | 说明 |
@@ -43,7 +82,7 @@ POST /api/auth/register        Content-Type: application/x-www-form-urlencoded
 ### 2.2 登录换取 JWT
 
 ```
-POST /api/auth/login           Content-Type: application/x-www-form-urlencoded
+POST /api/v1/auth/login           Content-Type: application/x-www-form-urlencoded
 ```
 
 | 参数 | 位置 | 必填 | 说明 |
@@ -62,7 +101,7 @@ POST /api/auth/login           Content-Type: application/x-www-form-urlencoded
 | 13900139000 | 123456 | USER | user.html |
 
 ```bash
-curl -X POST 'http://localhost:8080/api/auth/login' \
+curl -X POST 'http://localhost:8080/api/v1/auth/login' \
      -d 'phone=13800138000&password=123456'
 ```
 
@@ -75,7 +114,7 @@ curl -X POST 'http://localhost:8080/api/auth/login' \
 ### 2.3 内容图片上传（UGC，一帖多图，审核后展示）
 
 ```
-POST /api/media/upload         Content-Type: multipart/form-data
+POST /api/v1/media/upload         Content-Type: multipart/form-data
 ```
 
 | 参数 | 位置 | 必填 | 说明 |
@@ -95,10 +134,10 @@ POST /api/media/upload         Content-Type: multipart/form-data
 响应 `data`：**帖子视图**（`MediaItem`），不是 URL 字符串数组。
 
 ```bash
-TOKEN=$(curl -s -X POST 'http://localhost:8080/api/auth/login' \
+TOKEN=$(curl -s -X POST 'http://localhost:8080/api/v1/auth/login' \
         -d 'phone=13800138000&password=123456' | sed -E 's/.*"data":"([^"]+)".*/\1/')
 
-curl -X POST 'http://localhost:8080/api/media/upload' \
+curl -X POST 'http://localhost:8080/api/v1/media/upload' \
      -H "Authorization: Bearer $TOKEN" \
      -H "X-Request-Id: demo-req-001" \
      -F 'caption=第一张 #风景' \
@@ -145,7 +184,7 @@ curl -X POST 'http://localhost:8080/api/media/upload' \
 ### 2.3.1 预签名直传：申请上传凭证（推荐入口）
 
 ```
-POST /api/media/presign         Content-Type: application/json
+POST /api/v1/media/presign         Content-Type: application/json
 ```
 
 **字节流不经过网关**：本接口只接收元数据并签发每个对象的预签名 PUT URL，客户端凭 URL 直传对象存储
@@ -172,7 +211,7 @@ POST /api/media/presign         Content-Type: application/json
 ### 2.3.2 预签名直传：通知完成
 
 ```
-POST /api/media/complete        Content-Type: application/json
+POST /api/v1/media/complete        Content-Type: application/json
 ```
 
 客户端把全部图片直传成功后调用。服务端复核每个对象（真实大小 + 文件头 Magic Number），
@@ -205,7 +244,7 @@ POST /api/media/complete        Content-Type: application/json
 ### 2.4 我的内容（按帖聚合）
 
 ```
-GET /api/media/mine?page=0&size=50&status=APPROVED
+GET /api/v1/media/mine?page=0&size=50&status=APPROVED
 ```
 
 | 参数 | 位置 | 必填 | 说明 |
@@ -221,7 +260,7 @@ GET /api/media/mine?page=0&size=50&status=APPROVED
 ### 2.5 查询单条内容状态
 
 ```
-GET /api/media/status?mediaId=<mediaId>
+GET /api/v1/media/status?mediaId=<mediaId>
 ```
 
 响应 `data`：状态枚举值。内容已受理但审核事件未到时返回 `PENDING`（处理中）。
@@ -229,7 +268,7 @@ GET /api/media/status?mediaId=<mediaId>
 ### 2.6 更新描述 / 标题
 
 ```
-POST /api/media/caption?mediaId=<mediaId>&caption=<新描述>
+POST /api/v1/media/caption?mediaId=<mediaId>&caption=<新描述>
 ```
 
 更新**整帖**的描述（描述是帖级属性，一次上传共用一个）；走与上传一致的敏感词校验（命中返回 `42904`）；**不影响审核状态**（改文案 ≠ 内容违规降级）。
@@ -237,7 +276,7 @@ POST /api/media/caption?mediaId=<mediaId>&caption=<新描述>
 ### 2.7 删除内容
 
 ```
-DELETE /api/media?mediaId=<mediaId>
+DELETE /api/v1/media?mediaId=<mediaId>
 ```
 
 语义：对象存储（MinIO / 本地磁盘）**物理删除** + MySQL **逻辑删除**（整帖置 `DELETED`）。
@@ -248,7 +287,7 @@ DELETE /api/media?mediaId=<mediaId>
 ### 2.8 公域推荐流（免登录）
 
 ```
-GET /api/feed/recommended?page=0&size=20
+GET /api/v1/feed/recommended?page=0&size=20
 ```
 
 响应 `data`：`MediaItem` 数组（帖子视图，含 `images`），供前端渲染**整帖轮播**。
@@ -258,8 +297,8 @@ GET /api/feed/recommended?page=0&size=20
 ### 2.9 举报（任意登录用户）/ 申诉（作者）
 
 ```
-POST /api/media/report?mediaId=<mediaId>&reason=<理由>
-POST /api/media/appeal?mediaId=<mediaId>
+POST /api/v1/media/report?mediaId=<mediaId>&reason=<理由>
+POST /api/v1/media/appeal?mediaId=<mediaId>
 ```
 
 | 接口 | 前置状态 | 行为 |
@@ -272,9 +311,9 @@ POST /api/media/appeal?mediaId=<mediaId>
 ### 2.10 评论
 
 ```
-POST /api/comments?mediaId=<mediaId>&content=<内容>&parentId=0   # 发表（parentId=0 为一级评论，>0 为楼中楼回复）
-GET  /api/comments?mediaId=<mediaId>&rootId=0&page=0&size=20      # 列表（rootId>0 取该根评论下的回复）
-POST /api/comments/like?mediaId=<mediaId>&commentId=<id>          # 点赞，返回 Boolean
+POST /api/v1/comments?mediaId=<mediaId>&content=<内容>&parentId=0   # 发表（parentId=0 为一级评论，>0 为楼中楼回复）
+GET  /api/v1/comments?mediaId=<mediaId>&rootId=0&page=0&size=20      # 列表（rootId>0 取该根评论下的回复）
+POST /api/v1/comments/like?mediaId=<mediaId>&commentId=<id>          # 点赞，返回 Boolean
 ```
 
 发布 / 点赞**必须登录**；列表为公开读。评论按 `media_id` 独立分片（与 `media` 表按 `user_id` 分片正交），因此「读某条内容下的全部评论」单分片命中。
@@ -284,10 +323,10 @@ POST /api/comments/like?mediaId=<mediaId>&commentId=<id>          # 点赞，返
 权限：`CONTENT_REVIEW`（`pending` / `review` / `appeal-review`）、`CONTENT_TAKEDOWN`（`report-review`）。
 
 ```
-GET  /api/admin/media/pending?page=0&size=20
-POST /api/admin/media/review?mediaId=<mediaId>&approve=true|false
-POST /api/admin/media/report-review?mediaId=<mediaId>&confirmed=true|false
-POST /api/admin/media/appeal-review?mediaId=<mediaId>&upheld=true|false
+GET  /api/v1/admin/media/pending?page=0&size=20
+POST /api/v1/admin/media/review?mediaId=<mediaId>&approve=true|false
+POST /api/v1/admin/media/report-review?mediaId=<mediaId>&confirmed=true|false
+POST /api/v1/admin/media/appeal-review?mediaId=<mediaId>&upheld=true|false
 ```
 
 - `mediaId` 传**帖代表行**；审核动作**作用于整帖**（机审一次、状态一次翻转、公域时间线一次投递），审核队列里的每个帖子会铺开其全部图片供审核员判断；
@@ -297,12 +336,12 @@ POST /api/admin/media/appeal-review?mediaId=<mediaId>&upheld=true|false
 ### 2.12 管理端：敏感词库（权限 `SYSTEM_CONFIG`）
 
 ```
-GET  /api/admin/moderation/words?page=0&size=50
-POST /api/admin/moderation/words?word=<词>&category=DEFAULT
-POST /api/admin/moderation/words/disable?id=<id>
-POST /api/admin/moderation/words/enable?id=<id>
-POST /api/admin/moderation/words/delete?id=<id>
-POST /api/admin/moderation/words/reload      # 热加载词库，返回加载条数
+GET  /api/v1/admin/moderation/words?page=0&size=50
+POST /api/v1/admin/moderation/words?word=<词>&category=DEFAULT
+POST /api/v1/admin/moderation/words/disable?id=<id>
+POST /api/v1/admin/moderation/words/enable?id=<id>
+POST /api/v1/admin/moderation/words/delete?id=<id>
+POST /api/v1/admin/moderation/words/reload      # 热加载词库，返回加载条数
 ```
 
 ### 2.13 健康检查（三服务通用）
@@ -317,7 +356,7 @@ GET {host}/actuator/health      → {"status":"UP"}
 | tf-counter | http://localhost:8081/actuator/health |
 | tf-feed-engine | http://localhost:8083/actuator/health |
 
-## 3. 审核状态（MediaStatus）
+## 4. 审核状态（MediaStatus）
 
 | 值 | 含义 | 公域可见 |
 |---|---|---|
@@ -330,7 +369,7 @@ GET {host}/actuator/health      → {"status":"UP"}
 
 状态持久化在 **MySQL `media` 表的 `status` 列**（非内存态，重启不丢）；整帖各行状态一致。
 
-## 4. 错误码总表
+## 5. 错误码总表
 
 分段：`0` 成功 / `4xxxx` 客户端侧 / `5xxxx` 服务端侧。详见 [tf-shared 文档](../modules/tf-shared.md)。
 
@@ -349,7 +388,7 @@ GET {host}/actuator/health      → {"status":"UP"}
 | 50000 | 系统内部错误 |
 | 50001 | 依赖服务暂不可用，请稍后重试（Redis / MQ / MySQL） |
 
-## 5. 接口演进（规划，未实现）
+## 6. 接口演进（规划，未实现）
 
 | 接口 | 说明 |
 |---|---|

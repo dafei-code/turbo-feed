@@ -12,7 +12,7 @@ import java.time.Instant;
  * 作者申诉仓储（appeal 表，单表，ds_0；MVP 简化，按 media_id 索引）。
  *
  * <p>申诉闭环：作者对自身被驳回/下架内容申诉 → 状态翻 APPEALING 并写本表（status=0 待复核）；
- * 管理员在 {@code /api/admin/media/appeal-review} 复核（翻案→APPROVED 恢复公域+信用加回，
+ * 管理员在 {@code /api/v1/admin/media/appeal-review} 复核（翻案→APPROVED 恢复公域+信用加回，
  * 维持→维持原拒绝/下架态）。</p>
  */
 @Slf4j

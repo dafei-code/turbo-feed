@@ -67,7 +67,7 @@ public class InteractionEventService {
     /**
      * 记录一次客户端互动（点击/完播/点赞/评论/分享/不感兴趣）。
      *
-     * <p>经 {@code /api/feed/behavior} 上报，{@code @Async} 异步落库，fail-open。</p>
+     * <p>经 {@code /api/v1/feed/behavior} 上报，{@code @Async} 异步落库，fail-open。</p>
      *
      * @param userId     已登录用户
      * @param itemId     内容主键（BehaviorReport#postId）

@@ -232,9 +232,9 @@ public class FeedEngineClient {
         } catch (Exception e) {
             health.recordAppendFailure(e.toString());
             // 补救指引必须写在告警里：否则值班同学看到 WARN 也不知道下一步该做什么。
-            // 引擎恢复后跑一次 /api/admin/feed/timeline/backfill 即可把这段时间的存量补回来。
+            // 引擎恢复后跑一次 /api/v1/admin/feed/timeline/backfill 即可把这段时间的存量补回来。
             log.warn("Feed 引擎入流投递失败（fail-open，不影响审核主流程）: mediaId={}, poolLevel={}, {}"
-                            + " —— 该内容不会出现在发现流；引擎恢复后执行 /api/admin/feed/timeline/backfill 补投",
+                            + " —— 该内容不会出现在发现流；引擎恢复后执行 /api/v1/admin/feed/timeline/backfill 补投",
                     item.mediaId(), poolLevel, e.getMessage());
             return false;
         }

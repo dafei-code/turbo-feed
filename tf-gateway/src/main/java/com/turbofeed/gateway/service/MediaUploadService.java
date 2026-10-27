@@ -509,7 +509,7 @@ public class MediaUploadService {
      *
      * <p><b>为什么返回受理而非最终结果</b>：落库与送审已异步化（{@code MediaUploadFinalizer}），
      * 本接口只保证「校验通过 + 收尾已提交」。客户端凭回执里的 mediaId 轮询
-     * {@code GET /api/media/status} 获取最终状态（收尾未完成时该接口按既有语义返回 PENDING）。</p>
+     * {@code GET /api/v1/media/status} 获取最终状态（收尾未完成时该接口按既有语义返回 PENDING）。</p>
      *
      * @param postId    帖子 ID（取自 {@link PresignResponse#postId()}）
      * @param requestId 客户端幂等键（可选）

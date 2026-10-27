@@ -43,7 +43,7 @@
 
 **服务发现**：当前直连 `host:port`（`turbofeed.feed.engine.base-url`）；Phase 2 引入 Nacos 后该配置退化为兜底。
 
-**内部接口约定**：引擎侧服务间接口统一挂 `/internal/**`，与对外 `/api/**` 物理区分，便于在网关/Ingress 层直接拒绝外部访问。
+**内部接口约定**：引擎侧服务间接口统一挂 `/internal/**`，与对外 `/api/v1/**` 物理区分，便于在网关/Ingress 层直接拒绝外部访问。
 
 ## 5. 环境约束处理（克隆即跑）
 
@@ -93,7 +93,7 @@ curl -X POST "http://localhost:8083/internal/feed/timeline/remove?mediaId=media/
 |---|---|---|
 | FeedTimelineStore（多池 ZSET / 反查索引 / 精确下架） | `gateway.service.feed` | `feedengine.timeline` |
 | 推荐流旁路缓存（`tf:feed:rec:*`，TTL 15s） | `MediaQueryService`（网关） | `RecommendedFeedService`（引擎） |
-| 读接口 `/api/feed/recommended` | 网关直接读 Redis / 回源 DB | 网关**同名保留**（前端零改动），内部转发 `/internal/feed/recommended` |
+| 读接口 `/api/v1/feed/recommended` | 网关直接读 Redis / 回源 DB | 网关**同名保留**（前端零改动），内部转发 `/internal/feed/recommended` |
 | 写投递（append / remove，共 9 处调用点） | 网关本地写 Redis | `FeedEngineClient` → `/internal/feed/timeline/*` |
 
 **关键设计决策**：

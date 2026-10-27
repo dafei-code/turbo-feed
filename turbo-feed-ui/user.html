@@ -842,7 +842,7 @@
     var grid = document.getElementById('contentGrid');
     if (!manual) grid.innerHTML = '<div class="empty-state">加载中...</div>';
 
-    fetch(API_BASE + '/api/media/mine', {
+    fetch(API_BASE + '/api/v1/media/mine', {
       headers: { 'Authorization': 'Bearer ' + TOKEN }
     })
     .then(function (r) { return r.json(); })
@@ -1051,7 +1051,7 @@
       : '确定删除这条内容吗？删除后将从「我的内容」与公域发现流移除。';
     if (!confirm(tip)) return;
 
-    fetch(API_BASE + '/api/media?mediaId=' + encodeURIComponent(mediaId), {
+    fetch(API_BASE + '/api/v1/media?mediaId=' + encodeURIComponent(mediaId), {
       method: 'DELETE',
       headers: { 'Authorization': 'Bearer ' + TOKEN }
     })
@@ -1166,7 +1166,7 @@
       return { fileName: f.name, size: f.size, contentType: f.type || '' };
     });
 
-    fetch(API_BASE + '/api/media/presign', {
+    fetch(API_BASE + '/api/v1/media/presign', {
       method: 'POST',
       headers: { 'Authorization': authHeaders.Authorization, 'X-Request-Id': requestId,
                  'Content-Type': 'application/json' },
@@ -1197,7 +1197,7 @@
     .then(function (data) {
       // ③ 通知完成：服务端复核后异步落库送审（返回 202 受理）
       bar.style.width = '95%';
-      return fetch(API_BASE + '/api/media/complete', {
+      return fetch(API_BASE + '/api/v1/media/complete', {
         method: 'POST',
         headers: { 'Authorization': authHeaders.Authorization, 'X-Request-Id': requestId,
                    'Content-Type': 'application/json' },
@@ -1255,7 +1255,7 @@
   function logout() {
     var access = localStorage.getItem('turbofeed:token');
     var refresh = localStorage.getItem('turbofeed:refresh');
-    fetch(API_BASE + '/api/auth/logout?refreshToken=' + encodeURIComponent(refresh || ''), {
+    fetch(API_BASE + '/api/v1/auth/logout?refreshToken=' + encodeURIComponent(refresh || ''), {
       method: 'POST',
       headers: access ? { 'Authorization': 'Bearer ' + access } : {}
     }).catch(function () {}).finally(function () {

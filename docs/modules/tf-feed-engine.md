@@ -109,7 +109,7 @@ POST /internal/feed/timeline/append?poolLevel=       # 入流（幂等：同 key
 POST /internal/feed/timeline/remove?mediaId=         # 下架
 ```
 
-路径前缀 `/internal/**` 与对外 `/api/**` **物理区分**，便于在网关 / 前置层拒绝外部直达。
+路径前缀 `/internal/**` 与对外 `/api/v1/**` **物理区分**，便于在网关 / 前置层拒绝外部直达。
 
 > ⚠️ **当前无鉴权**：依赖内网信任。生产必须补服务间令牌 / mTLS，否则任何能访问 8083 的调用方都可写入 / 删除公域时间线。
 

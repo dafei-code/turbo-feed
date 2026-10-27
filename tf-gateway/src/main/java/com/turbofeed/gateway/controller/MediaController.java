@@ -9,6 +9,7 @@ import com.turbofeed.gateway.service.presign.UploadAccepted;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.query.MediaQueryService;
 import com.turbofeed.gateway.service.review.MediaStatus;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.Result;
 
 import lombok.RequiredArgsConstructor;
@@ -29,7 +30,7 @@ import java.util.List;
 /**
  * 内容图片上传接口（UGC：用户上传、审核通过后前端展示）。
  *
- * <p>POST /api/media/upload，multipart/form-data，字段名 files，支持多文件。
+ * <p>POST /api/v1/media/upload，multipart/form-data，字段名 files，支持多文件。
  * 图片按用户隔离，每个用户只能管理自己上传的图片。<b>上传成功 ≠ 前端可见</b>，
  * 内容需经审核流转（PENDING → APPROVED / REJECTED），前端仅展示 APPROVED 的内容。</p>
  *
@@ -95,7 +96,7 @@ import java.util.List;
  * 请求结束 finally 清理上下文，杜绝线程池复用导致的身份串号。</p>
  */
 @RestController
-@RequestMapping("/api/media")
+@RequestMapping(ApiVersion.V1 + "/media")
 @RequiredArgsConstructor
 public class MediaController {
 
@@ -180,7 +181,7 @@ public class MediaController {
      *
      * <p><b>P1.5 分页/过滤</b>：{@code status} 可按审核状态过滤（如只看 APPROVED），
      * {@code page}/{@code size} 分页，避免一次性回吐全部内容、也避免前端在内存里过滤状态。
-     * 公域推荐流请走独立 {@code GET /api/feed/recommended}，不再复用本接口。</p>
+     * 公域推荐流请走独立 {@code GET /api/v1/feed/recommended}，不再复用本接口。</p>
      *
      * <p>身份来源同 {@link #upload}：从 {@link UserContextHolder#requireUserId()} 取，
      * 不经方法签名，客户端无法传他人 ID 越权查看；未携带有效令牌直接 UNAUTHORIZED。</p>

@@ -60,7 +60,7 @@ flowchart TB
     client["客户端"]
 
     subgraph gw["tf-gateway :8080<br/>（接入层 / 独立部署）"]
-        gwapi["REST API<br/>/api/**"]
+        gwapi["REST API<br/>/api/v1/**"]
         gwauth["认证 · RBAC · 限流"]
         gwreview["审核状态机"]
         gwmedia["媒体上传编排"]
@@ -134,7 +134,7 @@ flowchart TB
 ```mermaid
 flowchart TB
     subgraph api["接入层"]
-        ctrl["Controller<br/>/api/**"]
+        ctrl["Controller<br/>/api/v1/**"]
         sec["Security<br/>JWT · RBAC · 令牌黑名单"]
         rl["限流<br/>Sentinel / 本地兜底"]
         trace["TraceIdFilter<br/>MDC 透传"]

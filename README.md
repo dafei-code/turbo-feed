@@ -25,7 +25,7 @@ turbo-feed/
 └── turbo-feed-ui/     静态前端（纯 HTML，无构建）：登录/注册 + 发布 + 公域 Feed(整帖轮播) + 审核 / 管理工作台
 ```
 
-服务间通信：同步走 HTTP（网关 → 引擎 `/internal/**`，与对外 `/api/**` 物理隔离）；异步走 RocketMQ **顺序消息**
+服务间通信：同步走 HTTP（网关 → 引擎 `/internal/**`，与对外 `/api/v1/**` 物理隔离）；异步走 RocketMQ **顺序消息**
 ——时间线的 `append` / `remove` 共用同一 topic 与同一消费者、靠消息体 `action` 区分，以保证同一帖内先后有序
 （拆 tag / 拆消费者会使「已下架内容重新出现」）。未启用 MQ 时自动退回「进程内事件 + HTTP 投递」，克隆即跑。
 契约见 `tf-shared`。服务间 `/internal/**` 接口已加 **`X-Internal-Token` 鉴权**（网关与引擎两侧 `InternalTokenInterceptor`，值来自 `TURBOFEED_INTERNAL_TOKEN`）：
@@ -95,7 +95,7 @@ Redis 在本项目**不只是缓存**，而是多项能力的权威数据源，�
 对应措施：
 
 - **compose 演示栈已显式开启 AOF**（`redis:7-alpine` 默认不开）并挂 `redis-data` 数据卷，避免容器删除即全丢。
-- **重建入口已可执行**（不是注释承诺）：`/api/admin/counter/*` 提供 recount（按去重集合对账）与 rebuild（按 `media_like` / `comment_like` 灾备表重建）；搜索侧另有 `/api/admin/search/rebuild`。三者均需 `SYSTEM_CONFIG` 权限（仅 ADMIN）。
+- **重建入口已可执行**（不是注释承诺）：`/api/v1/admin/counter/*` 提供 recount（按去重集合对账）与 rebuild（按 `media_like` / `comment_like` 灾备表重建）；搜索侧另有 `/api/v1/admin/search/rebuild`。三者均需 `SYSTEM_CONFIG` 权限（仅 ADMIN）。
 - 去重集合采用**滑动续期**（详情页读路径刷新 TTL），使仍被浏览的内容不会因固定 8d TTL 到期而丢失幂等语义。
 
 ## 技术文档
@@ -110,7 +110,7 @@ Redis 在本项目**不只是缓存**，而是多项能力的权威数据源，�
 | [docs/architecture/service-split.md](docs/architecture/service-split.md) | 服务拆分：部署单元 / 端口 / 通信矩阵 |
 | [docs/architecture/failure-mode-ledger.md](docs/architecture/failure-mode-ledger.md) | 全链路失败模式对账：投递语义 / 降级口径 / 指标与告警规则 / 排障手册 |
 | [docs/modules/](docs/modules/) | 模块级技术文档（与 Maven 模块一一对应，CI 检查） |
-| [docs/api/gateway-api.md](docs/api/gateway-api.md) | HTTP 接口：认证约定 / 参数 / curl / 错误码 |
+| [docs/api/gateway-api.md](docs/api/gateway-api.md) | HTTP 接口：版本前缀与兼容策略 / 认证约定 / 参数 / curl / 错误码 |
 | [docs/ops/deployment.md](docs/ops/deployment.md) | 构建部署 / 环境开关 / 生产前必改清单 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献指南：环境 / 构建 / 提交规范 / **提交前自检清单** / 代码约定 |
 | [docs/changelog/](docs/changelog/) | 变更记录（每次变更一份 md，编号递增） |

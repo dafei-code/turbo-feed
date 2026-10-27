@@ -8,6 +8,7 @@ import com.turbofeed.gateway.service.feed.BehaviorReport;
 import com.turbofeed.gateway.service.feed.InteractionEventService;
 import com.turbofeed.gateway.service.like.MediaLikeService;
 import com.turbofeed.gateway.service.review.MediaReviewService;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.Result;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,7 +33,7 @@ import java.util.List;
  * 任何异常都不影响本接口的发布主流程。</p>
  */
 @RestController
-@RequestMapping("/api/feed")
+@RequestMapping(ApiVersion.V1 + "/feed")
 public class FeedBehaviorController {
 
     private final BehaviorEventPublisher publisher;
@@ -62,7 +63,7 @@ public class FeedBehaviorController {
         String userId = UserContextHolder.requireUserId();
         // 热度复审旁路 + 训练样本落盘：逐条正向互动计入热度（fail-open，异常不阻断发布主流程）。
         // LIKE 类型单独走点赞去重通道（MediaLikeService），保证「一次实际状态变化 = 一条引擎事件」，
-        // 与专用点赞接口 /api/feed/media/like 共用同一去重集合，避免双写导致计数漂移。
+        // 与专用点赞接口 /api/v1/feed/media/like 共用同一去重集合，避免双写导致计数漂移。
         java.util.List<BehaviorReport> nonLike = new java.util.ArrayList<>();
         if (reports != null) {
             for (BehaviorReport r : reports) {

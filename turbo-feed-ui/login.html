@@ -304,7 +304,7 @@
     try {
       // 登录接口为表单编码（后端 @RequestParam 接收）；JwtAuthenticationFilter
       // 对未携带令牌的匿名请求放行，故此处无需 Authorization 头。
-      var resp = await fetch(API_BASE + '/api/auth/login', {
+      var resp = await fetch(API_BASE + '/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ phone: phone, password: password })
@@ -322,7 +322,7 @@
       localStorage.setItem('turbofeed:refresh', refresh);
       localStorage.setItem('turbofeed:user', phone);
       // 按令牌中的角色路由：管理员进系统后台 admin.html，审核员进审核工作台 review.html，
-      // 普通用户进 user.html。后端 /api/admin/** 仍按 JWT 中的权限二次校验，页面层仅做快捷拦截。
+      // 普通用户进 user.html。后端 /api/v1/admin/** 仍按 JWT 中的权限二次校验，页面层仅做快捷拦截。
       var role = parseJwtRole(access);
       localStorage.setItem('turbofeed:role', role);
       if (role === 'ADMIN') {

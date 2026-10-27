@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
- * 管理员接口鉴权拦截器：对所有 {@code /api/admin/**} 强制执行管理员角色校验。
+ * 管理员接口鉴权拦截器：对所有 {@code /api/v1/admin/**} 强制执行管理员角色校验。
  *
  * <p><b>为什么用拦截器而非 @PreAuthorize</b>：项目未引入 Spring Security，
  * 鉴权链由 {@link JwtAuthenticationFilter}（Servlet Filter）+ ThreadLocal

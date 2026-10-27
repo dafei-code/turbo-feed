@@ -3,6 +3,7 @@ package com.turbofeed.gateway.controller;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.penalty.ViolationCategory;
 import com.turbofeed.gateway.service.review.MediaReviewService;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -14,12 +15,12 @@ import org.springframework.web.bind.annotation.RestController;
  * 用户侧治理接口：举报 / 申诉（抖音式闭环的群众参与端）。
  *
  * <p><b>mediaId 传参</b>：mediaId 形如 {@code media/{userId}/{uuid}.{ext}} 含斜杠，不能做路径变量，
- * 一律走 query 参数原样携带（与 {@code /api/media} 其它接口一致）。</p>
+ * 一律走 query 参数原样携带（与 {@code /api/v1/media} 其它接口一致）。</p>
  *
  * <p><b>鉴权</b>：须有效 JWT（登录用户）；举报人/申诉人身份来自令牌，不可伪造。</p>
  */
 @RestController
-@RequestMapping("/api/media")
+@RequestMapping(ApiVersion.V1 + "/media")
 @RequiredArgsConstructor
 public class MediaReportController {
 

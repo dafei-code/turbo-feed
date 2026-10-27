@@ -4,6 +4,7 @@ import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
 import com.turbofeed.gateway.service.feed.FeedBackfillService;
 import com.turbofeed.gateway.service.feed.FeedDeliveryHealth;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.Result;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 属于系统级运维动作，比内容审核更高一级；{@code REVIEWER} 不应具备触发能力。</p>
  */
 @RestController
-@RequestMapping("/api/admin/feed")
+@RequestMapping(ApiVersion.V1 + "/admin/feed")
 public class AdminFeedController {
 
     private final FeedBackfillService backfillService;

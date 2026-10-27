@@ -7,6 +7,7 @@ import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.MediaReviewService;
 import com.turbofeed.gateway.service.review.MediaStatus;
 import com.turbofeed.gateway.service.review.ReviewTask;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,7 +26,7 @@ import java.util.List;
  * 提供「审核队列查询 + 通过/驳回」两个操作，把内容翻成 APPROVED / REJECTED 终态——
  * 即抖音级「机审 + 人审」中的人审入口（机审占位实现见 {@code AutoPassModeration}）。</p>
  *
- * <p><b>鉴权（RBAC 已落地）</b>：{@code /api/admin/**} 已由 {@link com.turbofeed.gateway.security.PermissionInterceptor}
+ * <p><b>鉴权（RBAC 已落地）</b>：{@code /api/v1/admin/**} 已由 {@link com.turbofeed.gateway.security.PermissionInterceptor}
  * （注册于 {@code WebConfig#addInterceptors}）在 preHandle 按 {@link RequirePermission} 注解做权限校验——
  * 审核员(REVIEWER，含 CONTENT_REVIEW/CONTENT_TAKEDOWN/DASHBOARD_VIEW)与系统管理员(ADMIN，全权限)可操作，
  * 普通用户(USER)或匿名请求一律 {@code 40301 / 40101}（由 {@code GlobalExceptionHandler} 翻译为 {@code Result}）。
@@ -35,7 +36,7 @@ import java.util.List;
  * 不能做路径变量（PathPattern 会把斜杠当段分隔符），一律走 query 参数原样携带。</p>
  */
 @RestController
-@RequestMapping("/api/admin/media")
+@RequestMapping(ApiVersion.V1 + "/admin/media")
 @RequiredArgsConstructor
 public class AdminMediaController {
 

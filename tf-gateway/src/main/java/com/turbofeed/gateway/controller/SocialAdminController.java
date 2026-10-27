@@ -4,6 +4,7 @@ import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.social.FollowService;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.ErrorCode;
 import com.turbofeed.shared.result.Result;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,10 +20,10 @@ import org.springframework.web.bind.annotation.RestController;
  * 双写已保证 Redis 实时一致，本端点仅作兜底。</p>
  *
  * <p><b>权限</b>：{@link Permission#USER_MANAGE}（仅 ADMIN 持有；REVIEWER 无此权限，
- * 配合 /api/admin/** 的 deny-by-default 拦截，普通用户与审核员均被拒）。</p>
+ * 配合 /api/v1/admin/** 的 deny-by-default 拦截，普通用户与审核员均被拒）。</p>
  */
 @RestController
-@RequestMapping("/api/admin/social")
+@RequestMapping(ApiVersion.V1 + "/admin/social")
 public class SocialAdminController {
 
     private final FollowService followService;

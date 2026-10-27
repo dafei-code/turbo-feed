@@ -11,7 +11,7 @@ import java.util.Map;
  * 审核配置（turbofeed.media.review.*）。
  *
  * <p>UGC 内容必须审核。默认 {@code auto-pass=false} 表示机审桩（AutoPassModeration）
- * 不自动放行，上传后停在 PENDING，由管理员审核接口（{@code /api/admin/media/{mediaId}/review}）
+ * 不自动放行，上传后停在 PENDING，由管理员审核接口（{@code /api/v1/admin/media/{mediaId}/review}）
  * 放行/驳回——即「真审核」闸。设为 {@code true} 退回演示占位（机审直接过），仅供本地联调
  * / 克隆即跑；生产务必关闭，否则 UGC 内容裸奔涉政涉黄。</p>
  *

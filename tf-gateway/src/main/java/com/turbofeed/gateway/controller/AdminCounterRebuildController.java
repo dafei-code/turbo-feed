@@ -4,6 +4,7 @@ import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
 import com.turbofeed.gateway.service.comment.CommentLikeService;
 import com.turbofeed.gateway.service.like.MediaLikeService;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.ErrorCode;
 import com.turbofeed.shared.result.Result;
 import lombok.RequiredArgsConstructor;
@@ -41,7 +42,7 @@ import org.springframework.web.bind.annotation.RestController;
  * （与 {@code AdminMediaController} 同约定）。</p>
  */
 @RestController
-@RequestMapping("/api/admin/counter")
+@RequestMapping(ApiVersion.V1 + "/admin/counter")
 @RequiredArgsConstructor
 public class AdminCounterRebuildController {
 

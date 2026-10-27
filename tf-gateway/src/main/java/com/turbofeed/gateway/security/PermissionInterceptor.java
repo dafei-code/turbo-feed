@@ -39,7 +39,7 @@ public class PermissionInterceptor implements HandlerInterceptor {
         }
         // 方法级 @RequirePermission 优先；缺省（未声明注解）一律拒绝（deny-by-default）。
         // 旧实现兜底为 CONTENT_REVIEW，导致「漏标注解的 admin 端点」可被审核员(REVIEWER)进入，
-        // 属可利用越权面；改为显式拒绝，强制每个 /api/admin/** 端点声明所需权限后才放行。
+        // 属可利用越权面；改为显式拒绝，强制每个 /api/v1/admin/** 端点声明所需权限后才放行。
         Permission[] required = null;
         if (handler instanceof HandlerMethod hm) {
             RequirePermission ann = hm.getMethodAnnotation(RequirePermission.class);

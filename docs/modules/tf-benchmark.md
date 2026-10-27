@@ -34,10 +34,10 @@
 
 ```bash
 # Feed 读取
-wrk -t8 -c200 -d60s --latency "http://localhost:8080/api/feed/recommended?page=0&size=10"
+wrk -t8 -c200 -d60s --latency "http://localhost:8080/api/v1/feed/recommended?page=0&size=10"
 
 # 需要登录态的场景先用 curl 拿 JWT，再带 Authorization 头
-wrk -t8 -c200 -d60s -H "Authorization: Bearer <jwt>" "http://localhost:8080/api/feed/recommended"
+wrk -t8 -c200 -d60s -H "Authorization: Bearer <jwt>" "http://localhost:8080/api/v1/feed/recommended"
 ```
 
 > 压测前请先确认真实容量目标。**没有目标的压测只会产出一个数字，不会产出决策**。

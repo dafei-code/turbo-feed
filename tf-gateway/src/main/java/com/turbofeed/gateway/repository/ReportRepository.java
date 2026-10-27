@@ -17,7 +17,7 @@ import java.util.Map;
  *
  * <p>举报闭环：用户对任意已发布内容举报 → 写本表（status=0 待处理）；高危类目由
  * {@code MediaReviewService#report} 立即下架，普通举报由管理员在
- * {@code /api/admin/media/report-review} 复核（确认违规→TAKEN_DOWN，不成立→驳回）。</p>
+ * {@code /api/v1/admin/media/report-review} 复核（确认违规→TAKEN_DOWN，不成立→驳回）。</p>
  */
 @Slf4j
 @Repository

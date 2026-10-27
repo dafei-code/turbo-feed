@@ -84,7 +84,7 @@ com.turbofeed.gateway
 ## 2. 认证与授权（JWT + RBAC）
 
 ```
-POST /api/auth/login ──> AuthService（按手机号查 user 表，恒定时间比较密码哈希）
+POST /api/v1/auth/login ──> AuthService（按手机号查 user 表，恒定时间比较密码哈希）
                           └─> JwtUtil.generateToken(userId, role)：HS256，载荷 sub/role/iat/exp
 后续请求 ──> JwtAuthenticationFilter（Order = HIGHEST_PRECEDENCE + 10）
               ├─ 无令牌        → 匿名放行（是否要求登录由业务调用点决定）

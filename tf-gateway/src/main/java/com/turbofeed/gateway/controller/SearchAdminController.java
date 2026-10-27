@@ -4,6 +4,7 @@ import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
 import com.turbofeed.gateway.service.search.SearchRebuildService;
 import com.turbofeed.gateway.service.search.SearchShardRebuildService;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.Result;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,16 +17,16 @@ import java.util.List;
 /**
  * 搜索索引运维接口（后台，需 {@link Permission#SYSTEM_CONFIG}，当前仅 ADMIN 持有）。
  *
- * <p><b>为什么必须挂在 {@code /api/admin/**} 而不是跟搜索接口放一起</b>：这里的每条重建都会
+ * <p><b>为什么必须挂在 {@code /api/v1/admin/**} 而不是跟搜索接口放一起</b>：这里的每条重建都会
  * 对 128 张物理分片做<b>全表扫描</b>。它绝不能出现在用户请求路径上——一次误触发就是
- * 一次全库扫描。{@code /api/admin/**} 由 {@code PermissionInterceptor} 按注解鉴权，
+ * 一次全库扫描。{@code /api/v1/admin/**} 由 {@code PermissionInterceptor} 按注解鉴权，
  * 天然把外部请求挡在门外。</p>
  *
  * <p><b>默认 dryRun=true</b>：先看清会影响多少行，再决定是否落。重建是幂等的，
  * 但「知道自己在改什么」比「随手就跑」重要。</p>
  */
 @RestController
-@RequestMapping("/api/admin/search")
+@RequestMapping(ApiVersion.V1 + "/admin/search")
 public class SearchAdminController {
 
     private final SearchRebuildService rebuildService;

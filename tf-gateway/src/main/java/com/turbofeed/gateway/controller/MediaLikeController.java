@@ -4,6 +4,7 @@ import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.like.MediaLikeService;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.ErrorCode;
 import com.turbofeed.shared.result.Result;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,16 +19,16 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p><b>两个端点</b>：
  * <ol>
- *   <li>{@code POST /api/feed/media/like}：toggle 点赞/取消。请求体 {@code {postId, like}}，
+ *   <li>{@code POST /api/v1/feed/media/like}：toggle 点赞/取消。请求体 {@code {postId, like}}，
  *       去重后只有「实际状态变化」才发一次引擎行为事件（接赛马），返回最新 {@code {liked, likeCount}}。</li>
- *   <li>{@code GET /api/feed/media/like/status}：查某内容的已赞态 + 点赞数（卡片红心/计数渲染用）。</li>
+ *   <li>{@code GET /api/v1/feed/media/like/status}：查某内容的已赞态 + 点赞数（卡片红心/计数渲染用）。</li>
  * </ol>
  * </p>
  *
  * <p><b>权限</b>：{@link Permission#FEED_INTERACT}（所有登录用户具备）。fail-open：异常不阻断浏览。</p>
  */
 @RestController
-@RequestMapping("/api/feed/media")
+@RequestMapping(ApiVersion.V1 + "/feed/media")
 public class MediaLikeController {
 
     private final MediaLikeService likeService;

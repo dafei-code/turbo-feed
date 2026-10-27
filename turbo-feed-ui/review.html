@@ -186,7 +186,7 @@
   if (!TOKEN) {
     window.location.href = 'login.html';
   } else if (ROLE === 'USER') {
-    // 普通用户无审核权限，回退普通用户页；后端 /api/admin/media/** 仍按权限二次拦截。
+    // 普通用户无审核权限，回退普通用户页；后端 /api/v1/admin/media/** 仍按权限二次拦截。
     // 旧令牌未写入 role 时放行（ADMIN/REVIEWER 或未知），由后端兜底校验。
     window.location.href = 'user.html';
   }
@@ -195,7 +195,7 @@
   function logout() {
     var access = localStorage.getItem('turbofeed:token');
     var refresh = localStorage.getItem('turbofeed:refresh');
-    fetch(API_BASE + '/api/auth/logout?refreshToken=' + encodeURIComponent(refresh || ''), {
+    fetch(API_BASE + '/api/v1/auth/logout?refreshToken=' + encodeURIComponent(refresh || ''), {
       method: 'POST',
       headers: access ? { 'Authorization': 'Bearer ' + access } : {}
     }).catch(function () {}).finally(function () {
@@ -220,7 +220,7 @@
   function loadReviewQueue() {
     var body = document.getElementById('reviewBody');
     body.innerHTML = '<tr><td colspan="5" class="empty">加载中…</td></tr>';
-    fetch(API_BASE + '/api/admin/media/pending?size=50', {
+    fetch(API_BASE + '/api/v1/admin/media/pending?size=50', {
       headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
     }).then(function (r) { return r.json(); })
       .then(function (res) {
@@ -266,7 +266,7 @@
     // 禁用本行两个按钮，避免重复提交
     var row = btn.parentNode;
     row.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
-    fetch(API_BASE + '/api/admin/media/review?mediaId=' + encodeURIComponent(mediaId) + '&approve=' + approve, {
+    fetch(API_BASE + '/api/v1/admin/media/review?mediaId=' + encodeURIComponent(mediaId) + '&approve=' + approve, {
       method: 'POST',
       headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
     }).then(function (r) { return r.json(); })

@@ -4,6 +4,7 @@ import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.comment.Comment;
 import com.turbofeed.gateway.service.comment.CommentPage;
 import com.turbofeed.gateway.service.comment.CommentService;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 评论接口（独立模块，类抖音楼中楼 + 敏感词前置）。
  *
- * <p><b>URL 设计</b>：与 media 平行挂 {@code /api/comments/**}；{@code mediaId} 必传且
+ * <p><b>URL 设计</b>：与 media 平行挂 {@code /api/v1/comments/**}；{@code mediaId} 必传且
  * 走 query（mediaId 形如 {@code media/{uid}/{uuid}.{ext}} 含斜杠，不能做路径变量）。</p>
  *
  * <p><b>分页 = keyset 游标</b>：列表用 {@code cursor}（上一页返回的 {@link CommentPage#nextCursor()}）
@@ -25,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 由 Filter 绑定 ThreadLocal，方法签名不出现身份参数，杜绝越权）。</p>
  */
 @RestController
-@RequestMapping("/api/comments")
+@RequestMapping(ApiVersion.V1 + "/comments")
 @RequiredArgsConstructor
 public class CommentController {
 

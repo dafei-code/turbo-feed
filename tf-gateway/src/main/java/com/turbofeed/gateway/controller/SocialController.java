@@ -4,6 +4,7 @@ import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
 import com.turbofeed.gateway.security.UserContextHolder;
 import com.turbofeed.gateway.service.social.FollowService;
+import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.result.ErrorCode;
 import com.turbofeed.shared.result.Result;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -20,19 +21,19 @@ import java.util.List;
  *
  * <p><b>端点</b>：
  * <ol>
- *   <li>{@code POST /api/social/follow?authorId=}：关注（幂等，重复关注返回 false）。</li>
- *   <li>{@code DELETE /api/social/follow?authorId=}：取消关注（幂等）。</li>
- *   <li>{@code GET /api/social/following?cursor=&limit=}：我的关注列表（抖音式游标分页）。</li>
- *   <li>{@code GET /api/social/followers?cursor=&limit=}：我的粉丝列表。</li>
- *   <li>{@code GET /api/social/relation?targetAuthorId=}：与某作者的关系（关注/粉丝/互关）。</li>
- *   <li>{@code GET /api/social/recommend?limit=}：关注推荐（二阶关注）。</li>
+ *   <li>{@code POST /api/v1/social/follow?authorId=}：关注（幂等，重复关注返回 false）。</li>
+ *   <li>{@code DELETE /api/v1/social/follow?authorId=}：取消关注（幂等）。</li>
+ *   <li>{@code GET /api/v1/social/following?cursor=&limit=}：我的关注列表（抖音式游标分页）。</li>
+ *   <li>{@code GET /api/v1/social/followers?cursor=&limit=}：我的粉丝列表。</li>
+ *   <li>{@code GET /api/v1/social/relation?targetAuthorId=}：与某作者的关系（关注/粉丝/互关）。</li>
+ *   <li>{@code GET /api/v1/social/recommend?limit=}：关注推荐（二阶关注）。</li>
  * </ol>
  * </p>
  *
  * <p><b>权限</b>：{@link Permission#FEED_INTERACT}（所有登录用户具备）。fail-open：异常不阻断。</p>
  */
 @RestController
-@RequestMapping("/api/social")
+@RequestMapping(ApiVersion.V1 + "/social")
 public class SocialController {
 
     private final FollowService followService;
