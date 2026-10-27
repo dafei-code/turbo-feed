@@ -36,3 +36,8 @@ cp.txt
 /application.yml
 /tf-gateway/application.yml
 /tf-feed-engine/application.yml
+
+# 本地 AI 助手会话目录（工作记忆、日志等），属个人环境产物，绝不该进仓。
+# CI 里另有一条检查（.github/workflows/ci.yml 的「工作区卫生」）兜底：
+# 即使本行被谁误删，只要它被 git 跟踪就会立刻失败——忽略规则和门禁各管一层。
+.workbuddy/
