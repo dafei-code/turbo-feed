@@ -463,11 +463,11 @@
     </div>
 
     <div class="nav-group" data-page-node-id="0iM7KBqUX3RahQW2LLiEx5">关注</div>
-    <div class="nav-item" data-tab="todo" data-page-node-id="48gUoVacQuaEhHgbR6WjoA">
+    <div class="nav-item" data-tab="follow" data-page-node-id="48gUoVacQuaEhHgbR6WjoA">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" data-page-node-id="s4uuiaBXSoFHh1YfbWOVQw"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" data-page-node-id="c3BZNhSqrC935rgT4HiO1S"/><circle cx="8.5" cy="7" r="4" data-page-node-id="qjLegZk6Ac0QAEVfWnmn0j"/><line x1="20" y1="8" x2="20" y2="14" data-page-node-id="I1gZYw2hlW6KFITMDDyDm1"/><line x1="23" y1="11" x2="17" y2="11" data-page-node-id="hsQa72VYrMy5rZrdpyCJfa"/></svg>
       关注
     </div>
-    <div class="nav-item" data-tab="todo" data-page-node-id="Q9lMnwlC92awtqO0E1j9JC">
+    <div class="nav-item" data-tab="friend" data-page-node-id="Q9lMnwlC92awtqO0E1j9JC">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" data-page-node-id="Qd5K9nHZa11FrNvIZ0p72f"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" data-page-node-id="LxAKD9fmL7NCw6VqrVJXPO"/><circle cx="9" cy="7" r="4" data-page-node-id="y0pGcVQnJX9i5j3bxDqyG7"/><path d="M23 21v-2a4 4 0 0 0-3-3.87" data-page-node-id="AV6y6p3CJlfdeBUWHTWbsS"/><path d="M16 3.13a4 4 0 0 1 0 7.75" data-page-node-id="Iq4uJXvRQ8tXsO3qBJBSu5"/></svg>
       朋友
       <span class="badge" data-page-node-id="o3Sj6O4oYTL5CG5dEwVPFR">1</span>
@@ -556,6 +556,16 @@
   </div>
 </div>
 
+<!-- 关注 / 朋友 列表抽屉（复用评论抽屉样式） -->
+<div class="drawer-overlay" id="followOverlay"></div>
+<div class="comment-drawer" id="followDrawer">
+  <div class="cm-head">
+    <h3 id="followTitle">关注</h3>
+    <span class="close" id="followClose">✕</span>
+  </div>
+  <div class="cm-list" id="followList"><!-- JS 填充 --></div>
+</div>
+
 <!-- 分享弹窗 -->
 <ul class="share-pop" id="sharePop" data-page-node-id="axCZmezu3V1IeVxCHFcia2">
   <li data-to="friend" data-page-node-id="nYthS8ucUqzLDhAXWNPWyg">推荐给朋友</li>
@@ -564,11 +574,32 @@
 </ul>
 
 <script>
-  // ========== 模拟视频数据 ==========
   // ========== 真实内容数据（来自后端 /api/v1/feed/recommended，仅返回 APPROVED） ==========
   // 说明：P1.5 起公域推荐流与「个人中心 /api/v1/media/mine」解耦，feed 走独立接口；
   // 后端已只返回 APPROVED，前端无需再内存过滤。演示阶段推荐接口返回当前 APPROVED 内容。
   let videos = [];
+  const API_BASE = 'http://localhost:8080';   // 演示用网关地址（与后端 --server.port 对齐）
+
+  /** 后端 MediaItem → 前端 video 视图（统一抽一处，loadFeed 初次拉取与无限滚动续拉共用）。 */
+  function mapItem(i) {
+    var images = (i.images && i.images.length) ? i.images.slice() : (i.url ? [i.url] : []);
+    var statusText = STATUS_TEXT[i.status] || '';
+    return {
+      postId: i.postId,
+      mediaId: i.mediaId,                                  // 评论/点赞接口以 mediaId 为分片键，必须保留
+      id: i.postId || i.mediaId,
+      author: (currentTab === 'mine') ? '我' : authorOf(i),
+      statusText: statusText,
+      title: (i.mediaId || '').split('/').pop(),
+      desc: i.caption || '',
+      // 「我的」把审核状态并进描述，让人一眼看出这条为什么没进公域
+      tags: (currentTab === 'mine') && statusText ? ('#' + statusText) : '#TurboFeed #UGC',
+      music: '—',
+      like: 0, comment: 0, fav: 0, share: 0,
+      images: images,
+      cover: images.length ? images[0] : ''
+    };
+  }
 
   /**
    * feed 容器（脚本级）。
@@ -680,48 +711,69 @@
     if (videos[idx]) track(videos[idx].id, 'IMPRESSION', { position: idx });
   }
 
-  function loadFeed() {
+  // 无限滚动 / 分页状态
+  let feedPage = 0;          // 当前拉取页码（offset 分页，page++ 续拉）
+  let feedHasMore = true;    // 是否还有下一页
+  let feedLoading = false;   // 防重入：同一时刻只发一个续拉请求
+  let feedReqToken = 0;      // 请求代次：切 Tab / 重拉时自增，过期响应直接丢弃
+
+  function loadFeed(append) {
     var TOKEN = localStorage.getItem('turbofeed:token');
-    if (!TOKEN) { location.href = 'login.html'; return; }
+    if (!TOKEN) { feedLoading = false; location.href = 'login.html'; return; }
 
     var mine = currentTab === 'mine';
-    // 一次拉取 = 一个 requestId：本次结果里所有条目的曝光/互动都归到它下面
-    currentRequestId = newRequestId();
-    var url = mine
-      ? 'http://localhost:8080/api/v1/media/mine?page=0&size=20'
-      : 'http://localhost:8080/api/v1/feed/recommended?page=0&size=20';
+    if (!append) {
+      // 一次拉取 = 一个 requestId：本次结果里所有条目的曝光/互动都归到它下面
+      currentRequestId = newRequestId();
+      feedPage = 0;
+      feedHasMore = true;
+    }
+    var myToken = ++feedReqToken;   // 代次快照：响应回来时若已被更新的拉取覆盖则丢弃（防竞态覆盖）
+    var url = (mine ? API_BASE + '/api/v1/media/mine' : API_BASE + '/api/v1/feed/recommended')
+      + '?page=' + feedPage + '&size=20';
 
     fetch(url, { headers: { 'Authorization': 'Bearer ' + TOKEN } })
       .then(function (r) { return r.json(); })
       .then(function (res) {
+        if (myToken !== feedReqToken) return;   // 过期响应：被更新的拉取（切 Tab/重拉）覆盖，丢弃
         var items = (res.data || []);
-        videos = items.map(function (i) {
-          // 一帖多图：images 是整帖图片（按 seq 排序，后端保证非空）；
-          // 兼容旧结构：没有 images 时回退成单图 [url]
-          var images = (i.images && i.images.length) ? i.images.slice() : (i.url ? [i.url] : []);
-          var statusText = STATUS_TEXT[i.status] || '';
-          return {
-            id: i.postId || i.mediaId,
-            author: mine ? '我' : authorOf(i),
-            statusText: statusText,
-            title: (i.mediaId || '').split('/').pop(),
-            desc: i.caption || '',
-            // 「我的」把审核状态并进描述，让人一眼看出这条为什么没进公域
-            tags: mine && statusText ? ('#' + statusText) : '#TurboFeed #UGC',
-            music: '—',
-            like: 0, comment: 0, fav: 0, share: 0,
-            images: images,
-            cover: images.length ? images[0] : ''
-          };
-        });
-        renderFeed(mine);
+        if (!items.length) {
+          feedHasMore = false;
+          if (!append) renderFeed(mine);
+          return;
+        }
+        if (!append) {
+          videos = items.map(mapItem);
+          renderFeed(mine);
+        } else {
+          appendFeed(items);          // 增量渲染，不重建已有 DOM，保住滚动位置与轮播
+        }
+        feedPage++;
+        feedHasMore = items.length >= 20;
       })
-      .catch(function (e) { console.error('加载 feed 失败', e); renderFeed(mine); });
+      .catch(function (e) {
+        console.error('加载 feed 失败', e);
+        if (myToken === feedReqToken && !append) renderFeed(mine);
+      })
+      .finally(function () { feedLoading = false; });
+  }
+
+  /** 无限滚动续拉：把新条目增量渲染进 feedList（复用 buildFeedItem，不重建整页）。 */
+  function appendFeed(rawItems) {
+    rawItems.forEach(function (item) {
+      var v = mapItem(item);
+      var i = videos.length;
+      videos.push(v);
+      feedList.appendChild(buildFeedItem(v, i));
+    });
+    bindSliders();   // 重新绑定横向滑块（含新帖的多图轮播）
   }
 
   /** Tab 切换：换高亮 + 重拉数据。 */
   function switchTab(tab) {
-    if (tab === 'todo') { toast('关注流 / 朋友流规划中（P2，需先建关注关系）'); return; }
+    if (tab === 'friend') { openUserList('recommend', '朋友 · 你可能想关注'); return; }
+    if (tab === 'follow') { openUserList('following', '关注'); return; }
+    if (tab === 'todo') { toast('该模块规划中（P2）'); return; }
     if (tab === currentTab) return;
     currentTab = tab;
     Array.prototype.forEach.call(document.querySelectorAll('.nav-item[data-tab]'), function (el) {
@@ -740,6 +792,41 @@
     return n.toString();
   }
 
+  // 生成单个 feed DOM（renderFeed 与 appendFeed 共用）
+  function buildFeedItem(v, i) {
+    var div = document.createElement('div');
+    div.className = 'feed-item';
+    div.dataset.idx = i;
+    var images = (v.images && v.images.length) ? v.images : [''];
+    var multi = images.length > 1;
+    // 每张图一个滑片；用 background-image 而非 <img>，省一层布局且天然 cover 裁切
+    var slides = images.map(function (u) {
+      var bg = u ? "background-image:url(" + JSON.stringify(safeUrl(u) || '#') + ");" : 'background:#1f4e79;';
+      return '<div class="img-slide" style="' + bg + '"></div>';
+    }).join('');
+    var dots = multi
+      ? '<div class="img-dots">' + images.map(function (_, k) {
+          return '<i class="img-dot' + (k === 0 ? ' on' : '') + '"></i>';
+        }).join('') + '</div>'
+      : '';
+    var counter = multi
+      ? '<div class="img-counter"><span class="cur">1</span>/' + images.length + '</div>'
+      : '';
+    // 单图帖维持原「视频演示」观感（播放遮罩 + 进度条）；多图帖是图文，隐藏二者
+    var hiddenCls = multi ? ' hidden' : '';
+    div.innerHTML = `
+      <div class="video-wrap">
+        <div class="img-slider" data-idx="${i}">${slides}</div>
+        ${dots}
+        ${counter}
+        <video class="video-el" loop playsinline muted poster data-idx="${i}"></video>
+        <div class="play-mask${hiddenCls}" id="mask-${i}"><div class="big-play"><svg viewBox="0 0 24 24" width="34" height="34" fill="#fff"><polygon points="5 3 21 12 5 21 5 3"/></svg></div></div>
+        <div class="progress${hiddenCls}"><div class="progress-bar" id="bar-${i}"></div></div>
+      </div>
+    `;
+    return div;
+  }
+
   // 生成 feed DOM（数据来自 loadFeed，仅渲染已有 videos）
   function renderFeed(mine) {
     feedList.innerHTML = '';
@@ -751,39 +838,8 @@
         : '<div style="padding:40px;text-align:center;color:#8b98ab">公域暂无已通过审核的内容<br><span style="font-size:12px">（若库里已有 APPROVED 内容，多半是 feed-engine 未启动或时间线未补投）</span></div>';
       return;
     }
-    videos.forEach(function (v, i) {
-      var div = document.createElement('div');
-      div.className = 'feed-item';
-      div.dataset.idx = i;
-      var images = (v.images && v.images.length) ? v.images : [''];
-      var multi = images.length > 1;
-      // 每张图一个滑片；用 background-image 而非 <img>，省一层布局且天然 cover 裁切
-      var slides = images.map(function (u) {
-        var bg = u ? "background-image:url(" + JSON.stringify(safeUrl(u) || '#') + ");" : 'background:#1f4e79;';
-        return '<div class="img-slide" style="' + bg + '"></div>';
-      }).join('');
-      var dots = multi
-        ? '<div class="img-dots">' + images.map(function (_, k) {
-            return '<i class="img-dot' + (k === 0 ? ' on' : '') + '"></i>';
-          }).join('') + '</div>'
-        : '';
-      var counter = multi
-        ? '<div class="img-counter"><span class="cur">1</span>/' + images.length + '</div>'
-        : '';
-      // 单图帖维持原「视频演示」观感（播放遮罩 + 进度条）；多图帖是图文，隐藏二者
-      var hiddenCls = multi ? ' hidden' : '';
-      div.innerHTML = `
-        <div class="video-wrap">
-          <div class="img-slider" data-idx="${i}">${slides}</div>
-          ${dots}
-          ${counter}
-          <video class="video-el" loop playsinline muted poster data-idx="${i}"></video>
-          <div class="play-mask${hiddenCls}" id="mask-${i}"><div class="big-play"><svg viewBox="0 0 24 24" width="34" height="34" fill="#fff"><polygon points="5 3 21 12 5 21 5 3"/></svg></div></div>
-          <div class="progress${hiddenCls}"><div class="progress-bar" id="bar-${i}"></div></div>
-        </div>
-      `;
-      feedList.appendChild(div);
-    });
+
+    videos.forEach(function (v, i) { feedList.appendChild(buildFeedItem(v, i)); });
     bindSliders();
     startCarousel();
     currentIdx = 0;
@@ -874,6 +930,7 @@
     document.getElementById('commentCount').textContent = fmt(v.comment);
     document.getElementById('favCount').textContent = fmt(v.fav);
     document.getElementById('shareCount').textContent = fmt(v.share);
+    syncLikeState(v);   // 切条时拉服务端真实点赞态，覆盖上面的本地重置
   }
 
   // ========== 播放控制 ==========
@@ -946,6 +1003,14 @@
       setPlay(best, true);
       onEnterItem(best);        // 滑动切条：结算上一条停留 + 报本条曝光
     }
+    // 无限滚动：触底且还有下一页时续拉（防重入 + 仅推荐/我的 Tab 触发）
+    if (!feedLoading && feedHasMore && currentTab !== 'todo') {
+      const nearBottom = feedList.scrollTop + feedList.clientHeight >= feedList.scrollHeight - 240;
+      if (nearBottom) {
+        feedLoading = true;
+        loadFeed(true);
+      }
+    }
   });
 
   // ========== 交互按钮事件 ==========
@@ -958,23 +1023,64 @@
 
   document.getElementById('btnLike').addEventListener('click', function () {
     const v = videos[currentIdx];
-    const liked = this.dataset.liked === '1';
-    if (!liked) {
-      this.classList.add('liked');
-      v.like++;
-      this.dataset.liked = '1';
-      toast('已点赞 ❤️');
-      // 只报"点赞"，不报"取消点赞"：契约里没有 UNLIKE 类型，而把取消记成负向会
-      // 与「不感兴趣(DISLIKE)」语义混淆——后者是"别再给我看这个"，前者只是手滑收回。
-      track(v.id, 'LIKE', { position: currentIdx });
-    } else {
-      this.classList.remove('liked');
-      v.like--;
-      this.dataset.liked = '0';
-      toast('取消点赞');
-    }
+    if (!v) return;
+    const btn = this;
+    const liked = btn.dataset.liked === '1';
+    const next = !liked;
+    // 乐观更新：先改 UI，再以服务端返回校准 / 失败回滚
+    btn.classList.toggle('liked', next);
+    btn.dataset.liked = next ? '1' : '0';
+    v.like = next ? v.like + 1 : v.like - 1;
     document.getElementById('likeCount').textContent = fmt(v.like);
+    toast(next ? '已点赞 ❤️' : '取消点赞');
+    const TOKEN = localStorage.getItem('turbofeed:token');
+    if (!TOKEN) { toast('请先登录'); return; }
+    fetch(API_BASE + '/api/v1/feed/media/like', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
+      body: JSON.stringify({ postId: v.id, like: next })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0 && res.data) {
+          v.like = res.data.likeCount;                 // 以服务端真实计数校准
+          btn.dataset.liked = res.data.liked ? '1' : '0';
+          btn.classList.toggle('liked', res.data.liked);
+          document.getElementById('likeCount').textContent = fmt(v.like);
+        } else {
+          rollback();
+          toast('点赞失败：' + (res.message || '未知错误'));
+        }
+      })
+      .catch(function () { rollback(); toast('点赞失败，已回滚'); });
+    function rollback() {
+      btn.classList.toggle('liked', !next);
+      btn.dataset.liked = !next ? '1' : '0';
+      v.like = next ? v.like - 1 : v.like + 1;
+      document.getElementById('likeCount').textContent = fmt(v.like);
+    }
   });
+
+  /** 切换条目时拉取服务端点赞态，校准红心与计数（避免本地 mock 数与服务端漂移）。 */
+  function syncLikeState(v) {
+    if (!v || !v.id) return;
+    const TOKEN = localStorage.getItem('turbofeed:token');
+    if (!TOKEN) return;
+    fetch(API_BASE + '/api/v1/feed/media/like/status?postId=' + encodeURIComponent(v.id), {
+      headers: { 'Authorization': 'Bearer ' + TOKEN }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0 && res.data) {
+          const btn = document.getElementById('btnLike');
+          btn.dataset.liked = res.data.liked ? '1' : '0';
+          btn.classList.toggle('liked', res.data.liked);
+          v.like = res.data.likeCount;
+          document.getElementById('likeCount').textContent = fmt(v.like);
+        }
+      })
+      .catch(function () { /* 失败不影响浏览，沿用本地态 */ });
+  }
 
   document.getElementById('btnFav').addEventListener('click', function () {
     const v = videos[currentIdx];
@@ -994,39 +1100,82 @@
   });
 
   // ========== 评论抽屉 ==========
-  function genComments(n) {
-    const names = ['极速车手', 'Redis老司机', '山城麦霸', '后端小黑', '极客小王', '路人甲', 'TurboViewer', '关注你了'];
-    const txts = ['太强了，已三连', '这画质爱了', 'TurboFeed 这个项目开源了吗？', '沙发', '求背景音乐', '下次能不能讲讲分桶计数实现细节', '这就是赛车游戏的顶流吗', '收藏了慢慢看'];
-    const arr = [];
-    for (let i = 0; i < n; i++) {
-      arr.push({
-        name: names[i % names.length] + (i ? '' : ''),
-        text: txts[i % txts.length],
-        like: Math.floor(Math.random() * 500) + 1
-      });
-    }
-    return arr;
+  // ========== 评论抽屉（真实评论链路：GET /api/v1/comments + POST /api/v1/comments） ==========
+  let commentCursor = '';
+  let commentHasMore = true;
+
+  /** 单条评论 DOM（textContent 渲染内容，天然防 XSS）。 */
+  function buildComment(c) {
+    const div = document.createElement('div');
+    div.className = 'cm-item';
+    const ava = document.createElement('div');
+    ava.className = 'cm-avatar';
+    ava.textContent = ('' + (c.userId || 0)).slice(-2);
+    const body = document.createElement('div');
+    body.className = 'cm-body';
+    const user = document.createElement('div');
+    user.className = 'cm-user';
+    user.textContent = '用户' + ('' + (c.userId || 0)).slice(-4);
+    const text = document.createElement('div');
+    text.className = 'cm-text';
+    text.textContent = c.content || '';
+    const actions = document.createElement('div');
+    actions.className = 'cm-actions';
+    const reply = document.createElement('span'); reply.textContent = '回复';
+    const likeBtn = document.createElement('span');
+    likeBtn.className = 'cm-like';
+    likeBtn.dataset.cid = c.commentId;
+    likeBtn.dataset.liked = c.liked ? '1' : '0';
+    likeBtn.textContent = (c.liked ? '❤ ' : '🤍 ') + fmt(c.likeCount || 0);
+    likeBtn.addEventListener('click', function () { toggleCommentLike(c, this); });
+    const report = document.createElement('span'); report.textContent = '举报';
+    actions.append(reply, likeBtn, report);
+    body.append(user, text, actions);
+    div.append(ava, body);
+    return div;
+  }
+
+  /** 拉取评论（keyset 游标 + hot 排序；replace=true 重新拉首页）。 */
+  function loadComments(v, replace) {
+    if (!v || !v.mediaId) { toast('该内容暂无评论接口'); return; }
+    const list = document.getElementById('cmList');
+    if (replace) { list.innerHTML = '<div class="cm-tip">加载中…</div>'; commentCursor = ''; commentHasMore = true; }
+    const TOKEN = localStorage.getItem('turbofeed:token');
+    const url = API_BASE + '/api/v1/comments?mediaId=' + encodeURIComponent(v.mediaId)
+      + '&rootId=0&size=20&mode=hot&cursor=' + encodeURIComponent(commentCursor);
+    fetch(url, TOKEN ? { headers: { 'Authorization': 'Bearer ' + TOKEN } } : {})
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        const page = res.data || {};
+        const items = page.items || [];
+        commentCursor = page.nextCursor || '';
+        commentHasMore = !!page.hasMore;
+        if (replace) {
+          list.innerHTML = '';
+          document.getElementById('cmTitle').textContent = '评论 (' + fmt(page.total || v.comment) + ')';
+        }
+        if (!items.length && replace) {
+          list.innerHTML = '<div class="cm-tip">还没有评论，来抢沙发～</div>';
+          return;
+        }
+        items.forEach(function (c) { list.appendChild(buildComment(c)); });
+        if (commentHasMore && !document.getElementById('cmMore')) {
+          const more = document.createElement('div');
+          more.className = 'cm-tip cm-more';
+          more.id = 'cmMore';
+          more.textContent = '加载更多评论';
+          more.addEventListener('click', function () { loadComments(v, false); this.remove(); });
+          list.appendChild(more);
+        }
+      })
+      .catch(function () { if (replace) list.innerHTML = '<div class="cm-tip">评论加载失败</div>'; });
   }
 
   function openComments() {
     const v = videos[currentIdx];
-    document.getElementById('cmTitle').textContent = `评论 (${fmt(v.comment)})`;
-    const list = document.getElementById('cmList');
-    list.innerHTML = '';
-    const comments = genComments(8);
-    comments.forEach((c, i) => {
-      const div = document.createElement('div');
-      div.className = 'cm-item';
-      div.innerHTML = `
-        <div class="cm-avatar">${esc(c.name.charAt(0).toUpperCase())}</div>
-        <div class="cm-body">
-          <div class="cm-user">${esc(c.name)}</div>
-          <div class="cm-text">${esc(c.text)}</div>
-          <div class="cm-actions"><span>回复</span><span>赞 ${fmt(c.like)}</span><span>举报</span></div>
-        </div>
-      `;
-      list.appendChild(div);
-    });
+    if (!v) return;
+    document.getElementById('cmTitle').textContent = '评论 (' + fmt(v.comment) + ')';
+    loadComments(v, true);
     document.getElementById('drawerOverlay').classList.add('show');
     document.getElementById('commentDrawer').classList.add('open');
   }
@@ -1040,28 +1189,103 @@
 
   document.getElementById('cmSend').addEventListener('click', function () {
     const input = document.getElementById('cmInput');
-    const txt = input.value.trim();
+    const txt = (input.value || '').trim();
     if (!txt) return;
     const v = videos[currentIdx];
-    v.comment++;
-    track(v.id, 'COMMENT', { position: currentIdx });
-    document.getElementById('commentCount').textContent = fmt(v.comment);
-    document.getElementById('cmTitle').textContent = `评论 (${fmt(v.comment)})`;
-    const list = document.getElementById('cmList');
-    const div = document.createElement('div');
-    div.className = 'cm-item';
-      div.innerHTML = `
-        <div class="cm-avatar">A</div>
-        <div class="cm-body">
-          <div class="cm-user">admin</div>
-          <div class="cm-text">${esc(txt)}</div>
-          <div class="cm-actions"><span>删除</span><span>赞 0</span></div>
-        </div>
-      `;
-    list.insertBefore(div, list.firstChild);
-    input.value = '';
-    toast('评论已发送');
+    if (!v || !v.mediaId) { toast('该内容无法评论'); return; }
+    const TOKEN = localStorage.getItem('turbofeed:token');
+    if (!TOKEN) { toast('请先登录'); return; }
+    const self = this;
+    self.disabled = true;
+    fetch(API_BASE + '/api/v1/comments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': 'Bearer ' + TOKEN },
+      body: 'mediaId=' + encodeURIComponent(v.mediaId) + '&content=' + encodeURIComponent(txt) + '&parentId=0'
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        self.disabled = false;
+        if (res.code === 0 && res.data) {
+          input.value = '';
+          const list = document.getElementById('cmList');
+          const tip = list.querySelector('.cm-tip');
+          if (tip) tip.remove();
+          list.insertBefore(buildComment(res.data), list.firstChild);
+          v.comment = (v.comment || 0) + 1;
+          document.getElementById('commentCount').textContent = fmt(v.comment);
+          document.getElementById('cmTitle').textContent = '评论 (' + fmt(v.comment) + ')';
+          toast('评论已发送');
+        } else {
+          toast('评论发送失败：' + (res.message || '未知错误'));
+        }
+      })
+      .catch(function () { self.disabled = false; toast('评论发送失败'); });
   });
+
+  /** 评论点赞 toggle（POST /api/v1/comments/like，返回最新已赞态）。 */
+  function toggleCommentLike(c, el) {
+    const TOKEN = localStorage.getItem('turbofeed:token');
+    if (!TOKEN) { toast('请先登录'); return; }
+    const liked = el.dataset.liked === '1';
+    const next = !liked;
+    el.dataset.liked = next ? '1' : '0';
+    el.textContent = (next ? '❤ ' : '🤍 ') + fmt((c.likeCount || 0) + (next ? 1 : -1));
+    fetch(API_BASE + '/api/v1/comments/like?mediaId=' + encodeURIComponent(c.mediaId) + '&commentId=' + c.commentId, {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0 && res.data != null) {
+          const nowLiked = !!res.data;
+          c.likeCount = nowLiked ? (c.likeCount || 0) + 1 : (c.likeCount || 0) - 1;
+          el.dataset.liked = nowLiked ? '1' : '0';
+          el.textContent = (nowLiked ? '❤ ' : '🤍 ') + fmt(c.likeCount);
+        } else { rollback(); }
+      })
+      .catch(function () { rollback(); });
+    function rollback() {
+      el.dataset.liked = liked ? '1' : '0';
+      el.textContent = (liked ? '❤ ' : '🤍 ') + fmt(c.likeCount || 0);
+    }
+  }
+
+  // ========== 关注 / 朋友 列表抽屉（真实社交后端） ==========
+  function openUserList(kind, title) {
+    const TOKEN = localStorage.getItem('turbofeed:token');
+    if (!TOKEN) { location.href = 'login.html'; return; }
+    document.getElementById('followTitle').textContent = title;
+    const list = document.getElementById('followList');
+    list.innerHTML = '<div class="cm-tip">加载中…</div>';
+    document.getElementById('followOverlay').classList.add('show');
+    document.getElementById('followDrawer').classList.add('open');
+    const url = kind === 'following'
+      ? API_BASE + '/api/v1/social/following?limit=50'
+      : API_BASE + '/api/v1/social/recommend?limit=50';
+    fetch(url, { headers: { 'Authorization': 'Bearer ' + TOKEN } })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        const items = (res.data && res.data.items) ? res.data.items : (res.data || []);
+        if (!items.length) { list.innerHTML = '<div class="cm-tip">还没有关注的人，去推荐流发现吧～</div>'; return; }
+        list.innerHTML = '';
+        items.forEach(function (uid) {
+          const div = document.createElement('div');
+          div.className = 'cm-item';
+          const ava = document.createElement('div'); ava.className = 'cm-avatar'; ava.textContent = ('' + uid).slice(-2);
+          const body = document.createElement('div'); body.className = 'cm-body';
+          const user = document.createElement('div'); user.className = 'cm-user'; user.textContent = '用户' + ('' + uid).slice(-4);
+          const text = document.createElement('div'); text.className = 'cm-text'; text.textContent = kind === 'following' ? '已关注' : '推荐关注';
+          body.append(user, text); div.append(ava, body);
+          list.appendChild(div);
+        });
+      })
+      .catch(function () { list.innerHTML = '<div class="cm-tip">加载失败</div>'; });
+  }
+  function closeUserList() {
+    document.getElementById('followOverlay').classList.remove('show');
+    document.getElementById('followDrawer').classList.remove('open');
+  }
+  document.getElementById('followClose').addEventListener('click', closeUserList);
+  document.getElementById('followOverlay').addEventListener('click', closeUserList);
 
   // ========== 分享 ==========
   const sharePop = document.getElementById('sharePop');
