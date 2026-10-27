@@ -4,19 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.feedengine.contract.ItemViewCodec;
 import com.turbofeed.shared.model.FeedItemView;
-import com.turbofeed.feedengine.client.ReviewSignalClient;
-import com.turbofeed.feedengine.interest.InterestService;
-import com.turbofeed.feedengine.interest.SessionSequenceService;
-import com.turbofeed.feedengine.ranking.FeedModerationProperties;
-import com.turbofeed.feedengine.ranking.RankingFeatures;
-import com.turbofeed.feedengine.ranking.RankingModel;
-import com.turbofeed.feedengine.ranking.PreRankCandidate;
-import com.turbofeed.feedengine.ranking.PreRankContext;
-import com.turbofeed.feedengine.ranking.PreRankFilter;
-import com.turbofeed.feedengine.ranking.RealtimeFeatureService;
-import com.turbofeed.feedengine.ranking.UserRealtimeProfile;
-import com.turbofeed.feedengine.recall.VectorRecallChannel;
-import com.turbofeed.feedengine.social.FollowService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,37 +11,30 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static com.turbofeed.feedengine.timeline.TimelineSupport.AUTHOR_PREFIX;
-import static com.turbofeed.feedengine.timeline.TimelineSupport.IDX_PREFIX;
-import static com.turbofeed.feedengine.timeline.TimelineSupport.IDX_SEP;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.BUCKET_TTL;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.IndexEntry;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.MAX_POOL_LEVELS;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.MERGE_BUCKETS;
-import static com.turbofeed.feedengine.timeline.TimelineSupport.TL_PREFIX;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.PER_BUCKET_CAP;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.authorIdFromKey;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.authorIdOf;
-// 下面这批仅 readPage 使用；A7 第二步把漏斗编排搬到 RecommendationPipeline 后，本类不再需要它们
-import static com.turbofeed.feedengine.timeline.TimelineSupport.FOLLOW_PER_AUTHOR;
-import static com.turbofeed.feedengine.timeline.TimelineSupport.FOLLOW_SCAN_LIMIT;
-import static com.turbofeed.feedengine.timeline.TimelineSupport.RECALL_OVERFETCH;
-import static com.turbofeed.feedengine.timeline.TimelineSupport.collectModerationKeys;
-import static com.turbofeed.feedengine.timeline.TimelineSupport.isModerationBlocked;
-import static com.turbofeed.feedengine.timeline.TimelineSupport.matchesNegative;
-import static com.turbofeed.feedengine.timeline.TimelineSupport.recencyOf;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.bucketKey;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.dateOf;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.dateOfBucket;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.indexKey;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.indexValue;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.parseIndex;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.poolOfBucket;
 
 /**
  * 公域发现流时间线读模型（写时物化）。
@@ -104,12 +84,8 @@ public class FeedTimelineStore {
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
-    /** 单桶最多拉取条数（防单天批准量过大时归并开销爆炸）。 */
-    private static final int PER_BUCKET_CAP = 500;
-    /** 桶与反查索引的存活时长：超过该天数的桶整体淘汰（发现流只看最新）。 */
-    private static final Duration BUCKET_TTL = Duration.ofDays(7);
-    /** 反查索引值里「桶 key」与「成员串」的分隔符（SOH 不可打印字符，不会出现在 key 与 JSON 中）。 */
-    private static final String IDX_SEP = "\u0001";
+    // PER_BUCKET_CAP / BUCKET_TTL / IDX_SEP 已上移到 TimelineSupport：它们约束的是桶与反查索引的
+    // 格式本身（读路径与扫描路径共用），留在本类会让「读写各一份」重新长出来（P1-1）。
     /** 推荐流是否按流量池权重分配每页槽位（抖音式曝光分层）。false 退化为"全池合并+全局倒序"。 */
     @Value("${turbofeed.feed.pool-read-weight-enabled:true}")
     private boolean poolReadWeightEnabled;
@@ -145,7 +121,7 @@ public class FeedTimelineStore {
         }
         int pool = poolLevel < 1 ? 1 : Math.min(poolLevel, MAX_POOL_LEVELS);
         Instant approvedAt = Instant.now();
-        String key = TL_PREFIX + pool + ":" + bucketOf(approvedAt);
+        String key = bucketKey(pool, dateOf(approvedAt));
         // 帖身份：有 postId 用 postId，历史单图数据回退 mediaId（见 FeedItemView#timelineKey）
         String timelineKey = item.timelineKey();
         String member;
@@ -158,7 +134,7 @@ public class FeedTimelineStore {
         detach(timelineKey, null);
         redisTemplate.opsForZSet().add(key, member, approvedAt.toEpochMilli());
         redisTemplate.expire(key, BUCKET_TTL);
-        redisTemplate.opsForValue().set(IDX_PREFIX + timelineKey, key + IDX_SEP + member, BUCKET_TTL);
+        redisTemplate.opsForValue().set(indexKey(timelineKey), indexValue(key, member), BUCKET_TTL);
         // 关注流作者索引（G6）：denormalized 同成员串，score = 入流时刻；关注召回依此取作者近期内容。
         String authorId = authorIdOf(item);
         if (authorId != null) {
@@ -226,9 +202,9 @@ public class FeedTimelineStore {
         }
         LocalDate today = LocalDate.now();
         for (int d = 0; d < MERGE_BUCKETS; d++) {
-            String date = today.minusDays(d).format(DateTimeFormatter.BASIC_ISO_DATE);
+            String date = dateOf(today.minusDays(d));
             for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
-                String key = TL_PREFIX + pool + ":" + date;
+                String key = bucketKey(pool, date);
                 try {
                     Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
                             .reverseRangeByScoreWithScores(key, Double.NEGATIVE_INFINITY,
@@ -266,11 +242,6 @@ public class FeedTimelineStore {
         return recommendationPipeline.recommend(userId, page, limit, byPool);
     }
 
-
-    private String bucketOf(Instant t) {
-        return DateTimeFormatter.BASIC_ISO_DATE.format(t.atZone(ZoneId.systemDefault()).toLocalDate());
-    }
-
     /**
      * 从公域时间线移除某个<b>帖子</b>（用户删除、举报下架、申诉中暂不可见时调用）。
      *
@@ -301,7 +272,7 @@ public class FeedTimelineStore {
         if (timelineKey == null) {
             return;
         }
-        if (detach(timelineKey, IDX_PREFIX + timelineKey)) {
+        if (detach(timelineKey, indexKey(timelineKey))) {
             return;
         }
         scanRemoveStrict(timelineKey);
@@ -323,47 +294,7 @@ public class FeedTimelineStore {
      * @return true = 已晋级；false = 不在池中 / 已是更高池 / 参数非法（无需动作）
      */
     public boolean promote(String timelineKey, int targetPool) {
-        if (timelineKey == null || targetPool <= 0 || targetPool > MAX_POOL_LEVELS) {
-            return false;
-        }
-        try {
-            String idxKey = IDX_PREFIX + timelineKey;
-            String location = redisTemplate.opsForValue().get(idxKey);
-            if (location == null) {
-                return false;
-            }
-            int sep = location.indexOf(IDX_SEP);
-            if (sep <= 0) {
-                return false;
-            }
-            String bucketKey = location.substring(0, sep);
-            String member = location.substring(sep + IDX_SEP.length());
-            // bucketKey 形如 tf:feed:tl:{oldPool}:{date}
-            String rest = bucketKey.substring(TL_PREFIX.length());
-            int colon = rest.indexOf(':');
-            if (colon <= 0) {
-                return false;
-            }
-            int oldPool = Integer.parseInt(rest.substring(0, colon));
-            String date = rest.substring(colon + 1);
-            if (oldPool >= targetPool) {
-                return false;                       // 仅升不降，避免来回抖动
-            }
-            Double score = redisTemplate.opsForZSet().score(bucketKey, member);
-            if (score == null) {
-                return false;                       // 索引与 ZSET 不一致，放弃晋级
-            }
-            String newBucket = TL_PREFIX + targetPool + ":" + date;
-            redisTemplate.opsForZSet().remove(bucketKey, member);
-            redisTemplate.opsForZSet().add(newBucket, member, score);
-            redisTemplate.expire(newBucket, BUCKET_TTL);
-            // 反查索引改写到新桶位置：否则后续 remove 会 ZREM 旧桶（已空），下架失效
-            redisTemplate.opsForValue().set(idxKey, newBucket + IDX_SEP + member, BUCKET_TTL);
-            return true;
-        } catch (Exception e) {
-            log.warn("流量池晋级失败（不影响主流程）: timelineKey={}, targetPool={}, {}", timelineKey, targetPool, e.getMessage());
-            return false;
-        }
+        return relevel(timelineKey, targetPool, Direction.UP);
     }
 
     /**
@@ -382,44 +313,70 @@ public class FeedTimelineStore {
      * @return true = 已降级；false = 不在池中 / 已是更低池 / 参数非法（无需动作）
      */
     public boolean demote(String timelineKey, int targetPool) {
-        if (timelineKey == null || targetPool <= 0 || targetPool >= MAX_POOL_LEVELS) {
+        return relevel(timelineKey, targetPool, Direction.DOWN);
+    }
+
+    /** 搬池方向。晋级与降级只差这一点差异，其余逻辑必须共用（见 {@link #relevel}）。 */
+    private enum Direction {
+        UP, DOWN
+    }
+
+    /**
+     * 搬池的<b>唯一实现</b>：把某帖从所在桶搬到同一日期、不同池号的桶。
+     *
+     * <p><b>为什么合并</b>：此前 {@link #promote} 与 {@link #demote} 是两份逐行镜像的方法
+     * （连注释都对称），方向只体现在 {@code oldPool >= targetPool} 与 {@code <=} 一处。
+     * 改一边漏一边<b>不会有任何编译或测试信号</b>——搬池失败只表现为「内容没被放大 / 没被压下去」，
+     * 属于纯静默的软故障。收成一份后，方向只是入参。</p>
+     *
+     * <p><b>两条路径共用的不变量</b>：</p>
+     * <ol>
+     *   <li>score（入流时刻）不因搬池改变——变的只是曝光分层，排序语义不受影响；</li>
+     *   <li>反查索引必须同步改写到新桶，否则后续 {@link #remove} 会 ZREM 已空的旧桶，下架失效；</li>
+     *   <li>索引缺失或格式非法 → 放弃（无从定位，不猜）；{@code ZSCORE} 取不到 → 放弃（索引与
+     *       ZSET 已不一致，猜一个 score 会把内容写到错误的时序位置）。</li>
+     * </ol>
+     *
+     * <p>与合并前的一处微小差异：原 {@code demote} 对 {@code targetPool == MAX_POOL_LEVELS}
+     * 直接拒绝、不读索引；现交由方向判断覆盖，结论相同，只多一次 O(1) GET。</p>
+     */
+    private boolean relevel(String timelineKey, int targetPool, Direction direction) {
+        if (timelineKey == null || targetPool < 1 || targetPool > MAX_POOL_LEVELS) {
             return false;
         }
         try {
-            String idxKey = IDX_PREFIX + timelineKey;
-            String location = redisTemplate.opsForValue().get(idxKey);
-            if (location == null) {
+            String idxKey = indexKey(timelineKey);
+            IndexEntry entry = parseIndex(redisTemplate.opsForValue().get(idxKey));
+            if (entry == null) {
+                return false;                       // 未入池 / 索引值格式非法，无从搬起
+            }
+            int oldPool = poolOfBucket(entry.bucketKey());
+            String date = dateOfBucket(entry.bucketKey());
+            if (oldPool < 0 || date == null) {
+                // 桶 key 不是本类格式：不硬抠池号（抠出来的数字会指向一个真实存在的桶，
+                // 于是「挪错桶」被当成成功写下去）
                 return false;
             }
-            int sep = location.indexOf(IDX_SEP);
-            if (sep <= 0) {
-                return false;
+            boolean wrongDirection = direction == Direction.UP
+                    ? oldPool >= targetPool
+                    : oldPool <= targetPool;
+            if (wrongDirection) {
+                return false;                       // 只朝一个方向走，避免来回抖动
             }
-            String bucketKey = location.substring(0, sep);
-            String member = location.substring(sep + IDX_SEP.length());
-            String rest = bucketKey.substring(TL_PREFIX.length());
-            int colon = rest.indexOf(':');
-            if (colon <= 0) {
-                return false;
-            }
-            int oldPool = Integer.parseInt(rest.substring(0, colon));
-            String date = rest.substring(colon + 1);
-            if (oldPool <= targetPool) {
-                return false;                       // 仅降不升，避免来回抖动
-            }
-            Double score = redisTemplate.opsForZSet().score(bucketKey, member);
+            Double score = redisTemplate.opsForZSet().score(entry.bucketKey(), entry.member());
             if (score == null) {
-                return false;                       // 索引与 ZSET 不一致，放弃降级
+                return false;                       // 索引与 ZSET 不一致，放弃搬池
             }
-            String newBucket = TL_PREFIX + targetPool + ":" + date;
-            redisTemplate.opsForZSet().remove(bucketKey, member);
-            redisTemplate.opsForZSet().add(newBucket, member, score);
+            String newBucket = bucketKey(targetPool, date);
+            redisTemplate.opsForZSet().remove(entry.bucketKey(), entry.member());
+            redisTemplate.opsForZSet().add(newBucket, entry.member(), score);
             redisTemplate.expire(newBucket, BUCKET_TTL);
             // 反查索引改写到新桶位置：否则后续 remove 会 ZREM 旧桶（已空），下架失效
-            redisTemplate.opsForValue().set(idxKey, newBucket + IDX_SEP + member, BUCKET_TTL);
+            redisTemplate.opsForValue().set(idxKey, indexValue(newBucket, entry.member()), BUCKET_TTL);
             return true;
         } catch (Exception e) {
-            log.warn("流量池降级失败（不影响主流程）: timelineKey={}, targetPool={}, {}", timelineKey, targetPool, e.getMessage());
+            log.warn("流量池搬池失败（不影响主流程）: timelineKey={}, targetPool={}, direction={}, {}",
+                    timelineKey, targetPool, direction, e.getMessage());
             return false;
         }
     }
@@ -433,20 +390,12 @@ public class FeedTimelineStore {
             return 0;
         }
         try {
-            String location = redisTemplate.opsForValue().get(IDX_PREFIX + timelineKey);
-            if (location == null) {
+            IndexEntry entry = parseIndex(redisTemplate.opsForValue().get(indexKey(timelineKey)));
+            if (entry == null) {
                 return 0;
             }
-            int sep = location.indexOf(IDX_SEP);
-            if (sep <= 0) {
-                return 0;
-            }
-            String rest = location.substring(0, sep).substring(TL_PREFIX.length());
-            int colon = rest.indexOf(':');
-            if (colon <= 0) {
-                return 0;
-            }
-            return Integer.parseInt(rest.substring(0, colon));
+            int pool = poolOfBucket(entry.bucketKey());
+            return pool < 0 ? 0 : pool;         // -1（格式非法）与 0（不在池中）对调用方同义
         } catch (Exception e) {
             return 0;
         }
@@ -474,17 +423,11 @@ public class FeedTimelineStore {
             return null;
         }
         try {
-            String location = redisTemplate.opsForValue().get(IDX_PREFIX + timelineKey);
-            if (location == null) {
+            IndexEntry entry = parseIndex(redisTemplate.opsForValue().get(indexKey(timelineKey)));
+            if (entry == null) {
                 return null;
             }
-            int sep = location.indexOf(IDX_SEP);
-            if (sep <= 0) {
-                return null;
-            }
-            String bucketKey = location.substring(0, sep);
-            String member = location.substring(sep + IDX_SEP.length());
-            Double score = redisTemplate.opsForZSet().score(bucketKey, member);
+            Double score = redisTemplate.opsForZSet().score(entry.bucketKey(), entry.member());
             return score == null ? null : score.longValue();
         } catch (Exception e) {
             log.warn("读入流排序位失败（回填时跳过该条）: timelineKey={}, {}", timelineKey, e.getMessage());
@@ -498,28 +441,27 @@ public class FeedTimelineStore {
      * <p>{@code append} 内部复用它做「先摘旧位置」——此时传 {@code null} 只摘除、保留索引，
      * 随后的写入会覆盖为新位置。</p>
      *
+     * <p><b>P1-1 修正</b>：索引<b>存在但格式非法</b>时，原先仍返回 {@code true}（只删索引、不摘桶），
+     * 于是 {@link #removeStrict} 认为「已精确下架」而不再退回扫描 —— 内容实际还在桶里，
+     * 表现为「下架成功但内容仍可见」。现改为返回 {@code false}，让它退回尽力扫描。</p>
+     *
      * @param idxKeyToDelete 需要一并删除的索引 key；{@code null} 表示保留
-     * @return 是否命中索引（false 表示该内容没有索引，调用方可决定是否退回扫描）
+     * @return 是否命中<b>可用的</b>索引（false 表示索引缺失或格式非法，调用方应退回扫描）
      */
     private boolean detach(String timelineKey, String idxKeyToDelete) {
         if (timelineKey == null) {
             return false;
         }
-        String idxKey = IDX_PREFIX + timelineKey;
-        String location = redisTemplate.opsForValue().get(idxKey);
-        if (location == null) {
+        String idxKey = indexKey(timelineKey);
+        IndexEntry entry = parseIndex(redisTemplate.opsForValue().get(idxKey));
+        if (entry == null) {
             return false;
         }
-        int sep = location.indexOf(IDX_SEP);
-        if (sep > 0) {
-            String bucketKey = location.substring(0, sep);
-            String member = location.substring(sep + IDX_SEP.length());
-            redisTemplate.opsForZSet().remove(bucketKey, member);
-            // 同步摘除关注流作者索引（G6）：同成员串，避免已下架内容仍出现在关注流
-            String aid = authorIdFromKey(timelineKey);
-            if (aid != null) {
-                redisTemplate.opsForZSet().remove(AUTHOR_PREFIX + aid, member);
-            }
+        redisTemplate.opsForZSet().remove(entry.bucketKey(), entry.member());
+        // 同步摘除关注流作者索引（G6）：同成员串，避免已下架内容仍出现在关注流
+        String aid = authorIdFromKey(timelineKey);
+        if (aid != null) {
+            redisTemplate.opsForZSet().remove(AUTHOR_PREFIX + aid, entry.member());
         }
         if (idxKeyToDelete != null) {
             redisTemplate.delete(idxKeyToDelete);
@@ -537,9 +479,9 @@ public class FeedTimelineStore {
     private void scanRemoveStrict(String timelineKey) {
         LocalDate today = LocalDate.now();
         for (int d = 0; d < MERGE_BUCKETS; d++) {
-            String date = today.minusDays(d).format(DateTimeFormatter.BASIC_ISO_DATE);
+            String date = dateOf(today.minusDays(d));
             for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
-                String key = TL_PREFIX + pool + ":" + date;
+                String key = bucketKey(pool, date);
                 Set<String> jsons = redisTemplate.opsForZSet()
                         .reverseRangeByScore(key, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, 0, PER_BUCKET_CAP);
                 if (jsons == null) {

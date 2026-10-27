@@ -489,7 +489,7 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 | P0-2 `/internal/**` 服务间鉴权 | ✅ 已落地（#186） | 网关 + 引擎双端 `InternalTokenInterceptor` 校验 `X-Internal-Token`；值来自 `TURBOFEED_INTERNAL_TOKEN`，未配置即 fail-open 放行（克隆即跑），本地 yml 写死 `local-dev-internal-token` 开启校验。e2e 三态（无 / 错 / 正确 token）全绿 |
 | P0-3 Flyway schema 版本管理 | ✅ 已落地 | 仅版本化「单表」(SINGLE 登记的 5 张：sensitive_word/sensitive_whitelist/user_phone_router/outbox_event/review_task)；分片表(540 张)仍走 init-local.sql 模板。Spring Boot 3.4.x 无 spring-boot-starter-flyway(仅 4.x 起)，改用 BOM 托管 flyway-core(10.20.1)+flyway-mysql；默认关闭(TURBOFEED_FLYWAY_ENABLED)，直连物理库 turbo_feed_1 绕过 ShardingSphere。编译通过 + 直连 DB 只读 info 校验(V1 被发现、MySQL 方言加载) 全绿 |
 | P0-4 可观测性 | ✅ 已落地（metrics） | 两服务均引 `micrometer-registry-prometheus` 且暴露 `health,info,prometheus,metrics` 端点：gateway 补依赖 + 两服务补 `metrics` 端点（对齐 §3 P0-4 建议原文）；`/actuator/prometheus` 可被 Grafana 拉取。tracing（micrometer-tracing-bridge-otel + zipkin/OTLP）因需采集后端（zipkin/OTLP Collector），未擅自加依赖，列为阶段B 演进项 |
-| P0-1 自动化测试 | 🔧 进行中（2026-10-27） | ADR-001 已落（[`docs/adr/0001-testing-strategy.md`](../adr/0001-testing-strategy.md)）；靶心由 6 扩至 **10**，全仓 **56 个测试类 / 399 例**（tf-shared 38、tf-redis 5、tf-hotspot 8、tf-feed-engine 124、tf-counter 12、tf-gateway 212，skip 8 为需 Docker 的集成测），`mvn test` 全绿。原 6 靶心——①审核 CAS 状态机 `MediaReviewServiceTest`(4) ②时间线 append-remove-promote `FeedTimelineStoreTest`(4) ③outbox 中继 `OutboxRelayTest`(4) ④用户分片路由 `UserJdbcRepositoryRoutingTest`(Testcontainers 真 MySQL，@RequiresDocker 守卫) ⑤处罚写路径缓存失效契约 `PenaltyServiceTest`(10) ⑥信用写路径缓存失效契约 `AccountCreditServiceTest`(5，均为 P2-6 把 AccountStateCache 委托 tf-hotspot SDK 后的 `stateCache.invalidate` 契约回归护栏，覆盖 canWrite 封禁推导与三路信用写失效）。**新增 4 靶心（M1/M2 期间）**——⑦跨服务契约 JSON golden `SharedContractJsonTest`(13，锁字段漂移 + 版本协商三边界) ⑧worker-id 租约 `WorkerIdLeaseManagerTest`(15) + 装配互斥 `SnowflakeConfigTest`(4) ⑨审核配置键契约 `ReviewPropertiesBindingTest`(5) ⑩计数落库事务闭合 `PostCounterRepositoryH2Test`(6，含故障注入反证)。CI 门禁 `.github/workflows/ci.yml`(`mvn -B clean test`，ubuntu 自带 Docker) 已加；根 pom 显式带 surefire 3.2.5 + testcontainers-bom。**缺口**：集成测的「真 MySQL 跑通」需 CI/Docker 环境确认（本地沙箱无 Docker）；CI 尚无覆盖率门槛与静态检查（M3）；2.6 万行主体中大量路径仍无自动化覆盖，「覆盖率偏低」的定性未变，只是关键路径已布防 |
+| P0-1 自动化测试 | 🔧 进行中（2026-10-27） | ADR-001 已落（[`docs/adr/0001-testing-strategy.md`](../adr/0001-testing-strategy.md)）；靶心由 6 扩至 **10**，全仓 **57 个测试类 / 416 例**（tf-shared 38、tf-redis 5、tf-hotspot 8、tf-feed-engine 141、tf-counter 12、tf-gateway 212，skip 8 为需 Docker 的集成测），`mvn test` 全绿。原 6 靶心——①审核 CAS 状态机 `MediaReviewServiceTest`(4) ②时间线 append-remove-promote `FeedTimelineStoreTest`(4) ③outbox 中继 `OutboxRelayTest`(4) ④用户分片路由 `UserJdbcRepositoryRoutingTest`(Testcontainers 真 MySQL，@RequiresDocker 守卫) ⑤处罚写路径缓存失效契约 `PenaltyServiceTest`(10) ⑥信用写路径缓存失效契约 `AccountCreditServiceTest`(5，均为 P2-6 把 AccountStateCache 委托 tf-hotspot SDK 后的 `stateCache.invalidate` 契约回归护栏，覆盖 canWrite 封禁推导与三路信用写失效）。**新增 4 靶心（M1/M2 期间）**——⑦跨服务契约 JSON golden `SharedContractJsonTest`(13，锁字段漂移 + 版本协商三边界) ⑧worker-id 租约 `WorkerIdLeaseManagerTest`(15) + 装配互斥 `SnowflakeConfigTest`(4) ⑨审核配置键契约 `ReviewPropertiesBindingTest`(5) ⑩计数落库事务闭合 `PostCounterRepositoryH2Test`(6，含故障注入反证)。CI 门禁 `.github/workflows/ci.yml`(`mvn -B clean test`，ubuntu 自带 Docker) 已加；根 pom 显式带 surefire 3.2.5 + testcontainers-bom。**缺口**：集成测的「真 MySQL 跑通」需 CI/Docker 环境确认（本地沙箱无 Docker）；CI 尚无覆盖率门槛与静态检查（M3）；2.6 万行主体中大量路径仍无自动化覆盖，「覆盖率偏低」的定性未变，只是关键路径已布防 |
 | P0-5 服务发现 / 配置中心 | 🟡 部分（2026-10-19 第一批已落） | 服务发现(双向 opt-in)+Sentinel 规则 Nacos 数据源(opt-in) 已落：依赖 + `@LoadBalanced RestClient` + `service-name` 切换 + 本地规则让位；`mvn compile` 通过、默认配置(Nacos 全关)真启动零回归。worker-id 集中分配经评审回退 phase-2（雪花 env-var 硬失败已保不撞号，短期够用）。真链路(多实例注册/LB/故障摘除、Sentinel 规则热推)待有 Nacos 的环境确认 |
 | P1-2 tf-counter 计数服务 | ✅ 已落地（收敛底座）+ 🔧 分布式增强 | 新增独立部署单元 `tf-counter`：点赞/评论/分享「增量事件」→ 缓冲 → 定时批量落 `post_counter`（最终一致）；三级读缓存 Caffeine L1/Redis L2(opt-in)/DB L3；传输 HTTP 兜底 + RocketMQ 顺序键 `postId`(opt-in) 互斥。默认关闭零回归。→ **分布式增强（2026-10-19，编译+单测全绿、未 push）**：抽 `CounterBuffer` 接口（内存默认 / 共享 Redis 双实现）；`CounterFlushService` 批量 UPSERT + `batch_id` 去重（`counter_flush_dedup`）实现 flush 幂等；`StandaloneCounterFlushScheduler`（默认无锁）/ `ClusteredCounterFlushScheduler`（ShedLock 选主独占 drain，配对共享 Redis 缓冲，多副本不丢不重）；新增 H2 集成测试（`applyBatch` 同 batch_id 重放计数不变、不同 batch_id 各落、ShedLock JDBC 锁在 H2 可用）全绿。`mvn compile`+`mvn test` 通过；Redis 真链路（共享缓冲 drain + ShedLock 选主）需本机 Redis 起后才能 e2e。详见 ADR-003 §6 |
 | P1-3 容器化部署 | ✅ 已落地（#187） | 参数化 `Dockerfile`（多阶段，按 `build.args.MODULE` 选子模块）+ 全栈 `docker-compose.yml`（mysql/redis/minio/三服务，RocketMQ 收进 `mq` profile）+ `.env.example`；所有凭据经环境变量注入，`docker compose config` 通过 |
@@ -615,12 +615,47 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 只要三处文档都明说未实现，就没有误导风险。但**占位必须有到期日**——删除条件已写进模块文档
 （一年内仍无容量目标即删），避免占位本身变成永久技术债。
 
-**待办（M0~M6 之外）**：
+### 7.7 P1-1 时间线读模型：职责与格式收口（已落地，2026-10-27）
 
-1. 评审原始项剩余：P0-5 Nacos🔧（真链路待 Nacos 环境验证）、P1-1 `FeedTimelineStore` 拆分、
-   P1-5 前端工程化；P2 其余（A/B、向量库、HTTPS/CDN、API 版本前缀）为演进优化。
-2. 工程卫生：`.workbuddy/` 仍未跟踪，建议加入 `.gitignore`。
-3. M4 登记的三处观测缺口（DLQ 深度 / MQ traceId / counter traceId），均需外部环境或契约演进。
-4. `lease-enabled=true` 的真启动（需 Redis）。
+> 主题：`FeedTimelineStore` 这个「上帝类」**已经不再是大类**——历次重构（M1/3.5 巨类拆分、
+> A7 漏斗析出）已把它从 1330 行搬到 565 行，推荐编排整体迁入 `RecommendationPipeline`。
+> 所以 P1-1 剩下的不是「继续拆类」，而是**拆完之后留下的残留**：一份被复制六遍的格式定义，
+> 和两份逐行镜像的实现。
 
-（M3 之前的旧待办清单已并入上方 §7.3，此处不再重复。）
+**先纠正评审快照的口径**：§3 写「1330 行上帝类 / 承担 9 项职责」，那是 `0e1403f` 时的事实。
+现在 `FeedTimelineStore` 507 行、只做三件事——按池取候选、池内搬移、按反查索引定位；
+`allocateSlots` / `scoreOf` / 多样性重排 / 冷启动候选 / 审核键收集均已迁出。
+因此**不再按 §3 的分法继续切**（那会把已经收干净的边界重新切开），只清残留。
+
+| 残留问题 | 处理 |
+| --- | --- |
+| 反查索引值 `{bucketKey}\u0001{member}` 的拼装/解析在 **6 处**各写一遍（Store 的 promote / demote / currentPool / inflowScoreOf / detach + `RecommendationPipeline#memberOf`），且两组实现的边界判断相反（`sep <= 0` vs `sep < 0`） | ✅ 收敛为 `TimelineSupport.parseIndex` / `indexValue` / `indexKey`，6 处全部改调 |
+| 桶键 `tf:feed:tl:{pool}:{yyyyMMdd}` 的拼装在 **7 处**各写一遍（append / readPage / scanRemove / promote / demote / pipeline 冷启动收集 …） | ✅ 收敛为 `TimelineSupport.bucketKey(pool, date)` + `dateOf(...)`（`Instant` 与 `LocalDate` 两个重载） |
+| `FeedTimelineStore` 自己又声明了一份 `IDX_SEP`，把 `TimelineSupport.IDX_SEP` 的静态导入**遮蔽成死代码** | ✅ 删掉本类副本；`PER_BUCKET_CAP` / `BUCKET_TTL` 一并上移（它们约束的是桶格式，读写共用一份） |
+| `promote` / `demote` 是两份 38 行逐行镜像（连注释都对称），方向只差一个比较符 | ✅ 合并为 `relevel(key, targetPool, Direction)`，两个 public 方法只做转发；方向判断与不变量集中一处 |
+| `PlayabilityService` 自抄了一份 `authorIdFromKey`，靠注释里的「同源逻辑」维系一致 | ✅ 直接委托 `TimelineSupport.authorIdFromKey` |
+| `FeedTimelineStore` 仍留着 13 个早已不用的 Spring 客户端 / 模型 import + 7 个死静态导入（A7 迁走漏斗后的残留） | ✅ 清理 |
+
+**顺带修掉一个真 bug**：反查索引**存在但格式非法**时，`detach` 原先仍返回 `true`（只删索引、不摘桶），
+于是 `removeStrict` 认为「已精确下架」而不再退回扫描——内容还在桶里，表现为
+「下架成功但内容仍可见」。现返回 `false`，让它退回尽力扫描；由
+`FeedTimelineStoreTest#removeStrict_fallsBackToScan_whenIndexValueMalformed` 锁定。
+
+**为什么格式收敛比「拆类」更值得做**：拆类买到的是可读性，格式分叉的代价是**静默错误**。
+这里的分叉已经发生（两组实现判断相反），而且它不抛异常、不打错误日志，只表现为
+「某些内容下架不掉 / 晋级不生效」——排查时几乎不会怀疑到「拼串」，因为两边代码各自都自洽。
+
+**验证**：`mvn -o test` 全仓 **416 例**全绿（tf-feed-engine 141）。新增 `TimelineSupportTest` 10 例
+（格式契约 + 畸形输入）、`FeedTimelineStoreTest` +7 例（demote / 反向拒绝 / 非法桶键 / score 缺失 /
+下架回退扫描）。**未做**：`readPage` 里 `poolReadWeightEnabled=false` 的兜底合并分支未拆出
+（它绑定的是改造前的老语义，属独立议题，硬拆会让回滚路径变复杂）。
+
+### 7.8 M0~M6 之后的待办
+
+1. 评审原始项剩余：P0-5 Nacos🔧（真链路待 Nacos 环境验证）、P1-5 前端工程化；
+   P2 其余（A/B 实验、独立向量库、HTTPS/CDN、API 版本前缀）属演进优化。P1-1 见 §7.7。
+2. M4 登记的三处观测缺口（RocketMQ DLQ 深度 / MQ 消费侧 traceId / tf-counter 入站 traceId），
+   均需外部环境或契约版本演进。
+3. `lease-enabled=true` 的真启动（需 Redis）。
+
+（M3 之前的旧待办清单已并入 §7.3 与本节，不再重复；`.workbuddy/` 未跟踪的问题已随 M6 加入 `.gitignore` 解决。）

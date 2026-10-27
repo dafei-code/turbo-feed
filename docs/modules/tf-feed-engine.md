@@ -12,17 +12,24 @@
 
 所以本模块当前的真实职责是**「公域时间线的读写与推荐流缓存」**，而不是「推拉结合扇出」。
 
-## 2. 代码结构（5 个类）
+## 2. 代码结构
 
-```
-com.turbofeed.feedengine
-├── FeedEngineApplication          # 启动类
-└── timeline/
-    ├── FeedTimelineStore          # 时间线写/读存储（ZSET 分桶 + 反查索引）
-    ├── RecommendedFeedService     # 推荐流读取 + 短 TTL 旁路缓存
-    ├── FeedTimelineController     # 内部接口 /internal/feed/**（供网关调用）
-    └── FeedTimelineConsumer       # RocketMQ 顺序消息消费者（mq.enabled=true 时激活）
-```
+> **按职责分组，不逐一列举类名。** 本节原先写「5 个类」并列了 4 个，而实际已有 67 个——
+> 这种「枚举式目录树」必然腐坏（每加一个类就假一分），所以改成稳定的职责边界表；
+> 需要精确类表时以 `src/main/java` 为准。
+
+| 包 | 职责 | 关键类 |
+|---|---|---|
+| `timeline/` | 公域时间线读模型 + 推荐漏斗编排 | `FeedTimelineStore`（池 ZSET 与反查索引的读写门面）· `RecommendationPipeline`（漏斗编排：多路召回 → 粗排 → 精排 → 重排）· `TimelineSupport`（**桶键与反查索引格式的唯一真值** + 共享纯函数）· `RecommendedFeedService`（15s 旁路缓存）· `FeedTimelineController` / `FeedTimelineConsumer`（内部 HTTP 与 MQ 两个写入口）· `FeedPoolPromoter`（赛马晋级调度）· `DiversityRerankService` / `EcosystemRegulationService` / `ColdStartService` / `PlayabilityService` / `TimelineDedup`（策略与去重） |
+| `recall/` | 多路召回通道与向量基础设施 | `VectorRecallChannel` / `TagVectorRecallChannel`、`ItemEmbeddingSource` / `UserEmbeddingSource` 家族（hash / model / ann 三种模式）、`VectorIndexWriter`（HNSW） |
+| `ranking/` | 粗排与精排模型 | `PreRankFilter` / `LinearPreRankModel`、`RankingModel` 家族（`LinearWeightedRankingModel` / `MultiTargetRankingModel` / `DeepFmRankingModel`）、`SelectedRankingModel`（按 `modelType` 分发的 `@Primary`） |
+| `interest/` | 兴趣标签、会话序列、搜索运维 | `InterestService`、`SessionSequenceService`、`TagIndexService`、`TagScoreBackfillService` |
+| `client/` · `config/` · `interceptor/` · `logging/` · `trace/` · `contract/` · `social/` | 外部客户端 / 装配 / 内部令牌拦截 / 行为日志 / traceId / 跨服务契约 / 关注关系 | 见包内类名 |
+
+**一条硬约定**：桶键 `tf:feed:tl:{pool}:{yyyyMMdd}` 与反查索引值 `{bucketKey}\u0001{member}` 的
+拼装/解析**只允许出现在 `TimelineSupport`**（`bucketKey` / `indexValue` / `parseIndex` 等）。
+写路径、读路径、扫描路径各有 5+ 处需要它们，任一处自行拼装就会出现「写入与读取落到两套键」——
+而两边代码各自看都是对的，症状是「发布了但发现流没有」。
 
 ## 3. 数据结构（Redis）
 

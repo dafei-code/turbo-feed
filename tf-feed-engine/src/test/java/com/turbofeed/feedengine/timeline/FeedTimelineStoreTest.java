@@ -141,4 +141,84 @@ class FeedTimelineStoreTest {
         verify(zSet).remove(eq("tf:feed:author:123"), anyString());
         verify(redisTemplate).delete(idxKey);
     }
+
+    // ==================== P1-1：搬池（promote/demote 共用 relevel）与索引格式 ====================
+
+    @Test
+    void demote_movesFromHighPoolToLower_rewritesIndex() {
+        FeedTimelineStore store = store();
+        String idxKey = "tf:feed:idx:post/123/u1";
+        when(valueOps.get(idxKey)).thenReturn("tf:feed:tl:3:20261017\u0001<member>");
+        when(zSet.score(anyString(), anyString())).thenReturn(2000.0);
+
+        assertTrue(store.demote("post/123/u1", 1));
+
+        verify(zSet).remove(eq("tf:feed:tl:3:20261017"), anyString());
+        // score（入流时刻）不因搬池改变，只有池号变
+        verify(zSet).add(eq("tf:feed:tl:1:20261017"), anyString(), eq(2000.0));
+        // 索引必须改写到新桶：否则后续 remove 会 ZREM 已空的旧桶，下架失效
+        verify(valueOps).set(eq(idxKey), argThat(v -> v != null && v.startsWith("tf:feed:tl:1:20261017\u0001")),
+                any(Duration.class));
+    }
+
+    @Test
+    void demote_refusesUpwardMove() {
+        FeedTimelineStore store = store();
+        when(valueOps.get("tf:feed:idx:post/123/u1")).thenReturn("tf:feed:tl:1:20261017\u0001<member>");
+
+        // 当前 L1，要求降到 L3 属于"反向"：只降不升，避免来回抖动
+        assertFalse(store.demote("post/123/u1", 3));
+        verify(zSet, never()).add(anyString(), anyString(), anyDouble());
+    }
+
+    @Test
+    void promote_givesUpOnForeignBucketKey() {
+        FeedTimelineStore store = store();
+        // 桶 key 不是 tf:feed:tl:{pool}:{date} —— 不能硬抠池号（抠出来会挪进一个真实存在的错桶）
+        when(valueOps.get("tf:feed:idx:post/123/u1")).thenReturn("media/123/x.jpg\u0001<member>");
+
+        assertFalse(store.promote("post/123/u1", 3));
+        verify(zSet, never()).add(anyString(), anyString(), anyDouble());
+    }
+
+    @Test
+    void promote_givesUpWhenScoreMissing() {
+        FeedTimelineStore store = store();
+        when(valueOps.get("tf:feed:idx:post/123/u1")).thenReturn("tf:feed:tl:1:20261017\u0001<member>");
+        // 索引指向的成员已不在 ZSET（两者不一致）→ 不猜 score。
+        // 必须显式 stub null：Mockito 对 Double 包装类型返回 0.0，不 stub 就测不出这条分支。
+        when(zSet.score(anyString(), anyString())).thenReturn(null);
+
+        assertFalse(store.promote("post/123/u1", 3));
+        verify(zSet, never()).add(anyString(), anyString(), anyDouble());
+    }
+
+    @Test
+    void currentPool_readsPoolFromReverseIndex() {
+        FeedTimelineStore store = store();
+        when(valueOps.get("tf:feed:idx:post/123/u1")).thenReturn("tf:feed:tl:2:20261017\u0001<member>");
+
+        assertEquals(2, store.currentPool("post/123/u1"));
+    }
+
+    @Test
+    void currentPool_malformedIndex_returnsZero() {
+        FeedTimelineStore store = store();
+        when(valueOps.get("tf:feed:idx:post/123/u1")).thenReturn("没有分隔符也不像桶键");
+
+        assertEquals(0, store.currentPool("post/123/u1"));
+    }
+
+    @Test
+    void removeStrict_fallsBackToScan_whenIndexValueMalformed() {
+        FeedTimelineStore store = store();
+        // 索引存在但格式非法：原先 detach 仍返回 true → 只删索引、不摘桶 → 调用方以为已下架，
+        // 内容却还在桶里（"下架成功但内容仍可见"）。修正后必须退回尽力扫描。
+        when(valueOps.get(anyString())).thenReturn("坏掉的值");
+
+        store.removeStrict("post/123/u1");
+
+        verify(zSet, atLeastOnce()).reverseRangeByScore(anyString(), anyDouble(), anyDouble(),
+                anyLong(), anyLong());
+    }
 }

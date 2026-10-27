@@ -26,8 +26,6 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -39,13 +37,15 @@ import java.util.Map;
 import java.util.Set;
 
 import static com.turbofeed.feedengine.timeline.TimelineSupport.AUTHOR_PREFIX;
-import static com.turbofeed.feedengine.timeline.TimelineSupport.IDX_PREFIX;
-import static com.turbofeed.feedengine.timeline.TimelineSupport.IDX_SEP;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.IndexEntry;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.MAX_POOL_LEVELS;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.MERGE_BUCKETS;
-import static com.turbofeed.feedengine.timeline.TimelineSupport.TL_PREFIX;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.authorIdFromKey;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.authorIdOf;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.bucketKey;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.dateOf;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.indexKey;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.parseIndex;
 // 漏斗编排所需的共享常量与纯函数（与写路径共用一份真值，见 TimelineSupport）
 import static com.turbofeed.feedengine.timeline.TimelineSupport.FOLLOW_PER_AUTHOR;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.FOLLOW_SCAN_LIMIT;
@@ -784,8 +784,8 @@ public class RecommendationPipeline {
             int pools = Math.min(maxPool, MAX_POOL_LEVELS);
             for (int pool = 1; pool <= pools; pool++) {
                 for (int d = 0; d < MERGE_BUCKETS; d++) {
-                    String date = today.minusDays(d).format(DateTimeFormatter.BASIC_ISO_DATE);
-                    String key = TL_PREFIX + pool + ":" + date;
+                    String date = dateOf(today.minusDays(d));
+                    String key = bucketKey(pool, date);
                     Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
                             .reverseRangeByScoreWithScores(key, minScore, Double.POSITIVE_INFINITY, 0, budget * 4);
                     if (tuples == null) {
@@ -832,15 +832,11 @@ public class RecommendationPipeline {
             return null;
         }
         try {
-            String location = redisTemplate.opsForValue().get(IDX_PREFIX + timelineKey);
-            if (location == null) {
+            IndexEntry entry = parseIndex(redisTemplate.opsForValue().get(indexKey(timelineKey)));
+            if (entry == null) {
                 return null;
             }
-            int sep = location.indexOf(IDX_SEP);
-            if (sep < 0) {
-                return null;
-            }
-            return parseMember(location.substring(sep + IDX_SEP.length()));
+            return parseMember(entry.member());
         } catch (Exception e) {
             log.warn("热点召回还原条目失败（跳过该条）: timelineKey={}, {}", timelineKey, e.getMessage());
             return null;

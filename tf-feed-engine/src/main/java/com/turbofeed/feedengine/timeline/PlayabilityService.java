@@ -84,18 +84,13 @@ public class PlayabilityService {
 
     /**
      * 从帖身份解析作者 userId：postId 形如 {@code post/{userId}/{uuid}}（历史单图回退 mediaId
-     * {@code media/{userId}/{uuid}.ext}），取首段斜杠后的 userId。与 {@code FeedTimelineStore#authorIdFromKey}
-     * 同一约定、同源逻辑；解析失败返回 {@code null}（fail-open：不剔除、不降权）。
+     * {@code media/{userId}/{uuid}.ext}），取首段斜杠后的 userId。
+     *
+     * <p><b>P1-1</b>：本方法原是本类自己抄的一份实现（注释也写着"同源逻辑"），
+     * 而"同源"只靠注释保证——约定一变（比如以后 postId 加一段路径）就会一边改一边漏，
+     * 表现为「部分内容对作者健康分失明」这种不报错的软故障。现直接委托 {@link TimelineSupport}。</p>
      */
     private static String authorIdFromKey(String pk) {
-        if (pk == null || pk.isEmpty()) {
-            return null;
-        }
-        int first = pk.indexOf('/');
-        if (first < 0) {
-            return null;
-        }
-        int second = pk.indexOf('/', first + 1);
-        return second > 0 ? pk.substring(first + 1, second) : null;
+        return TimelineSupport.authorIdFromKey(pk);
     }
 }

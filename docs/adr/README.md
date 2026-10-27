@@ -64,6 +64,7 @@
 | [0005](0005-contract-versioning.md) | 跨服务契约版本协商 | 已采纳 | 2026-10-26 | `schemaVersion` + 写路径拒绝留痕 / 读路径跳过该条，绝不硬解 |
 | [0006](0006-worker-id-lease.md) | 雪花 worker-id 自租约 | 已采纳 | 2026-10-27 | Redis `SET NX EX` 抢占 + 续约保活 + 失效即 fail-closed 拉闸 |
 | [0007](0007-observability.md) | 可观测性口径：指标与 traceId | 已采纳 | 2026-10-27 | 告警用失败率不用裸计数；traceId 纯逻辑共享、servlet 管道各自一份 |
+| [0008](0008-timeline-layering.md) | 公域时间线的分层边界与格式单一真值 | 已采纳 | 2026-10-27 | 桶键/反查索引只在 `TimelineSupport` 拼装解析；非法格式一律「不猜」；不为行数拆类 |
 
 ## 状态语义
 
