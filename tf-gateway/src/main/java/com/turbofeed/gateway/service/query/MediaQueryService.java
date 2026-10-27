@@ -3,6 +3,7 @@ package com.turbofeed.gateway.service.query;
 import com.turbofeed.shared.redis.RedisKeys;
 
 import com.turbofeed.gateway.client.FeedEngineClient;
+import com.turbofeed.gateway.client.FeedRecommendedPage;
 import com.turbofeed.gateway.config.FeedEngineProperties;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.service.feed.InteractionEventService;
@@ -10,6 +11,7 @@ import com.turbofeed.gateway.service.like.MediaLikeService;
 import com.turbofeed.gateway.service.review.MediaStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -53,6 +55,10 @@ public class MediaQueryService {
     private final InteractionEventService interactionEventService;
     private final MediaLikeService mediaLikeService;
 
+    /** keyset 游标分页开关（P3-PR07）：默认开（true）走 keyset 游标分页；关则回退页码分页，兼容老调用方与回滚。 */
+    @Value("${turbofeed.feed.cursor-paging-enabled:true}")
+    private boolean cursorPagingEnabled;
+
     /** 引擎共享实时分前缀（{@code tf:post:stat:{timelineKey}} Hash；与引擎 PostStatService 同命名空间，复用现有 Redis）。 */
     private static final String POST_STAT_PREFIX = RedisKeys.POST_STAT;
 
@@ -78,38 +84,58 @@ public class MediaQueryService {
     /**
      * 公域推荐流：转发到 tf-feed-engine 的时间线读模型（O(log n)/页，零扫分片库）。
      *
-     * <p>本方法只做三件事：调用引擎、判定降级、返回网关视图。推荐流的旁路缓存（TTL 15s）
-     * 与时间线 ZSET 同域放在引擎侧，网关不再压第二层缓存。</p>
+     * <p>本方法只做四件事：调用引擎、判定降级、注入抖音式计数、返回分页视图。推荐流的旁路缓存
+     * （TTL 15s）与时间线 ZSET 同域放在引擎侧，网关不再压第二层缓存。</p>
      *
-     * <p><b>注意区分两种"空"</b>：引擎正常但发现流确实没有内容（返回空列表）与引擎不可用
-     * 是两回事——前者是正常业务结果，后者才触发降级。这样引擎短暂抖动不会把
-     * "假空"写进任何缓存层。</p>
+     * <p><b>keyset 游标分页（P3-PR07）</b>：{@code cursor} 非空且开关
+     * {@code turbofeed.feed.cursor-paging-enabled=true}（默认）时走 keyset 游标分页——向引擎传
+     * {@code cursor}{@code size}、不再传 {@code page}，游标由引擎基于入流 score 计算并以不透明
+     * token 返回（前端只读 {@code nextCursor}）。{@code cursor} 为空或开关关闭时回退页码分页
+     * （传 {@code page}{@code size}），行为与改造前完全一致，保证老调用方兼容。</p>
      *
-     * @param page   页码（从 0 开始）
+     * <p><b>注意区分两种"空"</b>：引擎正常但发现流确实没有内容（返回空页）与引擎不可用
+     * 是两回事——前者是正常业务结果，后者才触发降级。这样引擎短暂抖动不会把"假空"写进任何缓存层。</p>
+     *
+     * @param page   页码（从 0 开始；cursor 模式由调用方传 0）
      * @param size   单页条数（≤0 兜底 20）
      * @param userId 个性化用户（已登录态；匿名为 {@code null}），透传给引擎做兴趣召回/排序
+     * @param cursor 续拉游标（空 = 首页，走页码分页）
+     * @return 分页视图 {@link FeedRecommendedPage}（items / nextCursor / hasMore）
      */
-    public List<MediaItem> listRecommended(int page, int size, String userId) {
+    public FeedRecommendedPage listRecommended(int page, int size, String userId, String cursor) {
         int limit = size <= 0 ? 20 : size;
-        Optional<List<MediaItem>> fromEngine = feedEngineClient.recommended(page, limit, userId);
+        boolean useCursor = cursorPagingEnabled && cursor != null && !cursor.isBlank();
+        // 游标模式把 cursor 透传给引擎、且不传 page；页码模式传 page、cursor 置空（引擎按 cursor==null 走页码分支）。
+        Optional<FeedRecommendedPage> fromEngine = feedEngineClient.recommended(page, limit, userId, useCursor ? cursor : null);
         if (fromEngine.isPresent()) {
-            List<MediaItem> items = fromEngine.get();
+            FeedRecommendedPage pageView = fromEngine.get();
             // 抖音式卡片计数注入：点赞数（网关 Redis Set 基数，去重权威值）/ 已赞态 /
             // 评论数（引擎共享实时分 comments 字段，客户端 COMMENT 行为事件实时累加）。
-            List<MediaItem> enriched = enrichCounts(items, userId);
+            List<MediaItem> enriched = enrichCounts(pageView.items(), userId);
             emitImpressions(userId, enriched, page);
-            return enriched;
+            return new FeedRecommendedPage(enriched, pageView.nextCursor(), pageView.hasMore());
         }
+        // 引擎不可用 → 降级（保全接口形态，绝不跨分片广播）
+        return degrade(page, limit, userId);
+    }
+
+    /**
+     * 引擎不可用时降级（接口形态不变，仍返回 {@link FeedRecommendedPage}）。
+     *
+     * <p>默认 {@code EMPTY} 返回空页（拒绝跨分片广播）；{@code LOCAL_SCAN} 为演示口径，
+     * 等价于拆分前的行为——带回源跨分片广播，生产禁用。</p>
+     */
+    private FeedRecommendedPage degrade(int page, int limit, String userId) {
         if (feedProperties.getDegradedMode() == FeedEngineProperties.DegradedMode.LOCAL_SCAN) {
-            // 演示口径：等价于拆分前的行为——带回源跨分片广播，生产禁用
             long offset = (long) Math.max(page, 0) * limit;
             log.warn("Feed 引擎不可用，降级回源分片库广播查询（degraded-mode=local-scan，仅限本地/演示）: page={}, size={}",
                     page, limit);
-            return mediaRepository.listApprovedGlobal(limit, offset);
+            List<MediaItem> items = enrichCounts(mediaRepository.listApprovedGlobal(limit, offset), userId);
+            return new FeedRecommendedPage(items, "", false);
         }
         log.warn("Feed 引擎不可用，降级返回空列表（degraded-mode=empty，拒绝跨分片广播）: page={}, size={}",
                 page, limit);
-        return List.of();
+        return new FeedRecommendedPage(List.of(), "", false);
     }
 
     /**

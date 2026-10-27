@@ -1,8 +1,8 @@
 package com.turbofeed.gateway.controller;
 
 import com.turbofeed.gateway.client.FeedEngineClient;
+import com.turbofeed.gateway.client.FeedRecommendedPage;
 import com.turbofeed.gateway.security.UserContextHolder;
-import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.query.MediaQueryService;
 import com.turbofeed.gateway.web.ApiVersion;
 import com.turbofeed.shared.model.PlayableView;
@@ -46,23 +46,33 @@ public class FeedController {
     private final FeedEngineClient feedEngineClient;
 
     /**
-     * 推荐流（按入流时间倒序返回全平台 APPROVED 内容，分页）。
+     * 推荐流（按入流时间倒序返回全平台 APPROVED 内容，keyset 游标分页）。
      *
      * <p>公域 feed 默认允许未登录访问（抖音「推荐」页同样未登录可见），故不强制取用户身份；
      * 但<b>已登录用户</b>会把自己的 userId 透传给引擎做兴趣召回/排序（个性化）。匿名访问
      * （{@code UserContextHolder.get() == null}）按冷启动口径返回纯「入流时刻 + 完播率」排序。</p>
      *
-     * @param page 页码（从 0 开始，默认 0）
-     * @param size 单页条数（默认 20，≤0 兜底 20）
-     * @return 推荐内容列表（仅 APPROVED），空则无更多内容或引擎不可用（降级）
+     * <p><b>keyset 游标分页（P3-PR07）</b>：续拉时前端带 {@code cursor}（上一页返回的
+     * {@code nextCursor}），不再用 {@code page}——游标锚定入流 score，翻页严格单调前进、跨页不重复。
+     * {@code cursor} 为空则走 {@code page} 页码分页（兼容老调用方）。响应统一为
+     * {@link FeedRecommendedPage}（items / nextCursor / hasMore），与评论 {@code CommentPage} 对齐。</p>
+     *
+     * @param page   页码（从 0 开始，默认 0；cursor 模式由本方法统一传 0，引擎忽略）
+     * @param size   单页条数（默认 20，≤0 兜底 20）
+     * @param cursor 续拉游标（空 = 首页，走页码分页）
+     * @return 分页视图（items / nextCursor / hasMore），空则无更多内容或引擎不可用（降级）
      */
     @GetMapping("/recommended")
-    public Result<List<MediaItem>> recommended(
+    public Result<FeedRecommendedPage> recommended(
             @RequestParam(value = "page", defaultValue = "0") int page,
-            @RequestParam(value = "size", defaultValue = "20") int size) {
+            @RequestParam(value = "size", defaultValue = "20") int size,
+            @RequestParam(value = "cursor", defaultValue = "") String cursor) {
         // 匿名访问返回 null（不抛）；已登录则取 userId 做个性化。
         String userId = UserContextHolder.get() == null ? null : UserContextHolder.get().userId();
-        return Result.ok(mediaQueryService.listRecommended(page, size, userId));
+        boolean hasCursor = cursor != null && !cursor.isBlank();
+        // 游标模式：page 对引擎无意义（游标已锚定位置），统一传 0，避免误用；
+        // 页码模式传真实 page。listRecommended 内部再按开关决定是否启用游标。
+        return Result.ok(mediaQueryService.listRecommended(hasCursor ? 0 : page, size, userId, cursor));
     }
 
     /**

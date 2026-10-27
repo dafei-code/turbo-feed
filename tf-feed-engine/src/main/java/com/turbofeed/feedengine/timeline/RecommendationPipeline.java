@@ -11,6 +11,8 @@ import com.turbofeed.feedengine.ranking.RankingFeatures;
 import com.turbofeed.feedengine.ranking.RankingModel;
 import com.turbofeed.feedengine.ranking.PreRankCandidate;
 import com.turbofeed.feedengine.ranking.PreRankContext;
+import com.turbofeed.feedengine.ranking.FeedFilterChain;
+import com.turbofeed.feedengine.ranking.FeedFilterContext;
 import com.turbofeed.feedengine.ranking.PreRankFilter;
 import com.turbofeed.feedengine.ranking.RealtimeFeatureService;
 import com.turbofeed.feedengine.ranking.UserRealtimeProfile;
@@ -207,6 +209,18 @@ public class RecommendationPipeline {
     private final FollowService followService;
     /** 生态调控层（G9：抖音式「生态调控」整页全局占比配额，与 G8 滑窗重排互补）。 */
     private final EcosystemRegulationService ecosystemRegulationService;
+    /**
+     * 推荐过滤规则链（P2-PR06 形式化）：把"审核拦截 / 整页去重"从各召回插入点的内联 {@code if}
+     * 收敛为可组合、可单测的规则。候选需通过链内全部规则才入流。开关见 {@link #filterChainEnabled}。
+     */
+    private final FeedFilterChain feedFilterChain;
+
+    /**
+     * 推荐过滤规则链开关（默认开启新链）。关闭时 {@link #passFilters} 回退到与旧内联完全等价的判定，
+     * 作为一键回滚保险——行为零变更。
+     */
+    @Value("${turbofeed.feed.filter-chain-enabled:true}")
+    private boolean filterChainEnabled;
 
     /**
      * 把一批池候选编排成推荐流的一页（漏斗全链路）。
@@ -222,7 +236,8 @@ public class RecommendationPipeline {
      * @return 本页内容；无内容时为空列表（不是 {@code null}）
      */
     public List<FeedItemView> recommend(String userId, int page, int limit,
-                                        Map<Integer, List<ZSetOperations.TypedTuple<String>>> byPool) {
+                                        Map<Integer, List<ZSetOperations.TypedTuple<String>>> byPool,
+                                        FeedCursor cursor) {
 
         // 一次性取用户兴趣画像（TopN 正向标签→权重）；无画像/匿名→空 Map，走冷启动排序。
         // 长期层（定"你是什么样的人"）用于 interestMatch；短期层（定"你现在想要什么"）
@@ -254,7 +269,7 @@ public class RecommendationPipeline {
         // 还原成完整条目。它是流量池之外的<b>第二路召回</b>，单独占 hot-recall-ratio 的槽位，
         // 流量池只参与剩下的 (limit - hotCount) 个槽位分配，保证单页总量始终不超 limit。
         // ==================================================================
-        int hotSlots = hotRecallRatio > 0d
+        int hotSlots = (hotRecallRatio > 0d && cursor == null)
                 ? (int) Math.floor(limit * Math.min(hotRecallRatio, 1.0d))
                 : 0;
         List<FeedItemView> hotItems = new ArrayList<>();
@@ -280,7 +295,7 @@ public class RecommendationPipeline {
         // 重复问题交给下面流量池解析时按 interestKeys 去重解决——谁先占位谁算，
         // 最终单页不出现重复条目，且个性化位优先。
         // ==================================================================
-        int interestSlots = (userId != null && interestRecallRatio > 0d && !interest.isEmpty())
+        int interestSlots = (userId != null && interestRecallRatio > 0d && !interest.isEmpty() && cursor == null)
                 ? (int) Math.floor(limit * Math.min(interestRecallRatio, 1.0d))
                 : 0;
         List<ScoredItem> interestPart = new ArrayList<>();
@@ -321,6 +336,11 @@ public class RecommendationPipeline {
             for (ZSetOperations.TypedTuple<String> t : byPool.get(pool)) {
                 FeedItemView it = parseMember(t == null ? null : t.getValue());
                 if (it == null) {
+                    continue;
+                }
+                // keyset 游标：跳过游标所指项及之后（翻页严格单调、跨页不重复）
+                if (cursor != null && cursor.excludes(
+                        t != null && t.getScore() != null ? t.getScore() : 0d, it.timelineKey())) {
                     continue;
                 }
                 // 同页去重：已在热点槽位 / 兴趣召回位露出的内容不再占流量池槽位——
@@ -402,7 +422,7 @@ public class RecommendationPipeline {
         // 向量召回门控：userId 非空 + 配比>0 即开。不再要求兴趣画像非空——
         // model 模式下用户向量来自 KV/共现训练（未必走 InterestService），无画像时通道内部 fail-open 返回空，
         // 不影响其余召回路。hash 模式无画像时 likewise 返回空，行为不变（零回归）。
-        int vectorSlots = (userId != null && vectorRecallRatio > 0d)
+        int vectorSlots = (userId != null && vectorRecallRatio > 0d && cursor == null)
                 ? (int) Math.floor(limit * Math.min(vectorRecallRatio, 1.0d))
                 : 0;
         if (vectorSlots > 0) {
@@ -446,7 +466,7 @@ public class RecommendationPipeline {
         // 关注流召回仅在第 0 页注入（page==0）：关注作者是"社交分发强信号"，应置顶于发现流首屏；
         // 若每页都重算并重钉，同一关注作者内容会在翻页时反复刷屏（整页去重前曾导致每页必含、翻页永不枯竭）。
         // 深页中该作者内容仍可由流量池自然浮现，不会丢失曝光。
-        int followSlots = (userId != null && page == 0 && followRecallRatio > 0d && !followeeAuthors.isEmpty())
+        int followSlots = (userId != null && page == 0 && cursor == null && followRecallRatio > 0d && !followeeAuthors.isEmpty())
                 ? (int) Math.floor(limit * Math.min(followRecallRatio, 1.0d))
                 : 0;
         List<ScoredItem> followPart = new ArrayList<>();
@@ -457,7 +477,7 @@ public class RecommendationPipeline {
                 if (followPart.size() >= followSlots) {
                     break;
                 }
-                for (FeedItemView it : authorRecentItems(aid, FOLLOW_PER_AUTHOR)) {
+                for (FeedItemView it : authorRecentItems(aid, FOLLOW_PER_AUTHOR, cursor)) {
                     if (followPart.size() >= followSlots) {
                         break;
                     }
@@ -539,6 +559,8 @@ public class RecommendationPipeline {
             blockedPosts = reviewSignalClient.blockedContentKeys(candidatePosts);
             blockedAuthors = reviewSignalClient.blockedAuthorIds(candidateAuthors);
         }
+        // P2-PR06：构造过滤链上下文（审核拦截集 + 整页去重），一次 recommend 内共享。
+        FeedFilterContext filterCtx = new FeedFilterContext(blockedPosts, blockedAuthors, dedup);
 
         // 流量池部分：统一走一次上下文感知重排（G8：在整页范围内强化作者去重 + 标签多样性），再入流。
         // G9 生态调控改到整页组装完成后做全局封顶（见下方 return 前），与「整页全局占比配额」语义一致。
@@ -547,15 +569,18 @@ public class RecommendationPipeline {
         // ===== 冷启动探索池（G7：EE 探索利用）=====
         // 给新内容 / 低曝光内容固定曝光配额，避免「分数低就永远刷不到」的饿死。
         // 取候选失败 / 关闭 → 空集，不注入（fail-open 不阻断浏览）。
+        Instant coldThreshold = (cursor != null)
+                ? Instant.ofEpochMilli((long) Math.floor(cursor.score()))
+                : coldStartService.coldThreshold(Instant.now());
         int coldBudget = coldStartService.exploreBudget(limit);
         List<FeedItemView> coldPart = coldBudget > 0
-                ? collectColdStartCandidates(coldBudget, coldStartService.coldThreshold(Instant.now()), coldStartService.maxPool())
+                ? collectColdStartCandidates(coldBudget, coldThreshold, coldStartService.maxPool())
                 : List.of();
 
         // 热点槽位<b>固定钉在最前</b>（先过召回过滤）：它是召回策略刻意给的探索位，不参与后续打散，
         // 否则"热门内容靠前"的策略语义会被重排层抹掉。
         for (FeedItemView it : hotItems) {
-            if (isModerationBlocked(it, blockedPosts, blockedAuthors) || !dedup.accept(it)) {
+            if (!passFilters(it, filterCtx)) {
                 continue;
             }
             result.add(it);
@@ -563,7 +588,7 @@ public class RecommendationPipeline {
         // 关注流位紧随热门之后（同为强信号位）：热点是"全站探索"、关注是"社交分发"，都先于兴趣/向量/流量池。
         // 单列于召回层、不参与后续打散——再交给重排层会把"关注优先"的语义抹掉。
         for (ScoredItem s : followPart) {
-            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !dedup.accept(s.item())) {
+            if (!passFilters(s.item(), filterCtx)) {
                 continue;
             }
             result.add(s.item());
@@ -571,21 +596,21 @@ public class RecommendationPipeline {
         // 兴趣召回位紧随热点之后：热点是"全站探索"，兴趣是"个性化兑现"，都先于流量池的通用排序。
         // 不参与后续打散——召回层已按多标签轮转保证覆盖，再交给打散层重排会抹掉"兴趣优先"的语义。
         for (ScoredItem s : interestPart) {
-            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !dedup.accept(s.item())) {
+            if (!passFilters(s.item(), filterCtx)) {
                 continue;
             }
             result.add(s.item());
         }
         // 向量召回位紧随兴趣之后（同为个性化位）：热点=全站探索、兴趣/向量=个性化兑现，都先于流量池。
         for (ScoredItem s : vectorPart) {
-            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !dedup.accept(s.item())) {
+            if (!passFilters(s.item(), filterCtx)) {
                 continue;
             }
             result.add(s.item());
         }
         // 流量池部分（已打散）入流。
         for (ScoredItem s : poolPart) {
-            if (isModerationBlocked(s.item(), blockedPosts, blockedAuthors) || !dedup.accept(s.item())) {
+            if (!passFilters(s.item(), filterCtx)) {
                 continue;
             }
             result.add(s.item());
@@ -595,8 +620,7 @@ public class RecommendationPipeline {
         if (!coldPart.isEmpty()) {
             for (FeedItemView it : coldPart) {
                 // 关注作者内容不在冷启动位重复刷（跨页去重）：只在首屏关注位曝光一次。
-                if (isModerationBlocked(it, blockedPosts, blockedAuthors) || followeeAuthors.contains(authorIdOf(it))
-                        || !dedup.accept(it)) {
+                if (!passFilters(it, filterCtx) || followeeAuthors.contains(authorIdOf(it))) {
                     continue;
                 }
                 result.add(it);
@@ -606,6 +630,23 @@ public class RecommendationPipeline {
         // 防单一作者/话题垄断整页；保序裁低位超额尾部，fail-open 回退原序（整页范围生效，含冷启动注入位）。
         result = ecosystemRegulationService.regulate(result, limit);
         return result;
+    }
+
+    /**
+     * 候选是否通过推荐过滤（P2-PR06 规则链）。
+     *
+     * <p>开关 {@code turbofeed.feed.filter-chain-enabled}（{@link #filterChainEnabled}）默认开启新链：
+     * 候选需通过 {@link FeedFilterChain} 内全部规则（审核拦截 + 整页去重）才放行。
+     * 关闭时回退到与旧内联完全等价的内联判定，作为一键回滚保险——行为零变更。</p>
+     *
+     * <p>短路语义：被审核拦截的内容不占去重名额（与旧 {@code isModerationBlocked || !dedup.accept}
+     * 短路一致）；开启新链时由 {@link ModerationBlockRule} 的 {@code @Order(1)} 保证同序。</p>
+     */
+    private boolean passFilters(FeedItemView item, FeedFilterContext ctx) {
+        if (filterChainEnabled) {
+            return feedFilterChain.allow(item, ctx);
+        }
+        return !isModerationBlocked(item, ctx.blockedPosts(), ctx.blockedAuthors()) && ctx.dedup().accept(item);
     }
 
     /** 池内重排用的"内容 + 入流时刻(score)"持有体（package-private 以便 {@link DiversityRerankService} 复用）。 */
@@ -729,14 +770,15 @@ public class RecommendationPipeline {
      * @param authorId 作者 userId（来自 tf:follow 社交图）
      * @param cap      最多返回条数
      */
-    private List<FeedItemView> authorRecentItems(String authorId, int cap) {
+    private List<FeedItemView> authorRecentItems(String authorId, int cap, FeedCursor cursor) {
         if (authorId == null || authorId.isEmpty() || cap <= 0) {
             return List.of();
         }
         try {
             Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
                     .reverseRangeByScoreWithScores(AUTHOR_PREFIX + authorId,
-                            Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, 0, cap);
+                            Double.NEGATIVE_INFINITY,
+                            (cursor == null) ? Double.POSITIVE_INFINITY : cursor.score(), 0, cap);
             if (tuples == null) {
                 return List.of();
             }

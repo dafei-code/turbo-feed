@@ -62,6 +62,8 @@ public class FeedEngineClient {
     private static final String PATH_BEHAVIOR = "/internal/feed/behavior";
     private static final String PATH_PLAYABLE = "/internal/feed/playable";
     private static final String PATH_INTEREST_SEARCH = "/internal/feed/interest/search";
+    private static final String PATH_DLQ_LIST = "/internal/feed/timeline/dlq";
+    private static final String PATH_DLQ_REPLAY = "/internal/feed/timeline/dlq/replay";
 
     private final FeedEngineProperties properties;
     private final ObjectMapper objectMapper;
@@ -123,23 +125,37 @@ public class FeedEngineClient {
     }
 
     /**
-     * 读取公域推荐流。
+     * 读取公域推荐流（keyset 游标分页）。
      *
-     * @param userId 个性化用户（已登录态；匿名为 {@code null}）。传给引擎做兴趣召回/排序，
-     *               {@code null} 时引擎退化为纯「入流时刻 + 完播率」排序（冷启动口径）。
-     * @return {@code Optional.of(list)} = 引擎正常响应（list 可能为空即"没有更多内容"）；
-     *         {@link Optional#empty()} = 引擎不可用（网络异常 / 非 2xx / 业务失败码），
+     * <p>返回 {@link FeedRecommendedPage}：当前页内容 + 续拉游标 {@code nextCursor} + {@code hasMore}。
+     * {@code cursor} 非空时走游标分页（向引擎传 {@code cursor} 参数、不再传 {@code page}）；
+     * 为空时走页码分页（传 {@code page} + {@code size}），行为与改造前一致。</p>
+     *
+     * @param page   页码（cursor 为空时生效，从 0 起）
+     * @param size   单页条数（≤0 兜底 20）
+     * @param userId 个性化用户（已登录态；匿名为 {@code null}）
+     * @param cursor 续拉游标（空 = 首页，走页码分页）
+     * @return {@code Optional.of(page)} = 引擎正常响应；{@link Optional#empty()} = 引擎不可用，
      *         调用方据此决定降级
      */
-    public Optional<List<MediaItem>> recommended(int page, int size, String userId) {
+    public Optional<FeedRecommendedPage> recommended(int page, int size, String userId, String cursor) {
         int limit = size <= 0 ? 20 : size;
         try {
             String body = restClient.get()
-                    .uri(uri -> uri.path(PATH_RECOMMENDED)
-                            .queryParam("page", page)
-                            .queryParam("size", limit)
-                            .queryParamIfPresent("userId", java.util.Optional.ofNullable(userId))
-                            .build())
+                    .uri(uri -> {
+                        if (cursor != null && !cursor.isBlank()) {
+                            return uri.path(PATH_RECOMMENDED)
+                                    .queryParam("cursor", cursor)
+                                    .queryParam("size", limit)
+                                    .queryParamIfPresent("userId", java.util.Optional.ofNullable(userId))
+                                    .build();
+                        }
+                        return uri.path(PATH_RECOMMENDED)
+                                .queryParam("page", page)
+                                .queryParam("size", limit)
+                                .queryParamIfPresent("userId", java.util.Optional.ofNullable(userId))
+                                .build();
+                    })
                     .retrieve()
                     .body(String.class);
             JsonNode root = objectMapper.readTree(body == null ? "{}" : body);
@@ -147,23 +163,31 @@ public class FeedEngineClient {
             if (code != 0) {
                 String msg = "引擎返回失败码 code=" + code + " message=" + root.path("message").asText("");
                 health.recordReadFailure(msg);
-                log.warn("Feed 引擎返回失败码，按不可用处理: page={}, size={}, {}", page, limit, msg);
+                log.warn("Feed 引擎返回失败码，按不可用处理: page={}, size={}, cursor={}, {}",
+                        page, limit, cursor, msg);
                 return Optional.empty();
             }
             JsonNode data = root.path("data");
             if (data.isMissingNode() || data.isNull()) {
-                return Optional.of(List.of());
+                return Optional.of(new FeedRecommendedPage(List.of(), "", false));
             }
-            List<FeedItemView> items = objectMapper.convertValue(data,
+            // 引擎下发的是契约类型 FeedItemView；网关侧 FeedRecommendedPage.items 是 MediaItem 视图
+            // （已注入计数/已赞态），两者字段口径不同，不能直接 convertValue 到 MediaItem 字段上。
+            // 先按契约类型抽出原始条目列表，再做版本协商（M3）与映射。
+            List<FeedItemView> rawItems = objectMapper.convertValue(data.get("items"),
                     objectMapper.getTypeFactory().constructCollectionType(List.class, FeedItemView.class));
+            String nextCursor = data.path("nextCursor").asText("");
+            boolean hasMore = data.path("hasMore").asBoolean(false);
             // 版本协商（M3）：引擎可能已先升级并写出更高版本的条目，按错误语义渲染等于静默出错。
             // 口径与引擎侧 ItemViewCodec 一致——不可消费的条目跳过，而不是让整页失败。
-            return Optional.of(ContractVersion.filterConsumable(items, FeedItemView.SCHEMA_VERSION,
-                    FeedItemView::schemaVersion).stream().map(FeedItemMapper::toView).toList());
+            List<MediaItem> items = ContractVersion.filterConsumable(rawItems,
+                    FeedItemView.SCHEMA_VERSION, FeedItemView::schemaVersion)
+                    .stream().map(FeedItemMapper::toView).toList();
+            return Optional.of(new FeedRecommendedPage(items, nextCursor, hasMore));
         } catch (Exception e) {
             health.recordReadFailure(e.toString());
-            log.warn("Feed 引擎读取失败（由调用方按 degraded-mode 决定降级口径）: page={}, size={}, {}",
-                    page, limit, e.getMessage());
+            log.warn("Feed 引擎读取失败（由调用方按 degraded-mode 决定降级口径）: page={}, size={}, cursor={}, {}",
+                    page, limit, cursor, e.getMessage());
             return Optional.empty();
         }
     }
@@ -319,6 +343,68 @@ public class FeedEngineClient {
                     .toBodilessEntity();
         } catch (Exception e) {
             log.warn("行为埋点投递引擎失败（fail-open，不影响主流程）: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 列出引擎当前死信（只读）。
+     *
+     * @return {@code Optional.of(list)} = 引擎正常响应；{@code Optional.empty()} =
+     *         引擎不可用 / DLQ 重放功能未启用（404）。fail-open，绝不抛
+     */
+    public Optional<List<DlqSummaryView>> dlqList() {
+        try {
+            String body = restClient.get()
+                    .uri(uri -> uri.path(PATH_DLQ_LIST).build())
+                    .retrieve()
+                    .body(String.class);
+            JsonNode root = objectMapper.readTree(body == null ? "{}" : body);
+            int code = root.path("code").asInt(-1);
+            if (code != 0) {
+                log.warn("Feed 引擎 DLQ 列表返回失败码 code={}", code);
+                return Optional.empty();
+            }
+            JsonNode data = root.path("data");
+            if (data.isMissingNode() || data.isNull()) {
+                return Optional.of(List.of());
+            }
+            List<DlqSummaryView> items = objectMapper.convertValue(data,
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, DlqSummaryView.class));
+            return Optional.of(items);
+        } catch (Exception e) {
+            log.warn("Feed 引擎 DLQ 列表读取失败（功能可能未启用，按空处理）: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * 重放引擎死信（按 mediaId 精确或全量）。fail-open：引擎不可用 / 未启用返回 empty。
+     *
+     * @param mediaIds 仅重放这些 mediaId 对应的死信
+     * @param all      为 true 时重放全部（忽略 mediaIds）
+     */
+    public Optional<DlqReplayResultView> dlqReplay(Set<String> mediaIds, boolean all) {
+        try {
+            String body = restClient.post()
+                    .uri(uri -> uri.path(PATH_DLQ_REPLAY).build())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(new DlqReplayRequest(mediaIds, all))
+                    .retrieve()
+                    .body(String.class);
+            JsonNode root = objectMapper.readTree(body == null ? "{}" : body);
+            int code = root.path("code").asInt(-1);
+            if (code != 0) {
+                log.warn("Feed 引擎 DLQ 重放返回失败码 code={}", code);
+                return Optional.empty();
+            }
+            JsonNode data = root.path("data");
+            if (data.isMissingNode() || data.isNull()) {
+                return Optional.empty();
+            }
+            return Optional.of(objectMapper.convertValue(data, DlqReplayResultView.class));
+        } catch (Exception e) {
+            log.warn("Feed 引擎 DLQ 重放失败（功能可能未启用，按空处理）: {}", e.getMessage());
+            return Optional.empty();
         }
     }
 }

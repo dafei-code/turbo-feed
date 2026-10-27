@@ -5,6 +5,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.turbofeed.feedengine.client.ReviewSignalClient;
 import com.turbofeed.feedengine.interest.InterestService;
 import com.turbofeed.feedengine.interest.SessionSequenceService;
+import com.turbofeed.feedengine.ranking.FeedFilterChain;
 import com.turbofeed.feedengine.ranking.FeedModerationProperties;
 import com.turbofeed.feedengine.ranking.LinearPreRankModel;
 import com.turbofeed.feedengine.ranking.PreRankFilter;
@@ -98,6 +99,8 @@ class FeedTimelineStoreReadPagePreRankTest {
     private FollowService followService;
     @Mock
     private EcosystemRegulationService ecosystemRegulationService;
+    @Mock
+    private FeedFilterChain feedFilterChain;
 
     private final ZSetOperations<String, String> zSet = mock();
 
@@ -115,7 +118,7 @@ class FeedTimelineStoreReadPagePreRankTest {
                 postStatService, hotTimelineKeyCache, interestService, sessionSequenceService,
                 rankingModel, reviewSignalClient, moderationProperties, vectorRecallChannel,
                 realtimeFeatureService, preRankFilter, diversityRerankService, coldStartService,
-                followService, ecosystemRegulationService);
+                followService, ecosystemRegulationService, feedFilterChain);
         // @Value 字段 new 出来不注入：poolWeightsCsv 需显式给出，其余召回配比保持 0（各路关闭，只留流量池）
         ReflectionTestUtils.setField(pipeline, "poolWeightsCsv", "0.2,0.3,0.5");
         FeedTimelineStore s = new FeedTimelineStore(redisTemplate, MAPPER, pipeline);

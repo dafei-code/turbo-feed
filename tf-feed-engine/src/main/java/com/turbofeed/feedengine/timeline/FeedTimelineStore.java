@@ -194,8 +194,29 @@ public class FeedTimelineStore {
      */
     public List<FeedItemView> readPage(String userId, int page, int size) {
         int limit = size <= 0 ? 20 : size;
+        return readPageInternal(userId, page, limit, null);
+    }
 
-        // 先按池收集近 N 天、每池最新的候选（保留 ZSET score 以便回退路径按入流时刻排序）
+    /**
+     * 游标分页读取公域发现流（入流时间倒序，keyset）。
+     *
+     * <p>以游标 score 为<b>排他上界</b>收集各池候选（ZSET 直接 seek，O(log N)，无 OFFSET）；
+     * 漏斗只取窗口内 top {@code limit}，多路召回也只取早于游标者，保证翻页单调前进、跨页不重复。
+     * {@code cursor == null} 时退化为与 {@link #readPage(String, int, int)} 完全等价的页码分页。</p>
+     *
+     * @param userId 当前用户（{@code null} 为匿名）
+     * @param limit  单页条数（&lt;=0 取默认 20）
+     * @param cursor 续拉游标（{@code null} = 首页）
+     * @return 时间倒序的内容列表（当前页）；空表示无更多内容或 Redis 不可用
+     */
+    public List<FeedItemView> readPage(String userId, int limit, FeedCursor cursor) {
+        return readPageInternal(userId, 0, limit <= 0 ? 20 : limit, cursor);
+    }
+
+    private List<FeedItemView> readPageInternal(String userId, int page, int limit, FeedCursor cursor) {
+        double maxScore = (cursor == null) ? Double.POSITIVE_INFINITY : cursor.score();
+        // 先按池收集近 N 天、每池最新的候选（保留 ZSET score 以便回退路径按入流时刻排序）。
+        // 游标模式以 maxScore 为上界（含），漏斗/合并阶段再精确排除游标所指项。
         Map<Integer, List<ZSetOperations.TypedTuple<String>>> byPool = new LinkedHashMap<>();
         for (int pool = 1; pool <= MAX_POOL_LEVELS; pool++) {
             byPool.put(pool, new ArrayList<>());
@@ -208,7 +229,7 @@ public class FeedTimelineStore {
                 try {
                     Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
                             .reverseRangeByScoreWithScores(key, Double.NEGATIVE_INFINITY,
-                                    Double.POSITIVE_INFINITY, 0, PER_BUCKET_CAP);
+                                    maxScore, 0, PER_BUCKET_CAP);
                     if (tuples != null) {
                         byPool.get(pool).addAll(tuples);
                     }
@@ -227,19 +248,32 @@ public class FeedTimelineStore {
             }
             merged.sort(Comparator.comparingDouble(
                     (ZSetOperations.TypedTuple<String> t) -> t.getScore() == null ? 0d : t.getScore()).reversed());
-            long offset = (long) Math.max(page, 0) * limit;
             List<FeedItemView> items = new ArrayList<>(merged.size());
             for (ZSetOperations.TypedTuple<String> tuple : merged) {
                 FeedItemView it = ItemViewCodec.parse(objectMapper, tuple == null ? null : tuple.getValue());
-                if (it != null) {
-                    items.add(it);
+                if (it == null) {
+                    continue;
                 }
+                // keyset：跳过游标所指项及之后（score 晚于/等于游标且身份不早于游标者）
+                if (cursor != null && cursor.excludes(
+                        tuple.getScore() == null ? 0d : tuple.getScore(), it.timelineKey())) {
+                    continue;
+                }
+                items.add(it);
             }
-            int from = (int) Math.min(offset, items.size());
-            int to = (int) Math.min(offset + limit, items.size());
+            int from;
+            int to;
+            if (cursor != null) {
+                from = 0;
+                to = Math.min(limit, items.size());
+            } else {
+                long offset = (long) Math.max(page, 0) * limit;
+                from = (int) Math.min(offset, items.size());
+                to = (int) Math.min(offset + limit, items.size());
+            }
             return items.subList(from, to);
         }
-        return recommendationPipeline.recommend(userId, page, limit, byPool);
+        return recommendationPipeline.recommend(userId, page, limit, byPool, cursor);
     }
 
     /**

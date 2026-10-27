@@ -170,4 +170,43 @@ class RecommendedFeedServiceTest {
         // 关键：不得写入任何缓存 Key——抖动窗口内写缓存可能让不同用户结果落到同一版本 Key
         verify(valueOps, never()).set(anyString(), anyString(), any());
     }
+
+    // ===== P3-PR07：keyset 游标分页 =====
+
+    @Test
+    void recommendedPage_cursorMode_computesNextCursor_andCachesByCursorKey() {
+        stubValueOps();
+        when(valueOps.get("tf:feed:rec:version")).thenReturn("11");
+        FeedItemView last = item("post/1/b");
+        List<FeedItemView> fresh = List.of(item("post/1/a"), last);
+        when(feedTimelineStore.readPage(eq("1001"), eq(20), any(FeedCursor.class))).thenReturn(fresh);
+        // 末条入流 score（经反查索引 + ZSCORE）决定 nextCursor
+        when(feedTimelineStore.inflowScoreOf("post/1/b")).thenReturn(1700000000999L);
+
+        FeedCursor cursor = FeedCursor.of(1700000000000.0, "post/1/prev");
+        FeedRecommendedPage page = service().recommendedPage(0, 20, "1001", cursor);
+
+        // 末条入流 score → 编码进不透明 nextCursor（前端原样回传）
+        assertEquals(FeedCursor.of(1700000000999.0, "post/1/b").encode(), page.nextCursor());
+        assertFalse(page.hasMore(), "2 条 < limit 20 → 无更多（hasMore 语义由 items.size()==limit 决定）");
+        // 缓存 Key 必须含 :cursor: 维度，与页码模式互不串
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(valueOps).set(keyCaptor.capture(), anyString(), any());
+        assertTrue(keyCaptor.getValue().contains(":cursor:" + cursor.encode()),
+                "游标模式缓存 Key 必须含 cursor 维度，实际=" + keyCaptor.getValue());
+    }
+
+    @Test
+    void recommendedPage_nullCursor_degeneratesToPageMode_withoutCursor() {
+        stubValueOps();
+        when(valueOps.get("tf:feed:rec:version")).thenReturn("4");
+        when(feedTimelineStore.readPage(eq("1001"), eq(0), eq(20))).thenReturn(List.of(item("post/1/a")));
+
+        FeedRecommendedPage page = service().recommendedPage(0, 20, "1001", null);
+
+        assertEquals("", page.nextCursor(), "页码模式不产出游标");
+        assertFalse(page.hasMore(), "1 条 < limit 20 → 无更多");
+        // 页码模式的缓存 Key 不应混入 :cursor: 维度（与游标模式隔离）
+        verify(valueOps).set(argThat(k -> !k.contains(":cursor:")), anyString(), any());
+    }
 }

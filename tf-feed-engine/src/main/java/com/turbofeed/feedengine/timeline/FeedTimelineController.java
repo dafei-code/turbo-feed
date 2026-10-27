@@ -55,18 +55,30 @@ public class FeedTimelineController {
     private final PlayabilityService playabilityService;
 
     /**
-     * 读取公域推荐流（入流时间倒序，分页）。
+     * 读取公域推荐流（入流时间倒序，keyset 游标分页）。
      *
-     * @param page 页码（从 0 开始，默认 0）
-     * @param size 单页条数（默认 20，≤0 兜底 20）
-     * @return 当前页内容；空列表表示无更多内容或 Redis 不可用
+     * <p>{@code cursor} 非空时走 keyset 游标分页（以游标 score 为排他下界 seek，无 OFFSET）；
+     * 为空时退化为 {@code page} 页码分页，行为与改造前一致。两者都返回
+     * {@link FeedRecommendedPage}（含 {@code nextCursor} / {@code hasMore}）。</p>
+     *
+     * @param page   页码（cursor 为空时生效，从 0 开始，默认 0）
+     * @param size   单页条数（默认 20，≤0 兜底 20）
+     * @param userId 个性化用户（已登录；匿名为空）
+     * @param cursor 续拉游标（空 = 首页）
+     * @return 当前页内容 + 续拉游标；空列表表示无更多内容或 Redis 不可用
      */
     @GetMapping("/recommended")
-    public Result<List<FeedItemView>> recommended(
+    public Result<FeedRecommendedPage> recommended(
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "20") int size,
-            @RequestParam(value = "userId", required = false) String userId) {
-        return Result.ok(recommendedFeedService.recommended(page, size, userId));
+            @RequestParam(value = "userId", required = false) String userId,
+            @RequestParam(value = "cursor", defaultValue = "") String cursor) {
+        FeedCursor decoded = (cursor == null || cursor.isBlank()) ? null : FeedCursor.decode(cursor);
+        int limit = size <= 0 ? 20 : size;
+        if (decoded == null) {
+            return Result.ok(recommendedFeedService.recommendedPage(page, size, userId, null));
+        }
+        return Result.ok(recommendedFeedService.recommendedPage(0, limit, userId, decoded));
     }
 
     /**

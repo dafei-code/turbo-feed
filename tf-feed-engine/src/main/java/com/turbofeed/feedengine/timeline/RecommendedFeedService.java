@@ -153,6 +153,76 @@ public class RecommendedFeedService {
     }
 
     /**
+     * 游标分页读取公域推荐流（keyset）：返回 {@link FeedRecommendedPage}（含 {@code nextCursor}）。
+     *
+     * <p>与 {@link #recommended(int, int, String)}（页码分页）共用缓存与读路径——
+     * 游标模式以游标编码进缓存 Key（与页码模式互不串），并据最后一页末条的<b>入流 score</b>
+     * （经 {@code tf:feed:idx} 反查 + ZSCORE，见 {@link FeedTimelineStore#inflowScoreOf}）计算
+     * {@code nextCursor} 下发给前端。{@code cursor == null} 时退化为页码分页（不产出游标）。</p>
+     *
+     * @param page   页码（cursor 为 null 时生效，从 0 起）
+     * @param size   单页条数（≤0 兜底 20）
+     * @param userId 个性化用户（已登录；匿名为 {@code null}）
+     * @param cursor 续拉游标（{@code null} = 首页，走页码分页）
+     */
+    public FeedRecommendedPage recommendedPage(int page, int size, String userId, FeedCursor cursor) {
+        int limit = size <= 0 ? 20 : size;
+        if (cursor == null) {
+            // 页码模式：复用既有分页 + 缓存（键含页码），不产出游标
+            List<FeedItemView> items = recommended(page, limit, userId);
+            return new FeedRecommendedPage(items, "", items.size() == limit);
+        }
+        // 游标模式：以游标 score 为排他上界读取 + 游标维度缓存
+        boolean personalized = userId != null && !userId.isBlank();
+        String version = readVersion();
+        String key = null;
+        Duration ttl = null;
+        if (version != null) {
+            key = personalized
+                    ? REC_KEY_PREFIX + version + ":u:" + userId + ":cursor:" + cursor.encode()
+                    : REC_KEY_PREFIX + version + ":cursor:" + cursor.encode();
+            ttl = personalized ? USER_REC_CACHE_TTL : REC_CACHE_TTL;
+        }
+        List<FeedItemView> fresh;
+        if (key != null) {
+            try {
+                String cached = redisTemplate.opsForValue().get(key);
+                if (cached != null) {
+                    return wrapWithCursor(ItemViewCodec.parseList(objectMapper, cached), limit);
+                }
+            } catch (Exception e) {
+                log.warn("推荐流游标缓存读取失败，回落实时读: key={}, {}", key, e.getMessage());
+            }
+        }
+        fresh = feedTimelineStore.readPage(userId, limit, cursor);
+        if (key != null) {
+            try {
+                redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(fresh), ttl);
+            } catch (Exception e) {
+                log.warn("推荐流游标缓存写入失败（不影响本次读取）: key={}, {}", key, e.getMessage());
+            }
+        }
+        return wrapWithCursor(fresh, limit);
+    }
+
+    /** 包一页内容为 {@link FeedRecommendedPage}，并据末条的入流 score 计算 {@code nextCursor}。 */
+    private FeedRecommendedPage wrapWithCursor(List<FeedItemView> items, int limit) {
+        if (items == null) {
+            items = List.of();
+        }
+        String next = "";
+        if (!items.isEmpty()) {
+            FeedItemView last = items.get(items.size() - 1);
+            Long s = feedTimelineStore.inflowScoreOf(last.timelineKey());
+            if (s != null) {
+                next = FeedCursor.of(s, last.timelineKey()).encode();
+            }
+        }
+        boolean hasMore = items.size() == limit;
+        return new FeedRecommendedPage(items, next, hasMore);
+    }
+
+    /**
      * 读全局缓存版本号；不可得时返回 {@code null}（调用方据此<b>跳过缓存</b>、直接实时读）。
      *
      * <p>刻意用「读不到就不缓存」而不是「读不到就当版本 0」：后者会在 Redis 抖动窗口内
