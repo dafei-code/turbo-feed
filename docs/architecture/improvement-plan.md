@@ -477,7 +477,7 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 
 ***
 
-## 7. 改进落地追踪（2026-10-26 更新）
+## 7. 改进落地追踪（2026-10-27 更新）
 
 > 本节追踪 §3 问题诊断各改进项的实施进展。**评审快照（基于 `0e1403f`）的原结论与诊断保持不变**，仅补充后续落地状态，避免读者被快照结论误导。
 > 已落地项均经编译 + 全仓 `mvn test` 验证（关键项另做真启动 / e2e），并已推送 `origin/main`。
@@ -517,17 +517,17 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 | M2/4.3 | 雪花 worker-id 自租约 | ✅ | `WorkerIdLeaseManager`：Redis `SET NX EX` 抢占 + Lua 比对 instanceId 续约/释放 + 独立 daemon 线程池保活；`SnowflakeIdGenerator` 持 `IdLease`，租约失效即 **fail-closed 拒绝发号**。开关 `turbofeed.snowflake.lease-enabled`（默认 false 走原显式配置）。**刻意不做**「Redis 不可用静默退化为显式配置」 |
 | M2/4.4 | 全链路失败模式对账 | ✅ | `docs/architecture/failure-mode-ledger.md`：六条链路逐条登记丢失窗口、降级口径、对账能力现状与缺口、症状→证据排查手册，并写明「变更本文即需补对账」的规则 |
 
-**M2 的已知偏离与未收口项**（转入 M3/M4）：
+**M2 的已知偏离与未收口项**（**状态已于 2026-10-27 复核更新**）：
 
 | 项 | 说明 |
 | --- | --- |
-| 契约 §7 旁路 | 仍有 4 处 `readValue` 未走版本协商（存量内部调用，风险低）→ M3 收口 |
-| `lease-enabled=true` 真启动 | 需 Redis，本机 6379 未监听，仅编译 + 单测验证，未做真启动 |
-| RocketMQ DLQ 巡检 | 完全无巡检；`LogDeadLetterAlert` 只打日志无计数 → M4 补指标 |
-| Outbox 积压水位 | 只有日志无指标 → M4 |
-| CI 门禁 | 只有 `mvn -B clean test`，缺覆盖率门槛与静态检查 → 见 §7.3 |
+| 契约 §7 旁路 | ✅ 已收口（M3）：6 处裸解析收敛为 `ItemViewCodec` 唯一入口 + ArchUnit 门禁 → 见 §7.3 |
+| `lease-enabled=true` 真启动 | ⏳ 仍需 Redis；本机 6379 未监听，仅编译 + 单测（`WorkerIdLeaseManagerTest` 15 例 / `SnowflakeConfigTest` 4 例）验证，**未做真启动** |
+| RocketMQ DLQ 巡检 | 🟡 部分：默认告警实现已升级「日志 + 计数」（`tf_outbox_deadletter_total`）、消费失败率指标已就位；**DLQ 深度本身仍无巡检**（需 `rocketmq-tools` + name-server） → 见 §7.4 |
+| Outbox 积压水位 | ✅ 已补（M4）：`tf_outbox_backlog{status}` + `tf_outbox_oldest_age_seconds{status}` → 见 §7.4 |
+| CI 门禁 | ✅ 已补（M3）：覆盖率门槛 + 工作区卫生 + compose 冒烟 → 见 §7.3 |
 
-### 7.3 M3 质量工程（进行中）
+### 7.3 M3 质量工程（已落地，2026-10-27）
 
 | 项 | 状态 | 落地说明 |
 | --- | --- | --- |
@@ -548,14 +548,33 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 - **未排除任何类**（配置 / 启动类 / DTO 都计入）：排除会让数字好看，但覆盖率的意义就在于如实反映
   「改动时有多少代码是裸奔的」——把难测的排除掉，等于把风险藏起来。
 
-**待办（M3 剩余 / M4~M6）**：
+### 7.4 M4 可观测性（已落地，2026-10-27）
 
-1. **M4 可观测性**：网关 / 引擎 / 计数埋 Micrometer 指标（DLQ 深度、Outbox 积压水位、flush 批次大小、
-   dedup 命中数）；`DeadLetterAlert` 升级为「日志 + 计数」；MDC traceId 透传。
-2. **M5 文档体系**：ADR 体系化（`docs/adr/`）、C4 架构图、CONTRIBUTING.md、README 完成度防漂移脚本。
-3. **M6**：`tf-benchmark` 兑现或诚实撤下 README 承诺。
-4. 评审原始项剩余：P0-5 Nacos🔧（真链路待 Nacos 环境验证）、P1-1 `FeedTimelineStore` 拆分、
+> 主题：把「有日志、无指标」的四处缺口补成可驱动告警的数字，并让一条请求的日志能串起来。
+
+| 项 | 状态 | 落地说明 |
+| --- | --- | --- |
+| 发件箱积压水位 | ✅ | `OutboxEventRepository#backlog()`（按状态分组 + 最老一行时间）+ `OutboxBacklogMetrics`：`tf_outbox_backlog{status}`、`tf_outbox_oldest_age_seconds{status}`。两个反直觉点已固化注释与测试：①四个状态**启动即注册为 0**（否则积压归零表现为「时序消失」，与「一直是 0」语义不同）②**查失败保留上一轮值**（fail-quiet，掉 0 会被读成「积压已消化」） |
+| 死信告警指标化 | ✅ | `LogDeadLetterAlert` → `DefaultDeadLetterAlert`，日志之外增 `tf_outbox_deadletter_total{type}`；计数放在写日志**之前**。保留原分级（REMOVE = error，APPEND = warn） |
+| 计数 flush 批次 / 去重 | ✅ | `tf_counter_flush_batch_size`、`_duration_seconds`、`_empty_total`、`_dedup_skipped_total`。`applyBatch` 由 `void` 改返回 `ApplyResult(applied, dedupSkipped)`——去重命中数只有仓储自己知道。timer 记在 `finally`（失败周期最需要看耗时）。空周期计数的意义：`batch_size` 无样本时「推不出数据」与「调度挂了」在指标上完全同形 |
+| MQ 消费失败率 | ✅ | `tf_feed_timeline_consume_total{action}`（分母）+ `tf_feed_timeline_consume_failed_total{action}`（分子）。只记失败数算不出失败率；失败不计分母（否则被自己的失败稀释）；成功路径不创建失败时序（`absent()` 类规则依赖此） |
+| traceId 全链路 | ✅ | `TraceIds`（tf-shared，纯 JDK：生成/白名单校验/常量）+ 网关/引擎各一个 `TraceIdFilter`（MDC + 响应头回写 + `finally` 清理）+ `TracePropagationInterceptor`（直连与 LB **两个** builder 都加，否则开 Nacos 后静默断链）；`logging.pattern.level: "%5p [%X{traceId:-}]"`。**已真启动验证**：18082 端口带 `X-Trace-Id: probe-trace-abc123` 请求 → 响应头原样回写、日志出现 `WARN [probe-trace-abc123]`；不带 header → 返回新生成的 32 位十六进制；启动期非请求线程 → `INFO []`（空方括号证明 pattern 生效且未输出 `IS_UNDEFINED`） |
+| 发件箱积压 / DLQ 缺口清单 | ✅ | `failure-mode-ledger.md` §5 重写为「已落地 / 仍是缺口」两栏并附 Prometheus 告警规则；§6 排查手册加「第 0 步：先拿 traceId」 |
+
+**M4 明确没做的三件事**（诚实登记，不假装覆盖）：
+
+| 缺口 | 为什么没做 | 阻塞条件 |
+| --- | --- | --- |
+| RocketMQ DLQ 深度 | 读位点需 `rocketmq-tools` 的 `DefaultMQAdminExt`（本机 `.m2` 无缓存且必须连 name-server 验证）。已用消费失败率覆盖「滑向 DLQ 之前」的那段，并给出 `mqadmin` runbook | `rocketmq-tools` 依赖 + name-server 环境 |
+| MQ 消费侧 traceId | 契约里没有该字段，加字段等于升 `schemaVersion`。应与「MQ 链路整体可观测」一起做 | 契约版本演进批次 |
+| `tf-counter` 入站 traceId | 入口九成是 MQ 消费，HTTP 仅兜底；为兜底路径再加第三份过滤器副本收益低于维护成本 | 随 MQ 契约一起做 |
+
+**待办（M5~M6）**：
+
+1. **M5 文档体系**：ADR 体系化（`docs/adr/`）、C4 架构图、CONTRIBUTING.md、README 完成度防漂移脚本。
+2. **M6**：`tf-benchmark` 兑现或诚实撤下 README 承诺。
+3. 评审原始项剩余：P0-5 Nacos🔧（真链路待 Nacos 环境验证）、P1-1 `FeedTimelineStore` 拆分、
    P1-5 前端工程化；P2 其余（A/B、向量库、HTTPS/CDN、API 版本前缀）为演进优化。
-5. 工程卫生：`.workbuddy/` 仍未跟踪，建议加入 `.gitignore`。
+4. 工程卫生：`.workbuddy/` 仍未跟踪，建议加入 `.gitignore`。
 
 （M3 之前的旧待办清单已并入上方 §7.3，此处不再重复。）

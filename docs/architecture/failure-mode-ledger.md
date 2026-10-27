@@ -120,27 +120,82 @@
 ## 5. 对账能力现状与缺口
 
 方案 4.4 要求「给两个对账 job 的设计占位」。核对代码后的**真实现状**是：一个已有骨架但缺指标化，
-一个完全没有。写清楚现状，避免后来者以为都做完了。
+一个完全没有。**M4 已把「缺指标化」这部分补掉**，下面区分「已落地」与「仍是缺口」，
+避免后来者读旧结论或误以为全做完了。
 
-### 5.1 DLQ 巡检告警 —— 🟡 有骨架，缺指标化通道
+### 5.1 DLQ 巡检告警 —— 🟢 发件箱侧已闭环 / 🔴 MQ 侧仍无巡检
 
 | 层 | 现状 |
 |---|---|
-| 发件箱 DEAD 行 | ✅ `OutboxDeadLetterSweeper` 周期重投（带冷却、有上限）；✅ `DeadLetterAlert` 接口已抽象，换 Bean 即可接 Prometheus / 告警通道 |
-| 默认实现 | ⚠️ `LogDeadLetterAlert` **只打日志**。没有计数器、没有告警通道 —— "人工核对"的工具支撑只有日志 |
-| **RocketMQ DLQ** | ❌ **完全无巡检**。消费者 `maxReconsumeTimes=5` 耗尽后进 `%DLQ%{consumerGroup}`，此后没有任何组件会去看它。MQ 通道是生产推荐通道，这里的缺口比发件箱侧更值得优先补 |
+| 发件箱 DEAD 行 | ✅ `OutboxDeadLetterSweeper` 周期重投（带冷却、有上限） |
+| 默认告警实现 | ✅ **M4 已升级**：`DefaultDeadLetterAlert`（原 `LogDeadLetterAlert`）= 日志 + `tf_outbox_deadletter_total{type}`。计数在写日志**之前**，日志失败也留得下指标 |
+| 消费失败可观测性 | ✅ **M4 新增**：`tf_feed_timeline_consume_total{action}`（分母）+ `tf_feed_timeline_consume_failed_total{action}`（分子）——失败率曲线能提前看到「正在滑向 DLQ」 |
+| **RocketMQ DLQ 深度** | 🔴 **仍无巡检**。`maxReconsumeTimes=5` 耗尽后消息进 `%DLQ%{consumerGroup}`，此后没有任何组件会去看它 |
 
-**待办（按优先级）**：
-1. 补 RocketMQ DLQ 深度的巡检（至少：定时读 DLQ 位点/条数 → `DeadLetterAlert` 或指标），并写一条 runbook；
-2. 把 `DeadLetterAlert` 的默认实现从「只打日志」升级为「日志 + Micrometer 计数」（与 M4 指标点联动）。
+**为什么 DLQ 深度没一起做**（不是遗漏，是依赖不满足）：读 DLQ 位点需要
+`rocketmq-tools` 的 `DefaultMQAdminExt`，而它是独立 artifact——本机 `.m2` 无缓存，
+且必须连到真实 name-server 才能验证。按项目纪律「先验证再宣称」，不上未验证的实现。
+消费失败率指标已经把**最需要提前量的那段**覆盖住了（失败率飙升 → 5 次重试 → 才进 DLQ），
+所以这块的紧迫性低于「完全没有信号」的发件箱侧。
 
-### 5.2 Outbox 积压水位 —— 🟡 只有日志，无指标
+**DLQ 巡检 runbook（运维侧，不依赖代码改动）**：
+
+```bash
+# 1) 看 DLQ 里积了多少（位点差 = 未消费条数）
+mqadmin consumerProgress -n <namesrv:9876> -g turbofeed-feed-timeline-group   # 看 %DLQ% 行
+# 2) 抽样看内容（会消耗消息，先确认可重投）
+mqadmin queryMsgByKey -n <namesrv:9876> -t %DLQ%turbofeed-feed-timeline-group -k <timelineKey>
+# 3) 修复后重投
+mqadmin resetOffsetByTime -n <namesrv:9876> -g turbofeed-feed-timeline-group -t %DLQ%... -s now
+```
+
+**告警规则建议**（Prometheus）：
+
+```yaml
+- alert: FeedTimeline消费失败率过高
+  expr: |
+    sum(rate(tf_feed_timeline_consume_failed_total[5m]))
+      / clamp_min(sum(rate(tf_feed_timeline_consume_total[5m])), 0.001) > 0.05
+  for: 5m
+  # 注：分母 + 分子的口径都按 action 分标签，sum 汇总后算总失败率；
+  # 如需单看下架链路，把 action="REMOVE" 加进两边。
+
+- alert: 发件箱死信产生
+  expr: increase(tf_outbox_deadletter_total[10m]) > 0
+  for: 1m
+  # 下架类（type="TIMELINE_REMOVE"）应单独配一条更急的（P1），
+  # 因为「下架没生效 = 内容仍在公域可见」是正向错误。
+```
+
+### 5.2 Outbox 积压水位 —— 🟢 已落地（M4）
 
 | 项 | 现状 |
 |---|---|
-| 可用信息 | `OutboxRelay` 每轮打印 `due=X, 成功=Y, 失败=Z`；`OutboxEventRepository` 有 `findDeadIds` |
-| 缺口 | 没有「当前 PENDING/FAILED/DEAD 各多少行」的可查询出口，也无法回答「积压是多久之前的」 |
-| 待办 | 补一个积压统计查询 + 指标导出（按事件类型分桶），并给一条 runbook：积压超过 N 行或最老一行超过 M 分钟即告警 |
+| 统计出口 | ✅ `OutboxEventRepository#backlog()`：按状态分组取行数 + 该状态最老一行创建时间 |
+| 指标 | ✅ `tf_outbox_backlog{status}`（PENDING/SENDING/FAILED/DEAD）与 `tf_outbox_oldest_age_seconds{status}` |
+| 刷新 | `OutboxBacklogMetrics`，默认每 15s（`turbofeed.outbox.backlog-poll-ms`） |
+| 可关 | `turbofeed.outbox.backlog-metrics-enabled=false` |
+
+两个刻意选择，改之前先读：
+
+1. **四个状态启动即注册为 0**，不是「查到才建」。否则积压归零会表现为「时序消失」，
+   而 Prometheus 里「时序消失」与「一直是 0」不是一回事（`absent()` / `rate()` 语义都会变）。
+2. **查失败时保留上一轮的值**（fail-quiet），不置 0。指标停在旧值比掉到 0 更接近事实——
+   掉 0 会被读成「积压已消化」，正好把最需要人看见的情况伪装成好事。
+
+**告警规则建议**：
+
+```yaml
+- alert: 发件箱积压
+  expr: sum(tf_outbox_backlog{status=~"PENDING|FAILED"}) > 500
+  for: 10m
+- alert: 发件箱积压过久
+  expr: max(tf_outbox_oldest_age_seconds) > 600     # 最老一条卡了 10 分钟
+  for: 5m
+- alert: 发件箱卡死投递
+  expr: tf_outbox_backlog{status="SENDING"} > 0
+  for: 5m    # SENDING 正常应瞬时归零，长期非零 = 有实例投递中崩溃
+```
 
 ### 5.3 其余已有能力（显式登记，避免重复造轮子）
 
@@ -150,18 +205,40 @@
 | 发件箱补偿 | `OutboxRelay`（CAS claim + 卡死回收） |
 | 死信重投 | `OutboxDeadLetterSweeper`（区分下架/入流冷却） |
 | 计数 flush 幂等 | `post_counter` + `counter_flush_dedup`（M2/4.2 已事务闭合） |
+| 计数 flush 批次/去重指标 | `tf_counter_flush_batch_size` / `_duration_seconds` / `_empty_total` / `_dedup_skipped_total`（M4） |
 | 契约版本协商 | `ContractVersion`（M2/4.1） |
+| 链路追踪 | `TraceIds` + 网关/引擎 `TraceIdFilter` + `TracePropagationInterceptor`（M4） |
+
+### 5.4 观测面仍未覆盖的地方（M4 之后）
+
+| 缺口 | 影响 | 归属 |
+|---|---|---|
+| MQ 消费侧拿不到生产者 traceId | 消费链路日志与生产请求无法串成一条 | 需在 `FeedTimelineEvent` 加字段并升 schemaVersion |
+| `tf-counter` 无入站 traceId | HTTP 兜底增量这条链路断链（九成流量走 MQ，影响小） | 随 MQ 契约一起做 |
+| RocketMQ DLQ 深度 | 进 DLQ 的消息无人知晓，只能靠人工/外部巡检 | 需 name-server 环境 |
+| 前端/客户端埋点未接 traceId | 用户侧报障只能给时间，不能给 id | 待前端工程化（P1-5） |
 
 ---
 
 ## 6. 排查手册：症状 → 去哪儿找证据
 
+**第 0 步（M4 之后一律先做这个）**：拿到 traceId 再往下查。用户报障时让他提供响应头
+`X-Trace-Id`，然后一条命令把整条链路拉出来：
+
+```bash
+grep "<traceId>" gateway.log engine.log          # 网关与引擎的日志一次对齐
+grep "<traceId>" gateway.log | grep -E "ERROR|WARN"   # 只看异常
+```
+
+> 拿不到 id 时（老版本客户端、异步任务）才退回按时间戳对齐——那是**兜底手段，不是首选**。
+
 | 症状 | 先查 | 再查 |
 |---|---|---|
 | 「我发了却看不到」 | outbox 该 `aggregate_id` 的事件行状态（PENDING/FAILED/DEAD/SENT） | 引擎侧 `tf:feed:tl:*` 是否有该 `timelineKey` 成员；推荐流缓存是否已失效 |
 | 「已下架却还在展示」 | outbox `TIMELINE_REMOVE` 事件状态 | 引擎反查索引 `tf:feed:idx:` 是否对得上（`timelineKey` 口径不一致会让 `ZREM` 静默失效） |
-| 「点赞数不对」 | `post_counter.updated_at`（多久没落库了） | `counter_flush_dedup` 是否有异常批次；flush 日志的批次大小 |
-| 「开 MQ 后新内容不可见」 | 是否走了 `FeedTimelineDeliveryService` 单入口（旧代码曾漏掉缓存失效） | RocketMQ DLQ 是否有堆积 |
+| 「发布后一直不可见」 | `tf_outbox_backlog{status}` 是否在涨（补偿通道是否追不上） | `tf_outbox_oldest_age_seconds{status}` 最老一条卡了多久；`tf_outbox_deadletter_total` 是否在增长 |
+| 「点赞数不对」 | `post_counter.updated_at`（多久没落库了） | `tf_counter_flush_batch_size` 是否有样本（调度还活着吗）；`tf_counter_flush_dedup_skipped_total` 是否非 0（flush 是否在反复重放） |
+| 「开 MQ 后新内容不可见」 | `rate(tf_feed_timeline_consume_failed_total)` / `rate(…_total)` 失败率 | 是否走了 `FeedTimelineDeliveryService` 单入口（旧代码曾漏掉缓存失效）；RocketMQ DLQ 是否有堆积（§5.1 runbook） |
 | 「兴趣画像不更新」 | 行为事件是否到达引擎 | `BehaviorLogSink` 队列是否长期打满（样本持续丢弃） |
 | 「注册偶发失败」 | 是否 `DuplicateKeyException`（主键冲突） | 多实例 worker-id 是否重复；租约模式下看续约日志是否被拉闸 |
 
