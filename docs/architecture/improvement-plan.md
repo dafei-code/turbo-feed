@@ -489,7 +489,7 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 | P0-2 `/internal/**` 服务间鉴权 | ✅ 已落地（#186） | 网关 + 引擎双端 `InternalTokenInterceptor` 校验 `X-Internal-Token`；值来自 `TURBOFEED_INTERNAL_TOKEN`，未配置即 fail-open 放行（克隆即跑），本地 yml 写死 `local-dev-internal-token` 开启校验。e2e 三态（无 / 错 / 正确 token）全绿 |
 | P0-3 Flyway schema 版本管理 | ✅ 已落地 | 仅版本化「单表」(SINGLE 登记的 5 张：sensitive_word/sensitive_whitelist/user_phone_router/outbox_event/review_task)；分片表(540 张)仍走 init-local.sql 模板。Spring Boot 3.4.x 无 spring-boot-starter-flyway(仅 4.x 起)，改用 BOM 托管 flyway-core(10.20.1)+flyway-mysql；默认关闭(TURBOFEED_FLYWAY_ENABLED)，直连物理库 turbo_feed_1 绕过 ShardingSphere。编译通过 + 直连 DB 只读 info 校验(V1 被发现、MySQL 方言加载) 全绿 |
 | P0-4 可观测性 | ✅ 已落地（metrics） | 两服务均引 `micrometer-registry-prometheus` 且暴露 `health,info,prometheus,metrics` 端点：gateway 补依赖 + 两服务补 `metrics` 端点（对齐 §3 P0-4 建议原文）；`/actuator/prometheus` 可被 Grafana 拉取。tracing（micrometer-tracing-bridge-otel + zipkin/OTLP）因需采集后端（zipkin/OTLP Collector），未擅自加依赖，列为阶段B 演进项 |
-| P0-1 自动化测试 | 🔧 进行中（2026-10-26） | ADR-001 已落（`docs/architecture/adr-001-testing.md`）；靶心由 6 扩至 **10**，全仓 **49 个测试类 / 360 例**（tf-shared 32、tf-redis 5、tf-hotspot 8、tf-feed-engine 112、tf-counter 8、tf-gateway 195，skip 8 为需 Docker 的集成测），`mvn test` 全绿。原 6 靶心——①审核 CAS 状态机 `MediaReviewServiceTest`(4) ②时间线 append-remove-promote `FeedTimelineStoreTest`(4) ③outbox 中继 `OutboxRelayTest`(4) ④用户分片路由 `UserJdbcRepositoryRoutingTest`(Testcontainers 真 MySQL，@RequiresDocker 守卫) ⑤处罚写路径缓存失效契约 `PenaltyServiceTest`(10) ⑥信用写路径缓存失效契约 `AccountCreditServiceTest`(5，均为 P2-6 把 AccountStateCache 委托 tf-hotspot SDK 后的 `stateCache.invalidate` 契约回归护栏，覆盖 canWrite 封禁推导与三路信用写失效）。**新增 4 靶心（M1/M2 期间）**——⑦跨服务契约 JSON golden `SharedContractJsonTest`(13，锁字段漂移 + 版本协商三边界) ⑧worker-id 租约 `WorkerIdLeaseManagerTest`(15) + 装配互斥 `SnowflakeConfigTest`(4) ⑨审核配置键契约 `ReviewPropertiesBindingTest`(5) ⑩计数落库事务闭合 `PostCounterRepositoryH2Test`(6，含故障注入反证)。CI 门禁 `.github/workflows/ci.yml`(`mvn -B clean test`，ubuntu 自带 Docker) 已加；根 pom 显式带 surefire 3.2.5 + testcontainers-bom。**缺口**：集成测的「真 MySQL 跑通」需 CI/Docker 环境确认（本地沙箱无 Docker）；CI 尚无覆盖率门槛与静态检查（M3）；2.6 万行主体中大量路径仍无自动化覆盖，「覆盖率偏低」的定性未变，只是关键路径已布防 |
+| P0-1 自动化测试 | 🔧 进行中（2026-10-27） | ADR-001 已落（[`docs/adr/0001-testing-strategy.md`](../adr/0001-testing-strategy.md)）；靶心由 6 扩至 **10**，全仓 **56 个测试类 / 399 例**（tf-shared 38、tf-redis 5、tf-hotspot 8、tf-feed-engine 124、tf-counter 12、tf-gateway 212，skip 8 为需 Docker 的集成测），`mvn test` 全绿。原 6 靶心——①审核 CAS 状态机 `MediaReviewServiceTest`(4) ②时间线 append-remove-promote `FeedTimelineStoreTest`(4) ③outbox 中继 `OutboxRelayTest`(4) ④用户分片路由 `UserJdbcRepositoryRoutingTest`(Testcontainers 真 MySQL，@RequiresDocker 守卫) ⑤处罚写路径缓存失效契约 `PenaltyServiceTest`(10) ⑥信用写路径缓存失效契约 `AccountCreditServiceTest`(5，均为 P2-6 把 AccountStateCache 委托 tf-hotspot SDK 后的 `stateCache.invalidate` 契约回归护栏，覆盖 canWrite 封禁推导与三路信用写失效）。**新增 4 靶心（M1/M2 期间）**——⑦跨服务契约 JSON golden `SharedContractJsonTest`(13，锁字段漂移 + 版本协商三边界) ⑧worker-id 租约 `WorkerIdLeaseManagerTest`(15) + 装配互斥 `SnowflakeConfigTest`(4) ⑨审核配置键契约 `ReviewPropertiesBindingTest`(5) ⑩计数落库事务闭合 `PostCounterRepositoryH2Test`(6，含故障注入反证)。CI 门禁 `.github/workflows/ci.yml`(`mvn -B clean test`，ubuntu 自带 Docker) 已加；根 pom 显式带 surefire 3.2.5 + testcontainers-bom。**缺口**：集成测的「真 MySQL 跑通」需 CI/Docker 环境确认（本地沙箱无 Docker）；CI 尚无覆盖率门槛与静态检查（M3）；2.6 万行主体中大量路径仍无自动化覆盖，「覆盖率偏低」的定性未变，只是关键路径已布防 |
 | P0-5 服务发现 / 配置中心 | 🟡 部分（2026-10-19 第一批已落） | 服务发现(双向 opt-in)+Sentinel 规则 Nacos 数据源(opt-in) 已落：依赖 + `@LoadBalanced RestClient` + `service-name` 切换 + 本地规则让位；`mvn compile` 通过、默认配置(Nacos 全关)真启动零回归。worker-id 集中分配经评审回退 phase-2（雪花 env-var 硬失败已保不撞号，短期够用）。真链路(多实例注册/LB/故障摘除、Sentinel 规则热推)待有 Nacos 的环境确认 |
 | P1-2 tf-counter 计数服务 | ✅ 已落地（收敛底座）+ 🔧 分布式增强 | 新增独立部署单元 `tf-counter`：点赞/评论/分享「增量事件」→ 缓冲 → 定时批量落 `post_counter`（最终一致）；三级读缓存 Caffeine L1/Redis L2(opt-in)/DB L3；传输 HTTP 兜底 + RocketMQ 顺序键 `postId`(opt-in) 互斥。默认关闭零回归。→ **分布式增强（2026-10-19，编译+单测全绿、未 push）**：抽 `CounterBuffer` 接口（内存默认 / 共享 Redis 双实现）；`CounterFlushService` 批量 UPSERT + `batch_id` 去重（`counter_flush_dedup`）实现 flush 幂等；`StandaloneCounterFlushScheduler`（默认无锁）/ `ClusteredCounterFlushScheduler`（ShedLock 选主独占 drain，配对共享 Redis 缓冲，多副本不丢不重）；新增 H2 集成测试（`applyBatch` 同 batch_id 重放计数不变、不同 batch_id 各落、ShedLock JDBC 锁在 H2 可用）全绿。`mvn compile`+`mvn test` 通过；Redis 真链路（共享缓冲 drain + ShedLock 选主）需本机 Redis 起后才能 e2e。详见 ADR-003 §6 |
 | P1-3 容器化部署 | ✅ 已落地（#187） | 参数化 `Dockerfile`（多阶段，按 `build.args.MODULE` 选子模块）+ 全栈 `docker-compose.yml`（mysql/redis/minio/三服务，RocketMQ 收进 `mq` profile）+ `.env.example`；所有凭据经环境变量注入，`docker compose config` 通过 |
@@ -569,12 +569,37 @@ README 与部分架构文档滞后于代码，以下是交叉核对后的真实�
 | MQ 消费侧 traceId | 契约里没有该字段，加字段等于升 `schemaVersion`。应与「MQ 链路整体可观测」一起做 | 契约版本演进批次 |
 | `tf-counter` 入站 traceId | 入口九成是 MQ 消费，HTTP 仅兜底；为兜底路径再加第三份过滤器副本收益低于维护成本 | 随 MQ 契约一起做 |
 
-**待办（M5~M6）**：
+### 7.5 M5 文档体系（已落地，2026-10-27）
 
-1. **M5 文档体系**：ADR 体系化（`docs/adr/`）、C4 架构图、CONTRIBUTING.md、README 完成度防漂移脚本。
-2. **M6**：`tf-benchmark` 兑现或诚实撤下 README 承诺。
-3. 评审原始项剩余：P0-5 Nacos🔧（真链路待 Nacos 环境验证）、P1-1 `FeedTimelineStore` 拆分、
+> 主题：让「文档说了什么」变成**构建期可验证**的事实，而不是靠人自觉。
+
+| 项 | 状态 | 落地说明 |
+| --- | --- | --- |
+| ADR 体系化 | ✅ | 4 份 ADR 从 `docs/architecture/adr-00X-*.md` 迁至 `docs/adr/00NN-*.md`（`git mv` 保留历史），新增 [`docs/adr/README.md`](../adr/README.md)：什么时候该写 / 不该写、五段式模板（**「负面/成本」是硬要求**）、状态语义、**「已采纳的 ADR 不改结论，要改动就写新的一份覆盖」**、索引表 |
+| 新增 ADR | ✅ | [0005 契约版本协商](../adr/0005-contract-versioning.md)、[0006 worker-id 自租约](../adr/0006-worker-id-lease.md)、[0007 可观测性口径](../adr/0007-observability.md)——补记 M2/M4 做过但没留档的决策 |
+| C4 架构图 | ✅ | [`docs/architecture/c4-model.md`](c4-model.md)：L1 上下文 / L2 容器 / L3 组件（网关·引擎·计数各一张），Mermaid 绘制 + 每图配等价表格（渲染不可用也不丢信息）。末尾「三条容易误解的线」写清了同步/异步边界与 tf-hotspot 不是部署单元 |
+| CONTRIBUTING.md | ✅ | 新建于根目录：环境 / 构建 / **两个环境专属坑**（D 盘 repackage、根目录 gitignored `application.yml`）/ 本地真启动（含 build-classpath 不输出 reactor 兄弟模块的坑）/ 提交规范 / **提交前自检清单** / 本项目的 6 条代码约定 / 症状速查表 |
+| README 漂移检查 | ✅ | `scripts/check-doc-drift.sh` + CI 步骤，四项检查：①相对链接可达 ②根 pom 每个 module 有 `docs/modules/*.md` ③README 提及每个模块 ④每份 ADR 登记在索引。**已做非空洞性反证**：造一个死链 + 一份未登记 ADR → 两项如期变红 → 删除 → 转绿 |
+| 补齐缺失的模块文档 | ✅ | `docs/README.md` 声称「模块文档与 Maven 模块一一对应」，实测 **tf-redis / tf-benchmark 都缺**。补 [`tf-redis.md`](../modules/tf-redis.md)（拓扑三态 / AutoConfiguration 机制 / 集群前提）与 [`tf-benchmark.md`](../modules/tf-benchmark.md)（**诚实标注空壳**、给出兑现条件） |
+
+**两个刻意的决定**
+
+1. **漂移检查排除 `docs/changelog/`**：那里有 7 条指向仓外 `turbo-feed-*.html` 的链接，而项目规则是
+   「changelog 是历史快照，不回头改」。纳入检查的结果只能是「永久红」或「破例改历史」，
+   两者都比「明确排除 + 写清原因」更糟。理由写在脚本注释里，不是隐式忽略。
+2. **ADR 迁目录而不是复制**：复制会留下两份真值，且旧位置的那份会慢慢腐坏。
+   `git mv` 保留 blame 历史，索引文档统一指向新路径。
+
+**M5 之后文档体系的边界**：能自动检查的是「结构一致性」（链接、文件存在、索引登记），
+**检查不了「内容是否还准确」**——比如某个类已经被重构但文档还在描述旧职责。
+后者只能靠「同一提交内同步文档」这条人工纪律，以及 review 时真正去看 diff。
+
+**待办（M6 + 其余）**：
+
+1. **M6**：`tf-benchmark` 兑现（容量目标 + 可重复数据基线 + 落地容量规划）或从 README 撤下承诺并删模块。
+2. 评审原始项剩余：P0-5 Nacos🔧（真链路待 Nacos 环境验证）、P1-1 `FeedTimelineStore` 拆分、
    P1-5 前端工程化；P2 其余（A/B、向量库、HTTPS/CDN、API 版本前缀）为演进优化。
-4. 工程卫生：`.workbuddy/` 仍未跟踪，建议加入 `.gitignore`。
+3. 工程卫生：`.workbuddy/` 仍未跟踪，建议加入 `.gitignore`。
+4. M4 登记的三处观测缺口（DLQ 深度 / MQ traceId / counter traceId），均需外部环境或契约演进。
 
 （M3 之前的旧待办清单已并入上方 §7.3，此处不再重复。）

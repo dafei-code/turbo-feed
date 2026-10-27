@@ -82,6 +82,13 @@ jobs:
 
           exit $fail
 
+      - name: 文档漂移检查
+        # 四项检查：相对链接可达性 / 模块文档与 Maven 模块一一对应 / README 提及每个模块 /
+        # ADR 索引完整。放在构建之前——纯文本检查，秒级，尽早给出反馈。
+        # 各项都对应真实发生过的漂移（ADR 目录搬迁造出 7 处死链、README 声称模块文档
+        # 一一对应而 tf-redis/tf-benchmark 实际缺失）。本地可单独跑：scripts/check-doc-drift.sh
+        run: bash scripts/check-doc-drift.sh
+
       - name: Build & verify
         # -Pci：激活 CI 专属门禁（JaCoCo 覆盖率报告）。本地默认不激活——插桩会拖慢日常构建，
         #   且本机 .m2 里 JaCoCo 传递依赖不完整、离线会直接失败（见根 pom 的 ci profile 注释）。

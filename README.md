@@ -100,11 +100,15 @@ Redis 在本项目**不只是缓存**，而是多项能力的权威数据源，�
 
 | 入口 | 内容 |
 |---|---|
+| [docs/architecture/c4-model.md](docs/architecture/c4-model.md) | **C4 架构模型**：上下文 / 容器 / 组件三层（Mermaid 图 + 表格对照） |
+| [docs/adr/](docs/adr/README.md) | **架构决策记录**：每份都写清了代价与否决过的方案 |
 | [docs/architecture/overview.md](docs/architecture/overview.md) | 系统总体架构：模块 / 通信 / 版本锁定 / 关键决策 |
 | [docs/architecture/service-split.md](docs/architecture/service-split.md) | 服务拆分：部署单元 / 端口 / 通信矩阵 |
-| [docs/modules/](docs/modules/) | 模块级技术文档（与 Maven 模块一一对应） |
+| [docs/architecture/failure-mode-ledger.md](docs/architecture/failure-mode-ledger.md) | 全链路失败模式对账：投递语义 / 降级口径 / 指标与告警规则 / 排障手册 |
+| [docs/modules/](docs/modules/) | 模块级技术文档（与 Maven 模块一一对应，CI 检查） |
 | [docs/api/gateway-api.md](docs/api/gateway-api.md) | HTTP 接口：认证约定 / 参数 / curl / 错误码 |
 | [docs/ops/deployment.md](docs/ops/deployment.md) | 构建部署 / 环境开关 / 生产前必改清单 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献指南：环境 / 构建 / 提交规范 / **提交前自检清单** / 代码约定 |
 | [docs/changelog/](docs/changelog/) | 变更记录（每次变更一份 md，编号递增） |
 
 维护约定：代码变更同一提交内同步模块文档，并追加编号 changelog。另附 `TurboFeed-详细设计.html`（上级目录 /Volumes/D/workbuddy/）。
