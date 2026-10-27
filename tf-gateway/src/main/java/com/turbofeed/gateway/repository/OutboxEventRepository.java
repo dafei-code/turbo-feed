@@ -182,6 +182,31 @@ public class OutboxEventRepository {
                 STATUS_PENDING, Timestamp.from(now.plusSeconds(cooldownSeconds)), Timestamp.from(now), id, STATUS_DEAD);
     }
 
+    /**
+     * 非终态积压统计（按状态分组，附每组最老一行的创建时间）。
+     *
+     * <p><b>为什么需要它</b>：{@code OutboxRelay} 每轮只打印 {@code due/成功/失败} 三个数，
+     * 回答不了「现在积压了多少、最老的一条卡了多久」——而这两个问题才是判断
+     * 「补偿通道是正常空转，还是已经追不上下游」的依据。{@code SENT} 是终态、
+     * 数量只增不减，统计进去毫无意义，故只取四个非终态。</p>
+     *
+     * <p>走 {@code idx_dispatch(status, next_attempt_at)} 的状态前缀做范围扫描；
+     * 正常情况下非终态行数极少（中继轮询到的应该永远是空列表），全表兜底也不会痛。</p>
+     *
+     * <p>无 Lombok：本仓库 {@code tf-gateway} 显式构造器风格，且此方法被单测直接构造。</p>
+     */
+    public List<BacklogRow> backlog() {
+        return jdbcTemplate.query(
+                "SELECT status, COUNT(*) AS cnt, MIN(created_at) AS oldest FROM outbox_event "
+                        + "WHERE status IN (?, ?, ?, ?) GROUP BY status",
+                (rs, rn) -> {
+                    Timestamp oldest = rs.getTimestamp("oldest");
+                    return new BacklogRow(rs.getString("status"), rs.getLong("cnt"),
+                            oldest == null ? null : oldest.toInstant());
+                },
+                STATUS_PENDING, STATUS_SENDING, STATUS_FAILED, STATUS_DEAD);
+    }
+
     private static String trim(String s, int max) {
         if (s == null) {
             return null;
@@ -192,5 +217,15 @@ public class OutboxEventRepository {
     /** 发件箱行投影。 */
     public record OutboxEvent(long id, String eventType, String aggregateId, Long userId, String payload,
                               String status, int attemptCount, int maxAttempts, Instant nextAttemptAt) {
+    }
+
+    /**
+     * 积压统计的一行：某状态下的行数 + 该状态最老一行的创建时间。
+     *
+     * @param status 状态（PENDING / SENDING / FAILED / DEAD）
+     * @param count  该状态行数
+     * @param oldest 该状态最老一行的创建时间；无行时为 {@code null}（调用方需容忍）
+     */
+    public record BacklogRow(String status, long count, Instant oldest) {
     }
 }

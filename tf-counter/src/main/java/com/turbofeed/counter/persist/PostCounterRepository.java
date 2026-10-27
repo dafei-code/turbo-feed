@@ -87,10 +87,14 @@ public class PostCounterRepository {
      *
      * @param snapshot 某次 drain 的 post_id -> [likeDelta, commentDelta, shareDelta, commentLikeDelta]
      * @param batchId  本 flush 周期唯一标识（UUID），用于去重与重放保护
+     * @return 本批次的结果统计（实际落库条数 / 被去重拦下的条数），供上层埋指标。
+     *         <b>返回值不是装饰</b>：{@code dedupSkipped > 0} 意味着「重放路径被走到了」，
+     *         正常情况下它应该恒为 0，一旦不归零就说明有 flush 异常在静默重试——这是唯一
+     *         能从外部观察到该路径的信号（M4 可观测性）。
      */
-    public void applyBatch(Map<String, long[]> snapshot, String batchId) {
+    public ApplyResult applyBatch(Map<String, long[]> snapshot, String batchId) {
         if (snapshot.isEmpty()) {
-            return;
+            return ApplyResult.EMPTY;
         }
         List<String> postIds = new ArrayList<>(snapshot.keySet());
         try {
@@ -130,12 +134,17 @@ public class PostCounterRepository {
                 });
                 return null;
             });
+            return new ApplyResult(postIds.size(), 0);
         } catch (DuplicateKeyException e) {
             // 整批为已落批次的重放：上面的事务已整体回滚（① ② 都没落），这里逐帖在
             // 【独立新事务】里补落——已落的被 dedup 拦下，未落的补上。
+            int applied = 0;
             for (String pid : postIds) {
-                safeApply(pid, snapshot.get(pid), batchId);
+                if (safeApply(pid, snapshot.get(pid), batchId)) {
+                    applied++;
+                }
             }
+            return new ApplyResult(applied, postIds.size() - applied);
         }
         // 其它异常（UPSERT 失败 / 连接中断）不在此捕获：事务已回滚，dedup 与计数都没落，
         // 交由调度器下个周期用新 batch_id 重放。绝不能吞掉——吞掉就等于把「可重放」
@@ -148,17 +157,20 @@ public class PostCounterRepository {
      * <p>已登记 → 空事务直接提交，不重复累加；UPSERT 失败 → 事务回滚、登记一并作废，
      * 与 {@link #applyBatch} 的批量路径保持同一套「要么都成、要么都滚」语义，
      * 不存在「逃生路径反而更不安全」的裂缝。</p>
+     *
+     * @return true = 本贴真的被累加了；false = 该 (batch, post) 已落过，被去重拦下
      */
-    private void safeApply(String postId, long[] d, String batchId) {
-        tx.execute(status -> {
+    private boolean safeApply(String postId, long[] d, String batchId) {
+        Boolean applied = tx.execute(status -> {
             try {
                 jdbcTemplate.update(DEDUP_SQL, batchId, postId, Timestamp.from(Instant.now()));
             } catch (DuplicateKeyException e) {
-                return null; // 该 (batch, post) 已落，跳过（空事务提交）
+                return Boolean.FALSE; // 该 (batch, post) 已落，跳过（空事务提交）
             }
             jdbcTemplate.update(UPSERT_SQL, postId, d[0], d[1], d[2], d[3]);
-            return null;
+            return Boolean.TRUE;
         });
+        return Boolean.TRUE.equals(applied);
     }
 
     /** 批量回读聚合计数（1 次 IN 查询），供 flush 后修正 L1/L2。空集合返回空 Map。 */
@@ -188,5 +200,17 @@ public class PostCounterRepository {
         } catch (org.springframework.dao.EmptyResultDataAccessException e) {
             return null;
         }
+    }
+
+    /**
+     * 一次 {@link #applyBatch} 的结果统计。
+     *
+     * @param applied      真正落库（累加）的帖子数
+     * @param dedupSkipped 被 {@code counter_flush_dedup} 拦下的帖子数（≥1 说明走到了整批重放路径）
+     */
+    public record ApplyResult(int applied, int dedupSkipped) {
+
+        /** 空快照的固定返回：不提「全部成功」，避免把「什么都没做」记成「成功落库」拉高指标。 */
+        public static final ApplyResult EMPTY = new ApplyResult(0, 0);
     }
 }

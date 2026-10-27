@@ -76,6 +76,15 @@
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- spring-boot-starter-test：JUnit5 + Mockito + AssertJ。版本由 spring-boot-dependencies BOM 托管。
+             补齐原因（M4）：本模块是唯一没有它的模块（网关 / 引擎 / tf-shared 都有），导致
+             CounterFlushService 这类「有多个协作者、无法只靠真实对象构造」的类没法写单测。
+             test scope，不进运行期 classpath；mockito 亦已由其它模块在本地 .m2 缓存。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
         <!-- ArchUnit（M1/3.1）：本服务是 Redis 客户端的【使用方】而非【装配方】，
              规则会拦截「又把 Redisson / Lettuce 连接工厂自建回来」的回潮。 -->
         <dependency>
