@@ -109,13 +109,7 @@ class RecommendationPipelineRecallTest {
     @Mock
     private RealtimeFeatureService realtimeFeatureService;
     @Mock
-    private DiversityRerankService diversityRerankService;
-    @Mock
-    private ColdStartService coldStartService;
-    @Mock
     private FollowService followService;
-    @Mock
-    private EcosystemRegulationService ecosystemRegulationService;
     @Mock
     private FeedFilterChain feedFilterChain;
 
@@ -151,11 +145,27 @@ class RecommendationPipelineRecallTest {
     private RecommendationPipeline pipeline(double hot, double interest, double vector, double follow) {
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
         lenient().when(redisTemplate.opsForZSet()).thenReturn(zSet);
-        RecommendationPipeline p = new RecommendationPipeline(redisTemplate, MAPPER,
-                postStatService, hotTimelineKeyCache, interestService, sessionSequenceService,
-                rankingModel, reviewSignalClient, moderationProperties, vectorRecallChannel,
-                realtimeFeatureService, new PreRankFilter(new LinearPreRankModel(new RankingProperties()), new RankingProperties()),
-                diversityRerankService, coldStartService, followService, ecosystemRegulationService, feedFilterChain);
+        RecallSupport recallSupport = new RecallSupport(redisTemplate, MAPPER, postStatService,
+                rankingModel, reviewSignalClient, moderationProperties, feedFilterChain);
+        List<RecallChannel> recallChannels = List.of(
+                new HotRecallChannel(hotTimelineKeyCache, postStatService),
+                new InterestRecallChannel(interestService, recallSupport),
+                new VectorFeedRecallChannel(vectorRecallChannel, recallSupport),
+                new FollowRecallChannel(recallSupport));
+        RerankStage diversityStage = mock(RerankStage.class);
+        lenient().when(diversityStage.phase()).thenReturn(RerankPhase.POOL);
+        lenient().when(diversityStage.rerank(any(), anyList())).thenAnswer(inv -> inv.getArgument(1));
+        RerankStage coldStage = mock(RerankStage.class);
+        lenient().when(coldStage.phase()).thenReturn(RerankPhase.COLD);
+        lenient().when(coldStage.rerank(any(), anyList())).thenAnswer(inv -> inv.getArgument(1));
+        RerankStage ecosystemStage = mock(RerankStage.class);
+        lenient().when(ecosystemStage.phase()).thenReturn(RerankPhase.FINAL);
+        lenient().when(ecosystemStage.rerank(any(), anyList())).thenAnswer(inv -> inv.getArgument(1));
+        List<RerankStage> rerankStages = List.of(diversityStage, coldStage, ecosystemStage);
+        RecommendationPipeline p = new RecommendationPipeline(followService, sessionSequenceService,
+                reviewSignalClient, moderationProperties, realtimeFeatureService,
+                new PreRankFilter(new LinearPreRankModel(new RankingProperties()), new RankingProperties()),
+                recallSupport, recallChannels, rerankStages, interestService);
         ReflectionTestUtils.setField(p, "poolWeightsCsv", "0.34,0.33,0.33");
         ReflectionTestUtils.setField(p, "hotRecallRatio", hot);
         ReflectionTestUtils.setField(p, "interestRecallRatio", interest);
@@ -183,9 +193,6 @@ class RecommendationPipelineRecallTest {
         lenient().when(rankingModel.score(any(RankingFeatures.class))).thenReturn(0d);
         lenient().when(moderationProperties.isEnableRecallFilter()).thenReturn(false);
         lenient().when(moderationProperties.isEnableHealthDemotion()).thenReturn(false);
-        lenient().when(coldStartService.exploreBudget(anyInt())).thenReturn(0);
-        lenient().when(diversityRerankService.rerank(anyList())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(ecosystemRegulationService.regulate(anyList(), anyInt())).thenAnswer(inv -> inv.getArgument(0));
         // 索引反查 + 作者 ZSET 统一走桩表
         lenient().when(valueOps.get(anyString())).thenAnswer(inv -> indexStubs.get(inv.getArgument(0)));
         lenient().when(zSet.reverseRangeByScoreWithScores(anyString(), anyDouble(), anyDouble(), anyLong(), anyLong()))

@@ -1,6 +1,5 @@
 package com.turbofeed.feedengine.timeline;
 
-import com.turbofeed.feedengine.timeline.RecommendationPipeline.ScoredItem;
 import com.turbofeed.shared.model.FeedItemView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,9 +30,12 @@ import java.util.Set;
  *
  * <p><b>fail-open</b>：任何异常 → 返回原序（不丢内容、不阻断浏览）。打不散时（整页一个话题 / 内容极少）
  * 同样回退原序——「保内容」优先于「形式多样性」。</p>
+ *
+ * <p><b>P1 组件化</b>：实现 {@link RerankStage}（phase=POOL），入参由 {@code List<ScoredItem>}
+ * 改为 {@code List<FeedItemView>}（原序由下标表示，语义不变），供 {@link RecommendationPipeline} 统一编排。</p>
  */
 @Component
-public class DiversityRerankService {
+public class DiversityRerankService implements RerankStage {
 
     private static final Logger log = LoggerFactory.getLogger(DiversityRerankService.class);
 
@@ -43,13 +45,20 @@ public class DiversityRerankService {
         this.props = props;
     }
 
+    @Override
+    public RerankPhase phase() {
+        return RerankPhase.POOL;
+    }
+
     /**
      * 对按 displayScore 降序的池候选做上下文感知重排。
      *
+     * @param ctx    本请求上下文（当前未使用，保留扩展位）
      * @param ranked 已按 displayScore 降序排好的候选
      * @return 重排后的候选（同集合、同成员，仅相对次序变化）
      */
-    public List<ScoredItem> rerank(List<ScoredItem> ranked) {
+    @Override
+    public List<FeedItemView> rerank(RecallContext ctx, List<FeedItemView> ranked) {
         if (!props.isEnabled() || ranked == null || ranked.size() <= 2) {
             return ranked;
         }
@@ -61,26 +70,26 @@ public class DiversityRerankService {
         }
     }
 
-    private List<ScoredItem> greedyRerank(List<ScoredItem> ranked) {
+    private List<FeedItemView> greedyRerank(List<FeedItemView> ranked) {
         int window = Math.max(1, props.getWindow());
         double authorPenalty = props.getAuthorPenaltyWeight();
         double tagPenalty = props.getTagOverlapPenalty();
         int authorCap = Math.max(1, props.getAuthorCapPerWindow());
 
-        Map<ScoredItem, Integer> origIdx = new HashMap<>();
+        Map<FeedItemView, Integer> origIdx = new HashMap<>();
         for (int i = 0; i < ranked.size(); i++) {
             origIdx.put(ranked.get(i), i);
         }
 
-        List<ScoredItem> remaining = new ArrayList<>(ranked);
-        List<ScoredItem> out = new ArrayList<>(ranked.size());
-        List<ScoredItem> recent = new ArrayList<>();        // 最近 window 条已输出内容（上下文）
+        List<FeedItemView> remaining = new ArrayList<>(ranked);
+        List<FeedItemView> out = new ArrayList<>(ranked.size());
+        List<FeedItemView> recent = new ArrayList<>();        // 最近 window 条已输出内容（上下文）
         Map<String, Integer> authorCountInWindow = new HashMap<>();
 
         while (!remaining.isEmpty()) {
-            ScoredItem best = null;
+            FeedItemView best = null;
             double bestScore = Double.NEGATIVE_INFINITY;
-            for (ScoredItem c : remaining) {
+            for (FeedItemView c : remaining) {
                 double s = (ranked.size() - origIdx.get(c))
                         - authorPenalty * authorRepeatPenalty(c, authorCountInWindow, authorCap)
                         - tagPenalty * tagOverlapWithRecent(c, recent);
@@ -92,14 +101,14 @@ public class DiversityRerankService {
             remaining.remove(best);
             out.add(best);
             // 更新上下文窗口
-            String aid = TimelineSupport.authorIdOf(best.item());
+            String aid = TimelineSupport.authorIdOf(best);
             if (aid != null) {
                 authorCountInWindow.merge(aid, 1, Integer::sum);
             }
             recent.add(best);
             if (recent.size() > window) {
-                ScoredItem evicted = recent.remove(0);
-                String evictedAid = TimelineSupport.authorIdOf(evicted.item());
+                FeedItemView evicted = recent.remove(0);
+                String evictedAid = TimelineSupport.authorIdOf(evicted);
                 if (evictedAid != null) {
                     authorCountInWindow.merge(evictedAid, -1, Integer::sum);
                     if (authorCountInWindow.get(evictedAid) <= 0) {
@@ -112,8 +121,8 @@ public class DiversityRerankService {
     }
 
     /** 作者重复惩罚：超过 cap 后线性加重（cap 内也给基础惩罚，促使作者分散）。 */
-    private double authorRepeatPenalty(ScoredItem c, Map<String, Integer> authorCountInWindow, int authorCap) {
-        String aid = TimelineSupport.authorIdOf(c.item());
+    private double authorRepeatPenalty(FeedItemView c, Map<String, Integer> authorCountInWindow, int authorCap) {
+        String aid = TimelineSupport.authorIdOf(c);
         if (aid == null) {
             return 0d;
         }
@@ -126,14 +135,14 @@ public class DiversityRerankService {
     }
 
     /** 与窗口内已选内容的最大标签 Jaccard 重叠（0~1）。无标签内容返回 0（不罚）。 */
-    private double tagOverlapWithRecent(ScoredItem c, List<ScoredItem> recent) {
-        Set<String> tags = tagsOf(c.item());
+    private double tagOverlapWithRecent(FeedItemView c, List<FeedItemView> recent) {
+        Set<String> tags = tagsOf(c);
         if (tags.isEmpty() || recent.isEmpty()) {
             return 0d;
         }
         double maxOverlap = 0d;
-        for (ScoredItem r : recent) {
-            Set<String> rt = tagsOf(r.item());
+        for (FeedItemView r : recent) {
+            Set<String> rt = tagsOf(r);
             if (rt.isEmpty()) {
                 continue;
             }

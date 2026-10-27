@@ -37,7 +37,7 @@ import java.util.Map;
  * 优先级低于「内容可达」。</p>
  */
 @Component
-public class EcosystemRegulationService {
+public class EcosystemRegulationService implements RerankStage {
 
     private static final Logger log = LoggerFactory.getLogger(EcosystemRegulationService.class);
 
@@ -50,6 +50,16 @@ public class EcosystemRegulationService {
         this.removed = Counter.builder("tf_feed_ecosystem_removed_total")
                 .description("生态调控层(G9)整页配额裁剪掉的内容条数")
                 .register(registry);
+    }
+
+    @Override
+    public RerankPhase phase() {
+        return RerankPhase.FINAL;
+    }
+
+    @Override
+    public List<FeedItemView> rerank(RecallContext ctx, List<FeedItemView> page) {
+        return regulate(page, ctx.limit);
     }
 
     /**

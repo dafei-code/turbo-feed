@@ -92,13 +92,7 @@ class FeedTimelineStoreReadPagePreRankTest {
     @Mock
     private RealtimeFeatureService realtimeFeatureService;
     @Mock
-    private DiversityRerankService diversityRerankService;
-    @Mock
-    private ColdStartService coldStartService;
-    @Mock
     private FollowService followService;
-    @Mock
-    private EcosystemRegulationService ecosystemRegulationService;
     @Mock
     private FeedFilterChain feedFilterChain;
 
@@ -114,11 +108,26 @@ class FeedTimelineStoreReadPagePreRankTest {
         lenient().when(redisTemplate.opsForZSet()).thenReturn(zSet);
         // A7：漏斗编排在 RecommendationPipeline 里，粗排也在其中，故这里构造真实的 pipeline
         // （不是 mock），否则测不到"粗排 × 分页"的组合行为——那正是本文件要守护的地方。
-        RecommendationPipeline pipeline = new RecommendationPipeline(redisTemplate, MAPPER,
-                postStatService, hotTimelineKeyCache, interestService, sessionSequenceService,
-                rankingModel, reviewSignalClient, moderationProperties, vectorRecallChannel,
-                realtimeFeatureService, preRankFilter, diversityRerankService, coldStartService,
-                followService, ecosystemRegulationService, feedFilterChain);
+        RecallSupport recallSupport = new RecallSupport(redisTemplate, MAPPER, postStatService,
+                rankingModel, reviewSignalClient, moderationProperties, feedFilterChain);
+        List<RecallChannel> recallChannels = List.of(
+                new HotRecallChannel(hotTimelineKeyCache, postStatService),
+                new InterestRecallChannel(interestService, recallSupport),
+                new VectorFeedRecallChannel(vectorRecallChannel, recallSupport),
+                new FollowRecallChannel(recallSupport));
+        RerankStage diversityStage = mock(RerankStage.class);
+        lenient().when(diversityStage.phase()).thenReturn(RerankPhase.POOL);
+        lenient().when(diversityStage.rerank(any(), anyList())).thenAnswer(inv -> inv.getArgument(1));
+        RerankStage coldStage = mock(RerankStage.class);
+        lenient().when(coldStage.phase()).thenReturn(RerankPhase.COLD);
+        lenient().when(coldStage.rerank(any(), anyList())).thenAnswer(inv -> inv.getArgument(1));
+        RerankStage ecosystemStage = mock(RerankStage.class);
+        lenient().when(ecosystemStage.phase()).thenReturn(RerankPhase.FINAL);
+        lenient().when(ecosystemStage.rerank(any(), anyList())).thenAnswer(inv -> inv.getArgument(1));
+        List<RerankStage> rerankStages = List.of(diversityStage, coldStage, ecosystemStage);
+        RecommendationPipeline pipeline = new RecommendationPipeline(followService, sessionSequenceService,
+                reviewSignalClient, moderationProperties, realtimeFeatureService,
+                preRankFilter, recallSupport, recallChannels, rerankStages, interestService);
         // @Value 字段 new 出来不注入：poolWeightsCsv 需显式给出，其余召回配比保持 0（各路关闭，只留流量池）
         ReflectionTestUtils.setField(pipeline, "poolWeightsCsv", "0.2,0.3,0.5");
         FeedTimelineStore s = new FeedTimelineStore(redisTemplate, MAPPER, pipeline);
@@ -141,10 +150,6 @@ class FeedTimelineStoreReadPagePreRankTest {
         lenient().when(rankingModel.score(any(RankingFeatures.class))).thenReturn(0d);
         lenient().when(moderationProperties.isEnableRecallFilter()).thenReturn(false);
         lenient().when(moderationProperties.isEnableHealthDemotion()).thenReturn(false);
-        lenient().when(coldStartService.exploreBudget(anyInt())).thenReturn(0);
-        lenient().when(diversityRerankService.rerank(anyList())).thenAnswer(inv -> inv.getArgument(0));
-        lenient().when(ecosystemRegulationService.regulate(anyList(), anyInt()))
-                .thenAnswer(inv -> inv.getArgument(0));
     }
 
     /** 造某池候选：count 条，入流 score 随序号递减（i 越大越旧）。 */
