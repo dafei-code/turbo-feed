@@ -349,3 +349,20 @@ turbofeed:
 # RocketMQ 连接配置已移至 profile 文件 application-mq.yml（--spring.profiles.active=mq 时加载）。
 # 放在那里的原因：只有让 rocketmq.name-server 在默认运行下「真正缺席」，
 # rocketmq-spring 才会跳过全部 Bean（见文件顶部 mq.enabled 处注释的字节码依据）。
+
+# ---- M4 可观测性：traceId 进日志 ----
+# 值由 trace/TraceIdFilter 放进 MDC（键名见 TraceIds.MDC_KEY）。
+#
+# 为什么改 logging.pattern.level 而不写一份 logback-spring.xml：
+# Boot 的三套默认 pattern（console/file/exception）都引用 ${LOG_LEVEL_PATTERN:-%5p}，
+# 而 logging.pattern.level 会被 Boot 映射成该系统属性（LoggingSystemProperties#apply）。
+# 于是只需替换 level 段，就能保留 Boot 默认的彩色控制台、滚动策略与异常转换词——
+# 若复制整份 pattern，Boot 升级改了默认格式时我们这份会停在旧写法上，且没人会发现。
+#
+# %X{traceId:-} 的 :- 空默认值很重要：缺失时输出空串，而不是字面量 traceId_IS_UNDEFINED
+# （Logback 对未定义 MDC 键的默认输出），那种日志既难看又会干扰 grep。
+# 无 traceId 的场景是正常的：定时任务、MQ 消费、启动期，都不在 HTTP 请求线程上。
+logging:
+  pattern:
+    level: "%5p [%X{traceId:-}]"
+

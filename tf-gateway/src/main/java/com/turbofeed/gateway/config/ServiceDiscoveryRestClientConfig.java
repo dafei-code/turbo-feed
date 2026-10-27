@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.config;
 
+import com.turbofeed.gateway.trace.TracePropagationInterceptor;
 import org.springframework.boot.autoconfigure.web.client.RestClientBuilderConfigurer;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.context.annotation.Bean;
@@ -51,7 +52,7 @@ public class ServiceDiscoveryRestClientConfig {
     @Bean
     @Scope("prototype")
     public RestClient.Builder directRestClientBuilder(RestClientBuilderConfigurer configurer) {
-        return configurer.configure(RestClient.builder());
+        return withTracePropagation(configurer.configure(RestClient.builder()));
     }
 
     /**
@@ -64,6 +65,19 @@ public class ServiceDiscoveryRestClientConfig {
     @Bean
     @LoadBalanced
     public RestClient.Builder loadBalancedRestClientBuilder() {
-        return RestClient.builder();
+        return withTracePropagation(RestClient.builder());
+    }
+
+    /**
+     * 给出站请求带上当前 traceId（M4）。
+     *
+     * <p><b>为什么两个 builder 都要加</b>：只加直连那份的话，一旦开启 Nacos 服务发现走 LB 分支，
+     * traceId 会在网关→引擎这一跳<b>静默断开</b>——两边都还能正常跑，只是日志再也串不起来，
+     * 而且这种事没人会主动去查。这类「只在某种部署形态下失效」的缺口，必须在同一处一起关掉。</p>
+     *
+     * <p>拦截器本体见 {@link TracePropagationInterceptor}（抽出成类是为了能单测）。</p>
+     */
+    private static RestClient.Builder withTracePropagation(RestClient.Builder builder) {
+        return builder.requestInterceptor(new TracePropagationInterceptor());
     }
 }
