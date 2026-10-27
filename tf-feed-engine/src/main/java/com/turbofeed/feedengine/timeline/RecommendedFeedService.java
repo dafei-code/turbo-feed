@@ -170,8 +170,10 @@ public class RecommendedFeedService {
         if (cursor == null) {
             // 页码模式：复用既有分页 + 缓存（键含页码），不产出游标
             List<FeedItemView> items = recommended(page, limit, userId);
-            return new FeedRecommendedPage(items, "", items.size() == limit);
+            return new FeedRecommendedPage(items, "", items.size() == limit, page);
         }
+        // 游标模式：本页绝对翻页序号由游标 depth 携带（首页 depth=0，逐页 +1），供曝光特征定位
+        int depth = cursor.depth();
         // 游标模式：以游标 score 为排他上界读取 + 游标维度缓存
         boolean personalized = userId != null && !userId.isBlank();
         String version = readVersion();
@@ -188,7 +190,7 @@ public class RecommendedFeedService {
             try {
                 String cached = redisTemplate.opsForValue().get(key);
                 if (cached != null) {
-                    return wrapWithCursor(ItemViewCodec.parseList(objectMapper, cached), limit);
+                    return wrapWithCursor(ItemViewCodec.parseList(objectMapper, cached), limit, depth);
                 }
             } catch (Exception e) {
                 log.warn("推荐流游标缓存读取失败，回落实时读: key={}, {}", key, e.getMessage());
@@ -202,11 +204,11 @@ public class RecommendedFeedService {
                 log.warn("推荐流游标缓存写入失败（不影响本次读取）: key={}, {}", key, e.getMessage());
             }
         }
-        return wrapWithCursor(fresh, limit);
+        return wrapWithCursor(fresh, limit, depth);
     }
 
-    /** 包一页内容为 {@link FeedRecommendedPage}，并据末条的入流 score 计算 {@code nextCursor}。 */
-    private FeedRecommendedPage wrapWithCursor(List<FeedItemView> items, int limit) {
+    /** 包一页内容为 {@link FeedRecommendedPage}，并据末条的入流 score 计算 {@code nextCursor}（depth+1）。 */
+    private FeedRecommendedPage wrapWithCursor(List<FeedItemView> items, int limit, int page) {
         if (items == null) {
             items = List.of();
         }
@@ -215,11 +217,12 @@ public class RecommendedFeedService {
             FeedItemView last = items.get(items.size() - 1);
             Long s = feedTimelineStore.inflowScoreOf(last.timelineKey());
             if (s != null) {
-                next = FeedCursor.of(s, last.timelineKey()).encode();
+                // nextCursor 携带 depth+1：下一页续拉时其绝对翻页序号即本页 +1
+                next = FeedCursor.of(s, last.timelineKey(), page + 1).encode();
             }
         }
         boolean hasMore = items.size() == limit;
-        return new FeedRecommendedPage(items, next, hasMore);
+        return new FeedRecommendedPage(items, next, hasMore, page);
     }
 
     /**

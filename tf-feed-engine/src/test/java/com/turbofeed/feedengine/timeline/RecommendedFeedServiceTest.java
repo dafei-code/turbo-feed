@@ -186,8 +186,8 @@ class RecommendedFeedServiceTest {
         FeedCursor cursor = FeedCursor.of(1700000000000.0, "post/1/prev");
         FeedRecommendedPage page = service().recommendedPage(0, 20, "1001", cursor);
 
-        // 末条入流 score → 编码进不透明 nextCursor（前端原样回传）
-        assertEquals(FeedCursor.of(1700000000999.0, "post/1/b").encode(), page.nextCursor());
+        // 末条入流 score + 本页绝对序号 depth(0)+1 → 编码进不透明 nextCursor（前端原样回传）
+        assertEquals(FeedCursor.of(1700000000999.0, "post/1/b", 1).encode(), page.nextCursor());
         assertFalse(page.hasMore(), "2 条 < limit 20 → 无更多（hasMore 语义由 items.size()==limit 决定）");
         // 缓存 Key 必须含 :cursor: 维度，与页码模式互不串
         ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);

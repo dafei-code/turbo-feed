@@ -11,7 +11,8 @@ import java.util.List;
  * <p>{@code /api/v1/feed/recommended} 现在统一返回本视图（复用评论 {@code CommentPage} 模式）：
  * {@link #items()} 为当前页内容（已由 {@link FeedEngineClient} 从引擎 {@code FeedItemView}
  * 映射为网关 {@link MediaItem} 视图），{@link #nextCursor()} 为续拉游标
- * （空串 = 已到末页），{@link #hasMore()} 为本页是否填满。</p>
+ * （空串 = 已到末页），{@link #hasMore()} 为本页是否填满，
+ * {@link #page()} 为本页<b>绝对翻页序号</b>（keyset 模式由游标 depth 续传累加，供曝光特征定位）。</p>
  *
  * <p><b>为什么是 {@code List<MediaItem>} 而不是 {@code FeedItemView}</b>：本视图是网关对外
  * （前端 / 下游服务）的展示模型，客户端已注入点赞/评论计数与已赞态（抖音式「计数接卡片」），
@@ -23,5 +24,6 @@ import java.util.List;
 public record FeedRecommendedPage(
         @JsonProperty("items") List<MediaItem> items,
         @JsonProperty("nextCursor") String nextCursor,
-        @JsonProperty("hasMore") boolean hasMore) {
+        @JsonProperty("hasMore") boolean hasMore,
+        @JsonProperty("page") int page) {
 }

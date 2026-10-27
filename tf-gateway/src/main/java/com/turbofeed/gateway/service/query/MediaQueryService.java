@@ -112,8 +112,10 @@ public class MediaQueryService {
             // 抖音式卡片计数注入：点赞数（网关 Redis Set 基数，去重权威值）/ 已赞态 /
             // 评论数（引擎共享实时分 comments 字段，客户端 COMMENT 行为事件实时累加）。
             List<MediaItem> enriched = enrichCounts(pageView.items(), userId);
-            emitImpressions(userId, enriched, page);
-            return new FeedRecommendedPage(enriched, pageView.nextCursor(), pageView.hasMore());
+            // 曝光用引擎回传的绝对翻页序号（pageView.page()），而非网关 page 入参——
+            // 游标模式下网关 page 恒为 0，必须用游标 depth 续传出的绝对序号，否则所有续拉页都记成第 0 页。
+            emitImpressions(userId, enriched, pageView.page());
+            return new FeedRecommendedPage(enriched, pageView.nextCursor(), pageView.hasMore(), pageView.page());
         }
         // 引擎不可用 → 降级（保全接口形态，绝不跨分片广播）
         return degrade(page, limit, userId);
@@ -131,11 +133,11 @@ public class MediaQueryService {
             log.warn("Feed 引擎不可用，降级回源分片库广播查询（degraded-mode=local-scan，仅限本地/演示）: page={}, size={}",
                     page, limit);
             List<MediaItem> items = enrichCounts(mediaRepository.listApprovedGlobal(limit, offset), userId);
-            return new FeedRecommendedPage(items, "", false);
+            return new FeedRecommendedPage(items, "", false, page);
         }
         log.warn("Feed 引擎不可用，降级返回空列表（degraded-mode=empty，拒绝跨分片广播）: page={}, size={}",
                 page, limit);
-        return new FeedRecommendedPage(List.of(), "", false);
+        return new FeedRecommendedPage(List.of(), "", false, page);
     }
 
     /**

@@ -74,7 +74,7 @@ class MediaQueryServiceTest {
         MediaQueryService svc = service();
         setCursorEnabled(svc, true);
         stubEnrich();
-        FeedRecommendedPage clientPage = new FeedRecommendedPage(List.of(item("post/1/a")), "NEXT", true);
+        FeedRecommendedPage clientPage = new FeedRecommendedPage(List.of(item("post/1/a")), "NEXT", true, 1);
         when(feedEngineClient.recommended(anyInt(), anyInt(), any(), any())).thenReturn(Optional.of(clientPage));
 
         FeedRecommendedPage result = svc.listRecommended(0, 20, "1001", "SOMECURSOR");
@@ -92,7 +92,7 @@ class MediaQueryServiceTest {
         MediaQueryService svc = service();
         setCursorEnabled(svc, true);
         stubEnrich();
-        FeedRecommendedPage clientPage = new FeedRecommendedPage(List.of(item("post/1/a")), "", false);
+        FeedRecommendedPage clientPage = new FeedRecommendedPage(List.of(item("post/1/a")), "", false, 0);
         when(feedEngineClient.recommended(anyInt(), anyInt(), any(), any())).thenReturn(Optional.of(clientPage));
 
         svc.listRecommended(3, 20, "1001", "");
@@ -107,7 +107,7 @@ class MediaQueryServiceTest {
         MediaQueryService svc = service();
         setCursorEnabled(svc, false);
         stubEnrich();
-        FeedRecommendedPage clientPage = new FeedRecommendedPage(List.of(item("post/1/a")), "", false);
+        FeedRecommendedPage clientPage = new FeedRecommendedPage(List.of(item("post/1/a")), "", false, 0);
         when(feedEngineClient.recommended(anyInt(), anyInt(), any(), any())).thenReturn(Optional.of(clientPage));
 
         svc.listRecommended(2, 20, "1001", "SOMECURSOR");

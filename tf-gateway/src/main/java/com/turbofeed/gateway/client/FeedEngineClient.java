@@ -169,7 +169,7 @@ public class FeedEngineClient {
             }
             JsonNode data = root.path("data");
             if (data.isMissingNode() || data.isNull()) {
-                return Optional.of(new FeedRecommendedPage(List.of(), "", false));
+                return Optional.of(new FeedRecommendedPage(List.of(), "", false, 0));
             }
             // 引擎下发的是契约类型 FeedItemView；网关侧 FeedRecommendedPage.items 是 MediaItem 视图
             // （已注入计数/已赞态），两者字段口径不同，不能直接 convertValue 到 MediaItem 字段上。
@@ -178,12 +178,14 @@ public class FeedEngineClient {
                     objectMapper.getTypeFactory().constructCollectionType(List.class, FeedItemView.class));
             String nextCursor = data.path("nextCursor").asText("");
             boolean hasMore = data.path("hasMore").asBoolean(false);
+            // 引擎回传的绝对翻页序号（keyset 模式下由游标 depth 续传累加），与入参 page 区分命名避免遮蔽
+            int returnedPage = data.path("page").asInt(0);
             // 版本协商（M3）：引擎可能已先升级并写出更高版本的条目，按错误语义渲染等于静默出错。
             // 口径与引擎侧 ItemViewCodec 一致——不可消费的条目跳过，而不是让整页失败。
             List<MediaItem> items = ContractVersion.filterConsumable(rawItems,
                     FeedItemView.SCHEMA_VERSION, FeedItemView::schemaVersion)
                     .stream().map(FeedItemMapper::toView).toList();
-            return Optional.of(new FeedRecommendedPage(items, nextCursor, hasMore));
+            return Optional.of(new FeedRecommendedPage(items, nextCursor, hasMore, returnedPage));
         } catch (Exception e) {
             health.recordReadFailure(e.toString());
             log.warn("Feed 引擎读取失败（由调用方按 degraded-mode 决定降级口径）: page={}, size={}, cursor={}, {}",
