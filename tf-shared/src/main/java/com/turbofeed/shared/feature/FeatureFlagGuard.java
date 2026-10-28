@@ -15,7 +15,8 @@ import java.util.function.Function;
  * 给出可读的中文报错，而不是让应用在缺 Bean / 错模式下以诡异方式崩溃或静默降级。</p>
  *
  * <p><b>框架无关</b>：本类不依赖 Spring，由各模块用 {@code Environment} 适配 {@link PropertyLookup} 后调用，
- * 便于单测与跨模块复用。校验逻辑纯函数，不读网络、不碰中间件。</p>
+ * 便于单测与跨模块复用。校验逻辑纯函数，不读网络、不碰中间件。所有属性键统一取自 {@link FeatureFlagKeys}，
+ * 与 {@code @ConditionalOnProperty} / {@code @Value} 引用同一单一事实源。</p>
  *
  * <p><b>触发时机</b>：由各模块以 {@code static @Bean BeanFactoryPostProcessor} 在上下文 refresh 早期、
  * 单例实例化之前调用，从而抢在 RocketMQ / Redisson 等 starter 的"缺 Bean 静默失败"之前报错。</p>
@@ -53,10 +54,10 @@ public final class FeatureFlagGuard {
 
     /** MQ 总闸：开启但无 name-server 或未激活 mq profile → 明确失败（否则缺 RocketMQTemplate/消费者 Bean 静默崩）。 */
     private void validateMessaging() {
-        if (!bool("turbofeed.mq.enabled")) {
+        if (!bool(FeatureFlagKeys.MQ_ENABLED)) {
             return;
         }
-        boolean hasNameServer = hasText(prop("rocketmq.name-server"));
+        boolean hasNameServer = hasText(prop(FeatureFlagKeys.ROCKETMQ_NAME_SERVER));
         boolean mqProfile = activeProfiles.contains("mq");
         if (!hasNameServer || !mqProfile) {
             StringBuilder sb = new StringBuilder("turbofeed.mq.enabled=true 但 RocketMQ 连接未就绪：");
@@ -74,7 +75,7 @@ public final class FeatureFlagGuard {
 
     /** 死信 replay 依赖 MQ：开 dlq-replay 但没开 mq → 死信链路根本不工作。 */
     private void validateDlqReplay() {
-        if (bool("turbofeed.feed.timeline.dlq-replay.enabled") && !bool("turbofeed.mq.enabled")) {
+        if (bool(FeatureFlagKeys.FEED_TIMELINE_DLQ_REPLAY_ENABLED) && !bool(FeatureFlagKeys.MQ_ENABLED)) {
             fail("turbofeed.feed.timeline.dlq-replay.enabled=true 依赖 turbofeed.mq.enabled=true，"
                     + " 但 MQ 未启用，死信 replay 无法工作。请同时开启 turbofeed.mq.enabled 并激活 mq profile。");
         }
@@ -82,18 +83,18 @@ public final class FeatureFlagGuard {
 
     /** Redis 拓扑：cluster / sentinel 必须有对应节点或 master，否则 Redisson/Lettuce 启动即连不上。 */
     private void validateRedisTopology() {
-        String mode = prop("turbofeed.redis.mode");
+        String mode = prop(FeatureFlagKeys.REDIS_MODE);
         if (mode == null) {
             mode = "single"; // 与 @ConditionalOnProperty(matchIfMissing=true) 默认一致
         }
         switch (mode) {
             case "cluster":
-                if (!hasText(prop("turbofeed.redis.cluster.nodes"))) {
-                    fail("turbofeed.redis.mode=cluster 必须配置 turbofeed.redis.cluster.nodes（逗号分隔的 host:port 列表）。");
+                if (!hasText(prop(FeatureFlagKeys.REDIS_CLUSTER_NODES))) {
+                    fail("turbofeed.redis.mode=cluster 必须配置 turbofeed.redis.cluster-nodes（逗号分隔的 host:port 列表）。");
                 }
                 break;
             case "sentinel":
-                if (!hasText(prop("turbofeed.redis.sentinel-master"))) {
+                if (!hasText(prop(FeatureFlagKeys.REDIS_SENTINEL_MASTER))) {
                     fail("turbofeed.redis.mode=sentinel 必须配置 turbofeed.redis.sentinel-master。");
                 }
                 break;
@@ -106,8 +107,8 @@ public final class FeatureFlagGuard {
 
     /** 计数缓冲：redis-buffer 依赖 redis-enabled（需 RedissonClient），只开缓冲不开 Redis 会 NoSuchBean。 */
     private void validateCounterBuffer() {
-        boolean buffer = bool("turbofeed.counter.redis-buffer-enabled");
-        boolean redis = bool("turbofeed.counter.redis-enabled");
+        boolean buffer = bool(FeatureFlagKeys.COUNTER_REDIS_BUFFER_ENABLED);
+        boolean redis = bool(FeatureFlagKeys.COUNTER_REDIS_ENABLED);
         if (buffer && !redis) {
             fail("turbofeed.counter.redis-buffer-enabled=true 需同时 turbofeed.counter.redis-enabled=true"
                     + "（缓冲依赖 RedissonClient）。或关闭 redis-buffer-enabled 退回进程内缓冲。");
@@ -116,11 +117,11 @@ public final class FeatureFlagGuard {
 
     /** 向量召回：two-tower 训练需 mode=model/ann；mode 非法值会被 TagVectorRecallChannel 静默走默认分支。 */
     private void validateVectorRecall() {
-        String mode = prop("turbofeed.feed.recall.vector.mode");
+        String mode = prop(FeatureFlagKeys.VECTOR_MODE);
         if (mode != null && !Set.of("hash", "model", "ann").contains(mode)) {
             fail("turbofeed.feed.recall.vector.mode 取值非法：" + mode + "（允许 hash / model / ann）。");
         }
-        if (bool("turbofeed.feed.recall.vector.two-tower.enabled")) {
+        if (bool(FeatureFlagKeys.VECTOR_TWO_TOWER_ENABLED)) {
             String m = mode == null ? "hash" : mode;
             if (!Set.of("model", "ann").contains(m)) {
                 fail("turbofeed.feed.recall.vector.two-tower.enabled=true 需 turbofeed.feed.recall.vector.mode=model 或 ann"
@@ -131,7 +132,7 @@ public final class FeatureFlagGuard {
 
     /** 媒资存储：非法 storage 值会让三个客户端都不匹配，静默无存储实现。 */
     private void validateMediaStorage() {
-        String storage = prop("turbofeed.media.storage");
+        String storage = prop(FeatureFlagKeys.MEDIA_STORAGE);
         if (storage != null && !Set.of("minio", "local", "placeholder").contains(storage)) {
             fail("turbofeed.media.storage 取值非法：" + storage + "（允许 minio / local / placeholder）。");
         }

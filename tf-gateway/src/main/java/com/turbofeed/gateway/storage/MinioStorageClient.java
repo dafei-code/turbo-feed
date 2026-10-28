@@ -56,7 +56,7 @@ import java.util.concurrent.TimeUnit;
  */
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "turbofeed.media.storage", havingValue = "minio")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MEDIA_STORAGE, havingValue = "minio")
 public class MinioStorageClient implements MediaStorageClient, InitializingBean {
 
     private final MediaProperties properties;

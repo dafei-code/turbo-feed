@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component;
  * true 也不会激活本类。现统一为 canonical 名 {@code turbofeed.counter.redis-enabled}。</p>
  */
 @Component
-@ConditionalOnProperty(name = "turbofeed.counter.redis-enabled", havingValue = "true")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.COUNTER_REDIS_ENABLED, havingValue = "true")
 public class RedisCounterStore {
 
     private final RedissonClient redisson;

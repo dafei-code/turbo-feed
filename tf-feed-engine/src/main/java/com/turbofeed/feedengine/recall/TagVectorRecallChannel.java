@@ -44,7 +44,7 @@ public class TagVectorRecallChannel implements VectorRecallChannel {
                                   ItemEmbeddingSource itemEmbeddingSource,
                                   VectorIndexWriter vectorIndexWriter,
                                   MeterRegistry registry,
-                                  @Value("${turbofeed.feed.recall.vector.mode:hash}") String mode) {
+                                  @Value("${" + com.turbofeed.shared.feature.FeatureFlagKeys.VECTOR_MODE + ":hash}") String mode) {
         this.userEmbeddingSource = userEmbeddingSource;
         this.itemEmbeddingSource = itemEmbeddingSource;
         this.vectorIndexWriter = vectorIndexWriter;

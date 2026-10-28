@@ -17,7 +17,7 @@ import java.util.List;
  * （时间线投递 fail-fast 是因为它关系内容正确性、要靠事务回滚兜底；埋点无此约束。）</p>
  */
 @Component
-@ConditionalOnProperty(name = "turbofeed.mq.enabled", havingValue = "true")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED, havingValue = "true")
 public class RocketMqBehaviorEventPublisher implements BehaviorEventPublisher {
 
     /** 行为埋点 Topic，与引擎侧 {@code FeedBehaviorConsumer} 共用同一配置键。 */

@@ -25,7 +25,7 @@ import java.util.Set;
 @RestController
 @RequestMapping("/internal/feed/timeline/dlq")
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = {"turbofeed.feed.timeline.dlq-replay.enabled", "turbofeed.mq.enabled"},
+@ConditionalOnProperty(name = {com.turbofeed.shared.feature.FeatureFlagKeys.FEED_TIMELINE_DLQ_REPLAY_ENABLED, com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED},
         havingValue = "true")
 public class FeedTimelineDlqController {
 

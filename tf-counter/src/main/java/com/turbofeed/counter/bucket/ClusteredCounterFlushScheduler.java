@@ -21,7 +21,7 @@ import org.springframework.stereotype.Component;
  * 而 ShedLockConfig 同样以 {@code redis-buffer-enabled=true} 为门控——两者天然同生共灭。</p>
  */
 @Component
-@ConditionalOnProperty(name = "turbofeed.counter.redis-buffer-enabled", havingValue = "true")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.COUNTER_REDIS_BUFFER_ENABLED, havingValue = "true")
 public class ClusteredCounterFlushScheduler {
 
     private final CounterFlushService flushService;

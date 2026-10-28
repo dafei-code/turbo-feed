@@ -33,7 +33,7 @@ import java.util.List;
  * 不用重启网关。</p>
  */
 @Configuration
-@ConditionalOnProperty(name = "turbofeed.sentinel.nacos.enabled", havingValue = "true")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.SENTINEL_NACOS_ENABLED, havingValue = "true")
 public class SentinelNacosDataSourceConfig {
 
     private static final Logger log = LoggerFactory.getLogger(SentinelNacosDataSourceConfig.class);

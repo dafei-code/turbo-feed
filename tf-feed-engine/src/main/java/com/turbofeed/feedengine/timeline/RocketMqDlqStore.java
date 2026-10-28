@@ -33,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Slf4j
 @Component
-@ConditionalOnProperty(name = {"turbofeed.feed.timeline.dlq-replay.enabled", "turbofeed.mq.enabled"},
+@ConditionalOnProperty(name = {com.turbofeed.shared.feature.FeatureFlagKeys.FEED_TIMELINE_DLQ_REPLAY_ENABLED, com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED},
         havingValue = "true")
 public class RocketMqDlqStore implements DlqMessageStore, InitializingBean, DisposableBean {
 
@@ -48,7 +48,7 @@ public class RocketMqDlqStore implements DlqMessageStore, InitializingBean, Disp
 
     public RocketMqDlqStore(ObjectMapper objectMapper,
                             @Value("${turbofeed.feed.timeline.consumer-group:turbofeed-feed-timeline-group}") String consumerGroup,
-                            @Value("${rocketmq.name-server:}") String namesrvAddr) {
+                            @Value("${" + com.turbofeed.shared.feature.FeatureFlagKeys.ROCKETMQ_NAME_SERVER + ":}") String namesrvAddr) {
         this.objectMapper = objectMapper;
         this.consumerGroup = consumerGroup;
         this.namesrvAddr = namesrvAddr == null ? "" : namesrvAddr;

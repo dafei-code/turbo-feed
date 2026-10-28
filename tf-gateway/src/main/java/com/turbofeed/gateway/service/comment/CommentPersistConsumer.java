@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
  * 把削峰后的事件幂等落库（{@code INSERT IGNORE}，comment_id 主键保证同事件只落一次）。fail-open。</p>
  */
 @Component
-@ConditionalOnProperty(name = "turbofeed.mq.enabled", havingValue = "true")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED, havingValue = "true")
 @RocketMQMessageListener(topic = "turbofeed-comment-created", consumerGroup = "tf-comment-persist")
 public class CommentPersistConsumer implements RocketMQListener<CommentCreatedEvent> {
 

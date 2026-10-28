@@ -15,7 +15,7 @@ import java.util.List;
  * 与时间线投递的 HTTP 兜底同语义（fail-open）。</p>
  */
 @Component
-@ConditionalOnProperty(name = "turbofeed.mq.enabled", havingValue = "false", matchIfMissing = true)
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED, havingValue = "false", matchIfMissing = true)
 public class HttpBehaviorEventPublisher implements BehaviorEventPublisher {
 
     private final FeedEngineClient feedEngineClient;

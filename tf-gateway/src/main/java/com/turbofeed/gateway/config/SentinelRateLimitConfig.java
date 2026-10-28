@@ -44,7 +44,7 @@ import java.util.List;
  * （见 {@link SentinelNacosDataSourceConfig}）。
  */
 @Configuration
-@ConditionalOnProperty(name = "turbofeed.sentinel.nacos.enabled", havingValue = "false", matchIfMissing = true)
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.SENTINEL_NACOS_ENABLED, havingValue = "false", matchIfMissing = true)
 public class SentinelRateLimitConfig {
 
     private static final Logger log = LoggerFactory.getLogger(SentinelRateLimitConfig.class);

@@ -14,7 +14,7 @@ public class VectorUserSourceEnabledCondition implements Condition {
 
     @Override
     public boolean matches(ConditionContext ctx, AnnotatedTypeMetadata metadata) {
-        String v = ctx.getEnvironment().getProperty("turbofeed.feed.recall.vector.mode");
+        String v = ctx.getEnvironment().getProperty(com.turbofeed.shared.feature.FeatureFlagKeys.VECTOR_MODE);
         return "model".equalsIgnoreCase(v) || "ann".equalsIgnoreCase(v);
     }
 }

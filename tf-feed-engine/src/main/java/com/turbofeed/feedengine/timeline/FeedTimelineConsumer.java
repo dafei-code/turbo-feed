@@ -51,7 +51,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "turbofeed.mq.enabled", havingValue = "true")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED, havingValue = "true")
 @RocketMQMessageListener(
         topic = "${turbofeed.feed.timeline.topic:turbofeed-feed-timeline}",
         consumerGroup = "${turbofeed.feed.timeline.consumer-group:turbofeed-feed-timeline-group}",

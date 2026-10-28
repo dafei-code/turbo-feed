@@ -23,7 +23,7 @@ import javax.sql.DataSource;
  * 让其他副本接管）；{@code lockAtLeastFor=4s} 防止短任务在多数调度框架下被同一副本重复抢到。</p>
  */
 @Configuration
-@ConditionalOnProperty(name = "turbofeed.counter.redis-buffer-enabled", havingValue = "true")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.COUNTER_REDIS_BUFFER_ENABLED, havingValue = "true")
 @EnableSchedulerLock(defaultLockAtMostFor = "9s", defaultLockAtLeastFor = "4s")
 public class ShedLockConfig {
 

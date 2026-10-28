@@ -22,7 +22,7 @@ import org.springframework.stereotype.Component;
  * 埋点只需累加、无顺序依赖，故用并发消费提升吞吐。</p>
  */
 @Component
-@ConditionalOnProperty(name = "turbofeed.mq.enabled", havingValue = "true")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED, havingValue = "true")
 @RocketMQMessageListener(
         topic = "${turbofeed.feed.behavior.topic:turbofeed-feed-behavior}",
         consumerGroup = "${turbofeed.feed.behavior.consumer-group:turbofeed-feed-behavior-group}",

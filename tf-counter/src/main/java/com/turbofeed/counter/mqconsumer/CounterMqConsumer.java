@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
  * 保证「MQ 启用 / 关闭」两种部署下计数逻辑只有一套。</p>
  */
 @Component
-@ConditionalOnProperty(name = "turbofeed.mq.enabled", havingValue = "true")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED, havingValue = "true")
 @RocketMQMessageListener(topic = "turbofeed-counter-incr", consumerGroup = "tf-counter-incr")
 public class CounterMqConsumer implements RocketMQListener<CounterIncrementEvent> {
 

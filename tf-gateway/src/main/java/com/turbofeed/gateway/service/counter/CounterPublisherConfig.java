@@ -22,12 +22,12 @@ public class CounterPublisherConfig {
 
     /** 总闸：计数聚合底座整体开启。 */
     @Configuration
-    @ConditionalOnProperty(name = "turbofeed.counter.service.enabled", havingValue = "true")
+    @ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.COUNTER_SERVICE_ENABLED, havingValue = "true")
     static class CounterServiceEnabledConfig {
 
         /** 默认分支：MQ 关闭/缺失 → HTTP 兜底（与 FeedEngineClient 同款防腐层）。 */
         @Configuration
-        @ConditionalOnProperty(name = "turbofeed.mq.enabled", havingValue = "false", matchIfMissing = true)
+        @ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED, havingValue = "false", matchIfMissing = true)
         static class HttpBranch {
             @Bean
             public HttpCounterEventPublisher httpCounterEventPublisher(CounterProperties props,
@@ -39,11 +39,11 @@ public class CounterPublisherConfig {
 
         /** opt-in 分支：MQ 开启 → 顺序键 postId 投递削峰。 */
         @Configuration
-        @ConditionalOnProperty(name = "turbofeed.mq.enabled", havingValue = "true")
+        @ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED, havingValue = "true")
         static class MqBranch {
             @Bean
             public RocketMqCounterEventPublisher rocketMqCounterEventPublisher(RocketMQTemplate rocketMQTemplate,
-                    @Value("${turbofeed.counter.service.topic:turbofeed-counter-incr}") String topic) {
+                    @Value("${" + com.turbofeed.shared.feature.FeatureFlagKeys.COUNTER_SERVICE_TOPIC + ":turbofeed-counter-incr}") String topic) {
                 return new RocketMqCounterEventPublisher(rocketMQTemplate, topic);
             }
         }

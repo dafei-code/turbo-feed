@@ -23,7 +23,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "turbofeed.mq.enabled", havingValue = "true")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED, havingValue = "true")
 @RocketMQMessageListener(
         topic = "${turbofeed.media.mq.topic:turbofeed-media-uploaded}",
         consumerGroup = "${turbofeed.media.mq.consumer-group:turbofeed-media-review-group}",

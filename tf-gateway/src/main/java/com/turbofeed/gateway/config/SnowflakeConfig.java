@@ -52,7 +52,7 @@ public class SnowflakeConfig {
      * 缺失、非数字或越界一律启动失败。</p>
      */
     @Bean
-    @ConditionalOnProperty(name = "turbofeed.snowflake.lease-enabled", havingValue = "false", matchIfMissing = true)
+    @ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.SNOWFLAKE_LEASE_ENABLED, havingValue = "false", matchIfMissing = true)
     public SnowflakeIdGenerator configuredSnowflakeIdGenerator(
             @Value("${turbofeed.snowflake.worker-id:}") String workerIdRaw,
             @Value("${turbofeed.snowflake.datacenter-id:}") String datacenterIdRaw) {
@@ -73,7 +73,7 @@ public class SnowflakeConfig {
      * {@code @PostConstruct}）让「抢占失败 = 启动失败」的时序在调用栈里一眼可见。</p>
      */
     @Bean
-    @ConditionalOnProperty(name = "turbofeed.snowflake.lease-enabled", havingValue = "true")
+    @ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.SNOWFLAKE_LEASE_ENABLED, havingValue = "true")
     public SnowflakeIdGenerator leasedSnowflakeIdGenerator(WorkerIdLeaseManager lease) {
         log.info("雪花 ID 生成器初始化（自租约模式）: workerId={}, datacenterId={}, instanceId={}",
                 lease.workerId(), lease.datacenterId(), lease.instanceId());
@@ -87,7 +87,7 @@ public class SnowflakeConfig {
      * 直接抛异常，进程起不来——不做任何静默退化。</p>
      */
     @Bean(destroyMethod = "release")
-    @ConditionalOnProperty(name = "turbofeed.snowflake.lease-enabled", havingValue = "true")
+    @ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.SNOWFLAKE_LEASE_ENABLED, havingValue = "true")
     public WorkerIdLeaseManager workerIdLeaseManager(StringRedisTemplate redisTemplate,
                                                      @Value("${turbofeed.snowflake.datacenter-id}") long datacenterId,
                                                      @Value("${turbofeed.snowflake.lease-ttl-seconds:60}") long ttlSeconds,

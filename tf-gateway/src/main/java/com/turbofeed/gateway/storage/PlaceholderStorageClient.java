@@ -26,7 +26,7 @@ import java.util.UUID;
  */
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "turbofeed.media.storage", havingValue = "placeholder")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MEDIA_STORAGE, havingValue = "placeholder")
 public class PlaceholderStorageClient implements MediaStorageClient {
 
     private static final Logger log = LoggerFactory.getLogger(PlaceholderStorageClient.class);

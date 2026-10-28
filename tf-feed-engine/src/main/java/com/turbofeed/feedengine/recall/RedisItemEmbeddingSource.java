@@ -24,7 +24,7 @@ import org.springframework.stereotype.Service;
  */
 @Service
 @Primary
-@ConditionalOnProperty(name = "turbofeed.feed.recall.vector.mode", havingValue = "model")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.VECTOR_MODE, havingValue = "model")
 public class RedisItemEmbeddingSource implements ItemEmbeddingSource {
 
     private static final Logger log = LoggerFactory.getLogger(RedisItemEmbeddingSource.class);

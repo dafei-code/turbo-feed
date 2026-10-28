@@ -41,8 +41,8 @@ import java.util.Map;
  */
 @Component
 @ConditionalOnProperty(name = {
-        "turbofeed.counter.redis-buffer-enabled",
-        "turbofeed.counter.redis-enabled"
+        com.turbofeed.shared.feature.FeatureFlagKeys.COUNTER_REDIS_BUFFER_ENABLED,
+        com.turbofeed.shared.feature.FeatureFlagKeys.COUNTER_REDIS_ENABLED
 }, havingValue = "true")
 @Primary
 public class RedisCounterBuffer implements CounterBuffer {

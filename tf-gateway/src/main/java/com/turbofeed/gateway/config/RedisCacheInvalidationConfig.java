@@ -33,7 +33,7 @@ import org.springframework.data.redis.listener.RedisMessageListenerContainer;
  * （发布侧同步关闭，见 {@code AccountStateCache#invalidate}）。</p>
  */
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(name = "turbofeed.state-cache.broadcast-enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.STATE_CACHE_BROADCAST_ENABLED, havingValue = "true", matchIfMissing = true)
 public class RedisCacheInvalidationConfig {
 
     private static final Logger log = LoggerFactory.getLogger(RedisCacheInvalidationConfig.class);

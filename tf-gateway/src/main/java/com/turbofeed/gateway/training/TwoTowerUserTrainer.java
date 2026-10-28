@@ -59,7 +59,7 @@ public class TwoTowerUserTrainer {
 
     public TwoTowerUserTrainer(InteractionEventRepository repository,
                                StringRedisTemplate redis,
-                               @Value("${turbofeed.feed.recall.vector.two-tower.enabled:false}") boolean enabled,
+                               @Value("${" + com.turbofeed.shared.feature.FeatureFlagKeys.VECTOR_TWO_TOWER_ENABLED + ":false}") boolean enabled,
                                @Value("${turbofeed.feed.recall.vector.item-prefix:tf:emb:item:}") String itemPrefix,
                                @Value("${turbofeed.feed.recall.vector.user-prefix:tf:emb:user:}") String userPrefix,
                                @Value("${turbofeed.feed.recall.vector.dim:64}") int dim,

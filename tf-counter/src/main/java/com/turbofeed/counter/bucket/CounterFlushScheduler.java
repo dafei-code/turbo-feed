@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
  * 由 {@link ClusteredCounterFlushScheduler} 接管。</p>
  */
 @Component
-@ConditionalOnProperty(name = "turbofeed.counter.redis-buffer-enabled", havingValue = "false", matchIfMissing = true)
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.COUNTER_REDIS_BUFFER_ENABLED, havingValue = "false", matchIfMissing = true)
 public class CounterFlushScheduler {
 
     private final CounterFlushService flushService;

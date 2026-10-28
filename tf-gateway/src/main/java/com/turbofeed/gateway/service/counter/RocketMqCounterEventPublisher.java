@@ -22,7 +22,7 @@ public class RocketMqCounterEventPublisher implements CounterEventPublisher {
     private final String topic;
 
     public RocketMqCounterEventPublisher(RocketMQTemplate rocketMQTemplate,
-                                         @Value("${turbofeed.counter.service.topic:turbofeed-counter-incr}") String topic) {
+                                         @Value("${" + com.turbofeed.shared.feature.FeatureFlagKeys.COUNTER_SERVICE_TOPIC + ":turbofeed-counter-incr}") String topic) {
         this.rocketMQTemplate = rocketMQTemplate;
         this.topic = topic;
     }

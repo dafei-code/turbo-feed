@@ -46,7 +46,7 @@ import java.util.UUID;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "turbofeed.media.storage", havingValue = "local", matchIfMissing = true)
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MEDIA_STORAGE, havingValue = "local", matchIfMissing = true)
 public class LocalDiskStorageClient implements MediaStorageClient {
 
     /** 落盘过程中的临时后缀，写完后原子改名，避免半截文件被读到。 */

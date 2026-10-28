@@ -28,7 +28,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "turbofeed.mq.enabled", havingValue = "true")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED, havingValue = "true")
 public class RocketMqMediaEventPublisher implements MediaEventPublisher {
 
     /** 媒体上传事件 Topic（编译期常量，作为 {@code @Value} 缺省值，发布与消费共用同一配置键）。 */

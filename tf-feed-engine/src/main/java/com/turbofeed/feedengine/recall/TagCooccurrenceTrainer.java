@@ -74,7 +74,7 @@ public class TagCooccurrenceTrainer {
 
     public TagCooccurrenceTrainer(StringRedisTemplate redis,
                                   ObjectMapper objectMapper,
-                                  @Value("${turbofeed.feed.recall.vector.mode:hash}") String mode,
+                                  @Value("${" + com.turbofeed.shared.feature.FeatureFlagKeys.VECTOR_MODE + ":hash}") String mode,
                                   @Value("${turbofeed.feed.recall.vector.auto-train:true}") boolean autoTrain,
                                   @Value("${turbofeed.feed.recall.vector.dim:64}") int dim,
                                   @Value("${turbofeed.feed.recall.vector.item-prefix:tf:emb:item:}") String itemPrefix,

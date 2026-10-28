@@ -26,7 +26,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "turbofeed.mq.enabled", havingValue = "true")
+@ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED, havingValue = "true")
 public class RocketMqFeedTimelinePublisher implements FeedTimelinePublisher {
 
     /** Feed 时间线事件 Topic，与引擎侧 {@code FeedTimelineConsumer} 共用同一配置键。 */

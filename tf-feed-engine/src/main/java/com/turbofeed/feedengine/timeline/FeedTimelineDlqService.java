@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Service
-@ConditionalOnProperty(name = {"turbofeed.feed.timeline.dlq-replay.enabled", "turbofeed.mq.enabled"},
+@ConditionalOnProperty(name = {com.turbofeed.shared.feature.FeatureFlagKeys.FEED_TIMELINE_DLQ_REPLAY_ENABLED, com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED},
         havingValue = "true")
 public class FeedTimelineDlqService {
 
