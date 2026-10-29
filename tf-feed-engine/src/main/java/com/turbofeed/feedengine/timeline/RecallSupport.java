@@ -153,7 +153,7 @@ public class RecallSupport {
 
     /** 组装排序特征并交 {@link RankingModel} 打分（原 scoreOf 逻辑，逐候选复用 ctx 内画像/会话/实时特征）。 */
     double scoreOf(ScoredItem s, RecallContext ctx) {
-        PostStatService.PostStat stat = new PostStatService.PostStat(0, 0, 0, 0, 0, 0);
+        PostStatService.PostStat stat = new PostStatService.PostStat(0, 0, 0, 0, 0, 0, 0);
         try {
             stat = postStatService.snapshot(s.item().timelineKey());
         } catch (Exception ignore) {

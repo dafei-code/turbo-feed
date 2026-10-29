@@ -218,6 +218,7 @@ public class InterestService {
             "LIKE", 1.0,
             "COMMENT", 1.5,
             "SHARE", 1.5,
+            "FAVORITE", 1.5,
             "DISLIKE", -1.5);
 
     /**

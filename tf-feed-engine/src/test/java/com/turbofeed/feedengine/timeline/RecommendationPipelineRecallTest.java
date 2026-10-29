@@ -189,7 +189,7 @@ class RecommendationPipelineRecallTest {
         lenient().when(followService.hasFollows(anyString())).thenReturn(false);
         lenient().when(followService.followedAuthors(anyString(), anyInt())).thenReturn(List.of());
         lenient().when(postStatService.snapshot(anyString()))
-                .thenReturn(new PostStatService.PostStat(0, 0, 0, 0, 0, 0));
+                .thenReturn(new PostStatService.PostStat(0, 0, 0, 0, 0, 0, 0));
         lenient().when(rankingModel.score(any(RankingFeatures.class))).thenReturn(0d);
         lenient().when(moderationProperties.isEnableRecallFilter()).thenReturn(false);
         lenient().when(moderationProperties.isEnableHealthDemotion()).thenReturn(false);

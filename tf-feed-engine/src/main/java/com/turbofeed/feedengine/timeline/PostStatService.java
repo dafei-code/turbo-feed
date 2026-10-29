@@ -20,7 +20,7 @@ import java.util.Set;
  * 内容实时分（抖音式赛马的数据底座）。
  *
  * <p>每条内容维护一个 Redis Hash {@code tf:post:stat:{timelineKey}}，字段为
- * {@code impressions / playCompletes / likes / comments / shares / dislikes}——
+ * {@code impressions / playCompletes / likes / comments / shares / dislikes / favorites}——
  * 行为事件（曝光/完播/点赞/评论/分享/不感兴趣）实时累加，即"内容实时分"。</p>
  *
  * <p><b>为什么用 Hash 而不是新存储</b>：用户明确要求"复用现有 Redis，不引新存储"。
@@ -78,6 +78,7 @@ public class PostStatService {
             "LIKE", 1.0,
             "COMMENT", 1.5,
             "SHARE", 2.0,
+            "FAVORITE", 2.0,
             "DISLIKE", -2.0,
             "NOT_INTERESTED", -3.0);
 
@@ -183,10 +184,11 @@ public class PostStatService {
                     asLong(m.get("likes")),
                     asLong(m.get("comments")),
                     asLong(m.get("shares")),
-                    asLong(m.get("dislikes")));
+                    asLong(m.get("dislikes")),
+                    asLong(m.get("favorites")));
         } catch (Exception e) {
             log.warn("行为分读取失败（按零分处理）: timelineKey={}, {}", timelineKey, e.getMessage());
-            return new PostStat(0, 0, 0, 0, 0, 0);
+            return new PostStat(0, 0, 0, 0, 0, 0, 0);
         }
     }
 
@@ -277,6 +279,8 @@ public class PostStatService {
             case "PLAY_COMPLETE", "play_complete" -> "playCompletes";
             case "LIKE", "like" -> "likes";
             case "UNLIKE", "unlike" -> "likes";
+            case "FAVORITE", "favorite" -> "favorites";
+            case "UNFAVORITE", "unfavorite" -> "favorites";
             case "COMMENT", "comment" -> "comments";
             case "SHARE", "share" -> "shares";
             case "DISLIKE", "dislike", "NOT_INTERESTED", "not_interested" -> "dislikes";
@@ -293,6 +297,9 @@ public class PostStatService {
         if (t.equals("UNLIKE")) {
             t = "LIKE";
         }
+        if (t.equals("UNFAVORITE")) {
+            t = "FAVORITE";
+        }
         return HOT_WEIGHTS.get(t);
     }
 
@@ -307,6 +314,6 @@ public class PostStatService {
      * @param dislikes     不感兴趣/负向
      */
     public record PostStat(long impressions, long playCompletes, long likes,
-                           long comments, long shares, long dislikes) {
+                           long comments, long shares, long dislikes, long favorites) {
     }
 }

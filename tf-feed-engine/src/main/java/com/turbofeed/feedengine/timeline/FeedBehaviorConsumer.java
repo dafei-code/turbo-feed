@@ -59,6 +59,9 @@ public class FeedBehaviorConsumer implements RocketMQListener<FeedBehaviorEvent>
         } else if ("UNLIKE".equalsIgnoreCase(msg.type())) {
             // 取消点赞：实时分 −1 + 热点榜按 LIKE 负权重回退（与 HTTP 路径成对修改）
             postStatService.cancel(msg.timelineKey(), msg.type());
+        } else if ("UNFAVORITE".equalsIgnoreCase(msg.type())) {
+            // 取消收藏：实时分 −1 + 热点榜按 FAVORITE 负权重回退（与 HTTP 路径成对修改）
+            postStatService.cancel(msg.timelineKey(), msg.type());
         } else {
             postStatService.record(msg.timelineKey(), msg.type());
         }

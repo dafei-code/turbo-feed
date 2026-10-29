@@ -145,7 +145,7 @@ class FeedTimelineStoreReadPagePreRankTest {
         lenient().when(realtimeFeatureService.profileOf(any())).thenReturn(null);
         lenient().when(followService.hasFollows(anyString())).thenReturn(false);
         lenient().when(postStatService.snapshot(anyString()))
-                .thenReturn(new PostStatService.PostStat(0, 0, 0, 0, 0, 0));
+                .thenReturn(new PostStatService.PostStat(0, 0, 0, 0, 0, 0, 0));
         // 精排恒 0 分 → 稳定排序保持粗排给出的池内顺序，断言才可确定
         lenient().when(rankingModel.score(any(RankingFeatures.class))).thenReturn(0d);
         lenient().when(moderationProperties.isEnableRecallFilter()).thenReturn(false);

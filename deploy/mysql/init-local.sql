@@ -10060,3 +10060,1293 @@ CREATE TABLE `turbo_feed_2`.`user_fans_127` (
   PRIMARY KEY (`author_id`, `user_id`),
   KEY `idx_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='粉丝关系表(谁关注了我, 物理分片 turbo_feed_2.user_fans_127)';
+
+-- ==================== 视频收藏表（media_favorite_0..media_favorite_127，分片键 post_id，HASH_MOD 128 节点） ====================
+-- 设计：media_favorite 是收藏的持久化兜底；收藏的「去重权威 + 已收藏态 + 计数 + 我的收藏列表」实时源是
+--       Redis Set tf:favorite:users:{postId}（SADD 原子去重、SCARD 计数、SISMEMBER 已收藏态）与 per-user ZSET tf:favorite:user:{userId}。
+--       本表仅在收藏/取消时同步 INSERT/DELETE，供 Redis 重启后据表重建去重集合与「我的收藏」ZSET（运维脚本）。
+--       分片键 post_id（= 时间线幂等键 timelineKey，与公域实时分 tf:post:stat:{postId}、去重集合同身份），
+--       与 comment(media_id) 正交；保证「读某条内容下所有收藏」单分片命中。
+-- 扩容（④，2026-10-13）：分片数 4 -> 128，物理表全局连续编号 media_favorite_0..media_favorite_127
+--       （偶数下标落 ds_0=turbo_feed_1、奇数 ds_1=turbo_feed_2）。存量采用清空重建（A 方案）。
+-- 配置见 shardingsphere-config(-128).yaml 的 media_favorite autoTable（shardingAlgorithmName: hashMod128）。
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_0` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_0)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_1` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_1)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_2` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_2)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_3` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_3)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_4` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_4)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_5` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_5)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_6` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_6)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_7` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_7)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_8` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_8)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_9` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_9)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_10` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_10)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_11` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_11)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_12` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_12)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_13` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_13)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_14` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_14)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_15` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_15)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_16` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_16)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_17` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_17)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_18` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_18)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_19` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_19)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_20` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_20)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_21` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_21)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_22` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_22)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_23` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_23)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_24` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_24)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_25` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_25)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_26` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_26)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_27` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_27)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_28` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_28)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_29` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_29)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_30` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_30)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_31` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_31)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_32` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_32)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_33` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_33)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_34` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_34)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_35` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_35)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_36` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_36)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_37` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_37)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_38` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_38)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_39` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_39)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_40` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_40)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_41` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_41)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_42` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_42)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_43` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_43)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_44` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_44)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_45` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_45)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_46` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_46)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_47` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_47)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_48` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_48)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_49` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_49)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_50` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_50)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_51` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_51)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_52` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_52)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_53` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_53)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_54` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_54)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_55` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_55)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_56` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_56)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_57` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_57)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_58` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_58)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_59` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_59)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_60` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_60)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_61` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_61)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_62` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_62)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_63` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_63)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_64` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_64)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_65` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_65)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_66` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_66)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_67` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_67)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_68` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_68)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_69` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_69)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_70` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_70)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_71` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_71)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_72` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_72)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_73` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_73)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_74` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_74)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_75` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_75)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_76` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_76)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_77` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_77)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_78` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_78)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_79` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_79)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_80` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_80)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_81` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_81)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_82` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_82)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_83` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_83)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_84` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_84)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_85` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_85)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_86` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_86)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_87` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_87)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_88` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_88)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_89` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_89)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_90` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_90)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_91` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_91)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_92` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_92)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_93` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_93)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_94` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_94)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_95` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_95)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_96` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_96)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_97` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_97)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_98` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_98)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_99` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_99)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_100` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_100)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_101` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_101)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_102` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_102)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_103` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_103)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_104` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_104)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_105` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_105)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_106` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_106)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_107` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_107)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_108` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_108)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_109` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_109)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_110` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_110)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_111` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_111)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_112` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_112)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_113` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_113)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_114` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_114)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_115` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_115)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_116` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_116)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_117` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_117)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_118` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_118)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_119` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_119)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_120` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_120)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_121` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_121)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_122` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_122)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_123` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_123)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_124` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_124)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_125` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_125)';
+
+CREATE TABLE `turbo_feed_1`.`media_favorite_126` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_1.media_favorite_126)';
+
+CREATE TABLE `turbo_feed_2`.`media_favorite_127` (
+  `id`         BIGINT       NOT NULL                COMMENT '雪花ID, 主键',
+  `post_id`    VARCHAR(255) NOT NULL                COMMENT '被收藏内容ID(=时间线幂等键), 分片键',
+  `user_id`    BIGINT       NOT NULL                COMMENT '收藏者用户ID',
+  `created_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP               COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_post_user` (`post_id`, `user_id`),
+  KEY `idx_user_created` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='media_favorite(物理分片 turbo_feed_2.media_favorite_127)';
