@@ -17,6 +17,7 @@ import com.turbofeed.feedengine.ranking.RealtimeFeatureService;
 import com.turbofeed.feedengine.recall.VectorRecallChannel;
 import com.turbofeed.feedengine.social.FollowService;
 import com.turbofeed.shared.model.FeedItemView;
+import com.turbofeed.shared.model.RecommendedItem;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -227,10 +228,10 @@ class RecommendationPipelineRecallTest {
         byPool = m;
     }
 
-    private static List<String> keysOf(List<FeedItemView> items) {
+    private static List<String> keysOf(List<RecommendedItem> items) {
         List<String> keys = new ArrayList<>(items.size());
-        for (FeedItemView it : items) {
-            keys.add(it.timelineKey());
+        for (RecommendedItem it : items) {
+            keys.add(it.item().timelineKey());
         }
         return keys;
     }

@@ -3,6 +3,7 @@ package com.turbofeed.feedengine.timeline;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.turbofeed.feedengine.client.ReviewSignalClient;
+import com.turbofeed.feedengine.experiment.ExperimentProperties;
 import com.turbofeed.feedengine.interest.InterestService;
 import com.turbofeed.feedengine.interest.SessionSequenceService;
 import com.turbofeed.feedengine.ranking.FeedFilterChain;
@@ -16,6 +17,7 @@ import com.turbofeed.feedengine.ranking.RealtimeFeatureService;
 import com.turbofeed.feedengine.recall.VectorRecallChannel;
 import com.turbofeed.feedengine.social.FollowService;
 import com.turbofeed.shared.model.FeedItemView;
+import com.turbofeed.shared.model.RecommendedItem;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -127,7 +129,8 @@ class FeedTimelineStoreReadPagePreRankTest {
         List<RerankStage> rerankStages = List.of(diversityStage, coldStage, ecosystemStage);
         RecommendationPipeline pipeline = new RecommendationPipeline(followService, sessionSequenceService,
                 reviewSignalClient, moderationProperties, realtimeFeatureService,
-                preRankFilter, recallSupport, recallChannels, rerankStages, interestService);
+                preRankFilter, recallSupport, recallChannels, rerankStages, interestService,
+                new ExperimentProperties()); // 实验默认关：走默认配比，守护默认路径不变
         // @Value 字段 new 出来不注入：poolWeightsCsv 需显式给出，其余召回配比保持 0（各路关闭，只留流量池）
         ReflectionTestUtils.setField(pipeline, "poolWeightsCsv", "0.2,0.3,0.5");
         FeedTimelineStore s = new FeedTimelineStore(redisTemplate, MAPPER, pipeline);
@@ -195,10 +198,10 @@ class FeedTimelineStoreReadPagePreRankTest {
         return new PreRankFilter(new LinearPreRankModel(props), props);
     }
 
-    private static List<String> keysOf(List<FeedItemView> items) {
+    private static List<String> keysOf(List<RecommendedItem> items) {
         List<String> keys = new ArrayList<>(items.size());
-        for (FeedItemView it : items) {
-            keys.add(it.timelineKey());
+        for (RecommendedItem it : items) {
+            keys.add(it.item().timelineKey());
         }
         return keys;
     }
@@ -215,7 +218,7 @@ class FeedTimelineStoreReadPagePreRankTest {
         stubCommon();
 
         // minPages=1 → 每池保留 max(20×1, ceil(60×0.3)=18) = 20 条（截断真的生效）
-        List<FeedItemView> page = store(preRankFilter(0.3d, 50, 1)).readPage("u1", 0, 20);
+        List<RecommendedItem> page = store(preRankFilter(0.3d, 50, 1)).readPage("u1", 0, 20);
 
         // 旧实现（跨池 Top-N 过滤当页切片）此处只有 0~2 条：这是本用例存在的原因
         assertEquals(20, page.size(), "开启粗排后单页仍应填满，不能塌缩");
@@ -231,7 +234,7 @@ class FeedTimelineStoreReadPagePreRankTest {
         stubCommon();
 
         // ratio=0.01 → 按比例只有 ceil(60×0.01)=1 条；靠下限 limit×minPages=20×2=40 兜底（再 min 到池大小 60）
-        List<FeedItemView> page = store(preRankFilter(0.01d, 50, 2)).readPage("u1", 0, 20);
+        List<RecommendedItem> page = store(preRankFilter(0.01d, 50, 2)).readPage("u1", 0, 20);
 
         // 旧实现没有下限：keep = floor(20×0.01) = 0 → max(1,·) = 1，全池只留 1 条，单页必然塌缩
         assertEquals(20, page.size(), "保留比例极小时也应靠下限填满单页");

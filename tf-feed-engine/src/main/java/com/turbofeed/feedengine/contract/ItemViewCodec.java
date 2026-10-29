@@ -1,10 +1,12 @@
 package com.turbofeed.feedengine.contract;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.shared.model.ContractVersion;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.model.RecommendedItem;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -98,10 +100,29 @@ public final class ItemViewCodec {
         if (json == null) {
             return List.of();
         }
-        List<RecommendedItem> items;
+        List<RecommendedItem> items = new ArrayList<>();
         try {
-            items = objectMapper.readValue(json,
-                    objectMapper.getTypeFactory().constructCollectionType(List.class, RecommendedItem.class));
+            JsonNode root = objectMapper.readTree(json);
+            if (root == null || !root.isArray()) {
+                return List.of();
+            }
+            for (JsonNode node : root) {
+                if (node == null || node.isNull()) {
+                    continue;
+                }
+                if (node.has("item") && !node.get("item").isNull()) {
+                    // 新格式（#307 起）：{item:{...}, recallChannel, poolLevel}
+                    items.add(objectMapper.treeToValue(node, RecommendedItem.class));
+                } else {
+                    // 旧格式（#307 前的裸条目缓存）：整节点即 FeedItemView。
+                    // 滚动发布期间旧缓存仍会被读到，必须按「无归因」降级而非整页丢弃——
+                    // 否则一次部署会让所有在途缓存页瞬间变空（用户看到推荐流「空了」）。
+                    FeedItemView view = objectMapper.treeToValue(node, FeedItemView.class);
+                    if (view != null) {
+                        items.add(new RecommendedItem(view, null, null));
+                    }
+                }
+            }
         } catch (Exception ignore) {
             return List.of();
         }
