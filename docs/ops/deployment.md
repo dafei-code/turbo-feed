@@ -35,6 +35,19 @@ TURBOFEED_REDIS_CLUSTER_NODES=127.0.0.1:7000,127.0.0.1:7001,127.0.0.1:7002
 > 用 `cluster-announce-ip` 填宿主机局域网 IP；填 `127.0.0.1` 容器间握手会失败。
 > 只起 1~2 个节点的「集群」比单点更脆，不要这么做。
 
+主 `docker-compose.yml` 已把 `TURBOFEED_REDIS_MODE` / `TURBOFEED_REDIS_CLUSTER_NODES` 透传为环境变量
+（默认 `single`），故对整个服务栈是一键切换：
+
+```bash
+TURBOFEED_REDIS_MODE=cluster \
+TURBOFEED_REDIS_CLUSTER_NODES=127.0.0.1:7000,127.0.0.1:7001,127.0.0.1:7002 \
+docker compose up -d
+```
+
+网关/引擎经 tf-redis 的 `RedisTopologyConfig`（Lettuce）/ `RedissonTopologyConfig`（Redisson）自动装配
+对应拓扑的连接工厂；`FeatureFlagGuard` 在启动时校验 `cluster` 必须带 `cluster-nodes`、`sentinel` 必须带
+`sentinel-master`，**配置缺失直接启动失败**，绝不静默回落单机（避免"假装高可用"）。
+
 建表与种子数据：
 
 ```bash

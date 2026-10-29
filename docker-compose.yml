@@ -140,7 +140,10 @@ services:
       SERVER_PORT: "8080"
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: "6379"
-      TURBOFEED_REDIS_MODE: single
+      # Redis 拓扑：默认 single（本地/演示）。生产启用 HA 时由环境变量整体切换为 cluster / sentinel，
+      # 无需改镜像或代码——拓扑装配见 tf-redis 的 RedisTopologyConfig / RedissonTopologyConfig。
+      TURBOFEED_REDIS_MODE: ${TURBOFEED_REDIS_MODE:single}
+      TURBOFEED_REDIS_CLUSTER_NODES: ${TURBOFEED_REDIS_CLUSTER_NODES:-}
       TURBOFEED_REDIS_PASSWORD: ${TURBOFEED_REDIS_PASSWORD:-}
       # ShardingSphere 逻辑库数据源（网关）；副本库指向同一实例，避免无副本时读失败
       TURBOFEED_DB_0_URL: jdbc:mysql://mysql:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
@@ -187,7 +190,9 @@ services:
       SERVER_PORT: "8083"
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: "6379"
-      TURBOFEED_REDIS_MODE: single
+      # Redis 拓扑：默认 single（本地/演示）。生产启用 HA 时由环境变量整体切换为 cluster / sentinel。
+      TURBOFEED_REDIS_MODE: ${TURBOFEED_REDIS_MODE:single}
+      TURBOFEED_REDIS_CLUSTER_NODES: ${TURBOFEED_REDIS_CLUSTER_NODES:-}
       TURBOFEED_REDIS_PASSWORD: ${TURBOFEED_REDIS_PASSWORD:-}
       TURBOFEED_GATEWAY_BASE_URL: http://tf-gateway:8080
       TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN:?请在 .env 中设置 TURBOFEED_INTERNAL_TOKEN，网关与引擎必须同值}
