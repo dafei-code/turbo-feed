@@ -2,6 +2,7 @@ package com.turbofeed.feedengine.timeline;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.shared.model.FeedItemView;
+import com.turbofeed.shared.model.RecommendedItem;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -51,6 +52,11 @@ class RecommendedFeedServiceTest {
                 FeedItemView.STATUS_APPROVED, null, "caption", null, null);
     }
 
+    /** 把契约条目包成归因条目（recallChannel / poolLevel 在单元桩里无意义，置 null）。 */
+    private static RecommendedItem rec(FeedItemView v) {
+        return new RecommendedItem(v, null, null);
+    }
+
     private void stubValueOps() {
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
     }
@@ -63,7 +69,7 @@ class RecommendedFeedServiceTest {
         // 注意桩顺序：Mockito 后定义者优先，通配桩必须先于具体桩，否则版本号读取被 null 覆盖
         when(valueOps.get(anyString())).thenReturn(null);
         when(valueOps.get("tf:feed:rec:version")).thenReturn("7");
-        List<FeedItemView> fresh = List.of(item("post/1/a"));
+        List<RecommendedItem> fresh = List.of(rec(item("post/1/a")));
         when(feedTimelineStore.readPage(eq("1001"), eq(0), eq(20))).thenReturn(fresh);
 
         service().recommended(0, 20, "1001");
@@ -123,10 +129,10 @@ class RecommendedFeedServiceTest {
         // 缓存串按契约字段序列化：timelineKey() 是派生方法、不进 JSON，身份由 postId 承载
         when(valueOps.get(hitKey)).thenReturn("[{\"postId\":\"post/1/cached\",\"mediaId\":\"media/1/x.jpg\"}]");
 
-        List<FeedItemView> got = service().recommended(0, 20, "1001");
+        List<RecommendedItem> got = service().recommended(0, 20, "1001");
 
         assertEquals(1, got.size());
-        assertEquals("post/1/cached", got.get(0).timelineKey());
+        assertEquals("post/1/cached", got.get(0).item().timelineKey());
         verify(feedTimelineStore, never()).readPage(any(), anyInt(), anyInt());
         verify(valueOps, never()).set(anyString(), anyString(), any());
     }
@@ -162,11 +168,11 @@ class RecommendedFeedServiceTest {
         stubValueOps();
         when(valueOps.get("tf:feed:rec:version")).thenThrow(new RuntimeException("redis down"));
         when(feedTimelineStore.readPage(eq("1001"), eq(0), eq(20)))
-                .thenReturn(List.of(item("post/1/live")));
+                .thenReturn(List.of(rec(item("post/1/live"))));
 
-        List<FeedItemView> got = service().recommended(0, 20, "1001");
+        List<RecommendedItem> got = service().recommended(0, 20, "1001");
 
-        assertEquals("post/1/live", got.get(0).timelineKey(), "版本号不可得时必须回落实时读时间线");
+        assertEquals("post/1/live", got.get(0).item().timelineKey(), "版本号不可得时必须回落实时读时间线");
         // 关键：不得写入任何缓存 Key——抖动窗口内写缓存可能让不同用户结果落到同一版本 Key
         verify(valueOps, never()).set(anyString(), anyString(), any());
     }
@@ -178,7 +184,7 @@ class RecommendedFeedServiceTest {
         stubValueOps();
         when(valueOps.get("tf:feed:rec:version")).thenReturn("11");
         FeedItemView last = item("post/1/b");
-        List<FeedItemView> fresh = List.of(item("post/1/a"), last);
+        List<RecommendedItem> fresh = List.of(rec(item("post/1/a")), rec(last));
         when(feedTimelineStore.readPage(eq("1001"), eq(20), any(FeedCursor.class))).thenReturn(fresh);
         // 末条入流 score（经反查索引 + ZSCORE）决定 nextCursor
         when(feedTimelineStore.inflowScoreOf("post/1/b")).thenReturn(1700000000999L);
@@ -200,7 +206,7 @@ class RecommendedFeedServiceTest {
     void recommendedPage_nullCursor_degeneratesToPageMode_withoutCursor() {
         stubValueOps();
         when(valueOps.get("tf:feed:rec:version")).thenReturn("4");
-        when(feedTimelineStore.readPage(eq("1001"), eq(0), eq(20))).thenReturn(List.of(item("post/1/a")));
+        when(feedTimelineStore.readPage(eq("1001"), eq(0), eq(20))).thenReturn(List.of(rec(item("post/1/a"))));
 
         FeedRecommendedPage page = service().recommendedPage(0, 20, "1001", null);
 
