@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -15,14 +15,27 @@
     <description>压测模块：数据构造器 + 压测器（五场景）+ Markdown 报告生成，一条命令产出可复现性能数据</description>
 
     <dependencies>
+        <!-- 契约模型（Result / ErrorCode 的 JSON 形状以本项目为准）。
+             注意：本模块只用它的「字段名约定」，运行时不反序列化成对象。 -->
         <dependency>
             <groupId>com.turbofeed</groupId>
             <artifactId>tf-shared</artifactId>
         </dependency>
-        <!-- 压测器：HttpClient（JDK 内置），此处仅声明运行所需 -->
+
+        <!-- 刻意不引 spring-boot / jackson：
+             ① 压测端必须比被测服务更轻，否则压测机自身先到瓶颈（GC、线程池、JSON 反射）；
+             ② JSON 只读两个字段（code / accessToken），手写字段提取足够，且避免离线构建拉包；
+             ③ 端口连通性、状态码、延迟全部走 JDK 内置 HttpClient。 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter</artifactId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- surefire 3.x 跑 JUnit5 必需（BOM 父不自动带 junit-platform-launcher）。 -->
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>
