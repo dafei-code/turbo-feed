@@ -27,9 +27,9 @@
 | tf-gateway | 独立服务（可执行 jar） | 8080 | HTTP 接入：认证 + 媒体上传 + Sentinel 流量防护 + 审核状态机。**不持有任何 Feed 读模型** | web / sentinel / rocketmq / actuator / shardingsphere-jdbc |
 | tf-counter | 独立服务（可执行 jar） | **8081** | 分布式计数：Redis 分桶 + MQ 削峰 + 批量落库 + 三级缓存 | redisson / jdbc / h2 / caffeine |
 | tf-feed-engine | 独立服务（可执行 jar） | **8083** | Feed 推拉核心：**公域时间线读模型（多池 ZSET + 反查索引 + 推荐流旁路缓存）** / 收件箱 / outbox / 活跃度分层 / 多路归并 | data-redis(lettuce) / caffeine |
-| tf-hotspot | **进程内 SDK（库）** | - | 热 Key 探测 + 广播 + 本地 L1 缓存，嵌入 counter / feed-engine 进程 | caffeine |
+| tf-hotspot | **进程内 SDK（库，已落地）** | - | 热 Key 探测 + 广播 + 本地 L1 缓存，嵌入 counter / feed-engine 进程（ADR-0004：零 Spring 依赖 SDK；引擎 `HotTimelineKeyCache` 第二消费者已接入，8 单测覆盖） | caffeine |
 | tf-shared | 契约库 | - | Result / ErrorCode / 跨服务 DTO（如 FeedItemView） | 零依赖 |
-| tf-benchmark | 压测模块 | - | 压测器 + 报告生成 | 独立 |
+| tf-benchmark | 压测模块（**空壳占位**） | - | 仅 `.gitkeep`，零 `.java`；删除条件：引入正式压测方案（JMH / 负载脚本）或确认不再需要压测模块时，从根 pom `<module>` 移除该模块 | 独立 |
 
 ## 4. 通信矩阵
 

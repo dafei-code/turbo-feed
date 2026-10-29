@@ -1,21 +1,16 @@
 package com.turbofeed.gateway.service.review;
 
-import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.repository.AppealRepository;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
-import com.turbofeed.gateway.repository.MediaTagJdbcRepository;
 import com.turbofeed.gateway.repository.ReportRepository;
 import com.turbofeed.gateway.repository.ReviewTaskRepository;
 import com.turbofeed.gateway.service.event.outbox.OutboxService;
 import com.turbofeed.gateway.service.penalty.PenaltyService;
 import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.service.review.credit.ReporterCreditService;
-import com.turbofeed.gateway.service.health.AccountHealthService;
-import com.turbofeed.gateway.service.signal.ModerationSignalService;
 import com.turbofeed.gateway.service.behavior.BehaviorLogService;
 import com.turbofeed.gateway.service.review.ModerationPolicy;
-import com.turbofeed.gateway.storage.MediaStorageClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -37,10 +32,8 @@ import static org.mockito.Mockito.*;
 class MediaReviewServiceTest {
 
     @Mock MediaJdbcRepository mediaRepository;
-    @Mock MediaTagJdbcRepository mediaTagRepository;
     @Mock StringRedisTemplate redisTemplate;
     @Mock ContentModerationRouter contentModeration;
-    @Mock MediaProperties properties;
     @Mock ReviewProperties reviewProperties;
     @Mock AccountCreditService accountCreditService;
     @Mock ReportRepository reportRepository;
@@ -48,20 +41,19 @@ class MediaReviewServiceTest {
     @Mock ReviewTaskRepository reviewTaskRepository;
     @Mock OutboxService outboxService;
     @Mock PenaltyService penaltyService;
-    @Mock DispositionPolicy dispositionPolicy;
-    @Mock AccountHealthService accountHealthService;
     @Mock ReporterCreditService reporterCreditService;
     @Mock ReviewWaterLevelService reviewWaterLevelService;
-    @Mock ModerationSignalService moderationSignalService;
     @Mock BehaviorLogService behaviorLogService;
     @Mock ModerationPolicy moderationPolicy;
-    @Mock MediaStorageClient storageClient;
+    @Mock ReviewTimelineDelivery delivery;
+    @Mock ViolationDispositionService disposition;
+    @Mock ReviewEscalationService escalation;
 
     private MediaReviewService service() {
-        return new MediaReviewService(mediaRepository, mediaTagRepository, redisTemplate, contentModeration,
-                properties, reviewProperties, accountCreditService, reportRepository, appealRepository, reviewTaskRepository,
-                outboxService, penaltyService, dispositionPolicy, accountHealthService, reporterCreditService,
-                reviewWaterLevelService, moderationSignalService, behaviorLogService, storageClient, moderationPolicy);
+        return new MediaReviewService(mediaRepository, redisTemplate, contentModeration, reviewProperties,
+                accountCreditService, reportRepository, appealRepository, reviewTaskRepository, outboxService,
+                penaltyService, reporterCreditService, reviewWaterLevelService, behaviorLogService, moderationPolicy,
+                delivery, disposition, escalation);
     }
 
     @Test
