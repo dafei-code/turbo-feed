@@ -25,6 +25,9 @@ public final class FeatureFlagKeys {
     // ===== 死信 replay（依赖 MQ）=====
     public static final String FEED_TIMELINE_DLQ_REPLAY_ENABLED = "turbofeed.feed.timeline.dlq-replay.enabled";
 
+    // ===== 死信 replay 积压告警（依赖 DLQ replay + MQ）=====
+    public static final String FEED_TIMELINE_DLQ_ALERT_ENABLED = "turbofeed.feed.timeline.dlq-alert.enabled";
+
     // ===== 向量召回 =====
     public static final String VECTOR_MODE = "turbofeed.feed.recall.vector.mode";
     public static final String VECTOR_TWO_TOWER_ENABLED = "turbofeed.feed.recall.vector.two-tower.enabled";
