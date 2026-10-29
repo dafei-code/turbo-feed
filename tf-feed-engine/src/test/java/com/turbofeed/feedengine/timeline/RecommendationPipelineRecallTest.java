@@ -3,6 +3,7 @@ package com.turbofeed.feedengine.timeline;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.turbofeed.feedengine.client.ReviewSignalClient;
+import com.turbofeed.feedengine.experiment.ExperimentProperties;
 import com.turbofeed.feedengine.interest.InterestService;
 import com.turbofeed.feedengine.interest.SessionSequenceService;
 import com.turbofeed.feedengine.ranking.FeedFilterChain;
@@ -165,7 +166,8 @@ class RecommendationPipelineRecallTest {
         RecommendationPipeline p = new RecommendationPipeline(followService, sessionSequenceService,
                 reviewSignalClient, moderationProperties, realtimeFeatureService,
                 new PreRankFilter(new LinearPreRankModel(new RankingProperties()), new RankingProperties()),
-                recallSupport, recallChannels, rerankStages, interestService);
+                recallSupport, recallChannels, rerankStages, interestService,
+                new ExperimentProperties()); // 实验默认关：走默认配比，守护默认路径不变
         ReflectionTestUtils.setField(p, "poolWeightsCsv", "0.34,0.33,0.33");
         ReflectionTestUtils.setField(p, "hotRecallRatio", hot);
         ReflectionTestUtils.setField(p, "interestRecallRatio", interest);

@@ -1,6 +1,8 @@
 package com.turbofeed.feedengine.timeline;
 
 import com.turbofeed.feedengine.client.ReviewSignalClient;
+import com.turbofeed.feedengine.experiment.ExperimentBucket;
+import com.turbofeed.feedengine.experiment.ExperimentProperties;
 import com.turbofeed.feedengine.interest.InterestService;
 import com.turbofeed.feedengine.interest.SessionSequenceService;
 import com.turbofeed.feedengine.ranking.FeedFilterChain;
@@ -129,6 +131,8 @@ public class RecommendationPipeline {
     private final List<RerankStage> rerankStages;
     /** 兴趣画像服务（长期/短期标签 → 权重，负反馈，召回索引）。 */
     private final InterestService interestService;
+    /** A/B 实验分桶配置（最简试错尺子，P0-1b）：命中分桶的用户用覆写配比替换默认配比，默认关、fail-open。 */
+    private final ExperimentProperties experimentProperties;
 
     /** 各流量池在推荐流中的曝光权重（按池序 L1..Ln，默认 10%/30%/60%：新内容试水/已验证优质占大头）。 */
     @Value("${turbofeed.feed.pool-weights:0.1,0.3,0.6}")
@@ -458,6 +462,8 @@ public class RecommendationPipeline {
             case VECTOR -> vectorRecallRatio;
             case FOLLOW -> followRecallRatio;
         };
+        // A/B 实验覆写（P0-1b 试错尺子）：命中分桶且开关开启时用覆写配比替换默认配比，默认关、fail-open。
+        ratio = experimentProperties.resolveRatio(t.name(), ctx.userId, ratio);
         if (ratio <= 0d || ctx.cursor != null) {
             return 0;
         }
