@@ -3,8 +3,12 @@ package com.turbofeed.hotspot.cache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -30,8 +34,11 @@ import java.util.function.Supplier;
  *
  * <h3>边界</h3>
  * <ul>
- *   <li><b>超限整体清空</b>：条目数超过 {@code maxEntries} 时直接 {@code clear()}（非 LRU）。
- *       保护性熔断：宁可缓存整体失效退回直读，也不让 map 无界增长拖垮堆。</li>
+ *   <li><b>热/冷两段淘汰（近 LRU）</b>：条目数超过 {@code maxEntries} 时，优先淘汰<b>冷段</b>
+ *       （只读过一次/刚写入）里「最久未访问」的条目，热段（被再次访问过）最后才动；同段内按
+ *       {@code lastAccess} 升序淘汰。写入时按 5% 余量批量淘汰，摊薄全表扫描成本。
+ *       <b>不再整体 {@code clear()}</b>——旧策略下一次冷 key 扫描就会把热条目全部冲掉，命中率骤降，
+ *       正是「热/冷桶迁移未做」的缺口。</li>
  *   <li><b>周期清理过期条目</b>：{@link #sweepExpired()} 摘掉过期条目并清理过期的 {@code invalidatedAt} 标记，
  *       避免「过期却永不被访问」的条目常驻堆里。调度（@Scheduled）由接入方负责，本组件只暴露方法。</li>
  *   <li><b>可关闭</b>：{@code enabled=false} 退回直读（每次走 loader）；{@code broadcastEnabled=false} 只关广播、保留本地缓存。</li>
@@ -58,7 +65,7 @@ public class LocalCacheWithBroadcast<K, V> {
     /** 把消息体中的 key 片段反向解析为 K（如 {@code Long::parseLong}）。 */
     private final Function<String, K> keyParser;
 
-    private final ConcurrentHashMap<K, Holder<V>> map = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<K, Entry<V>> map = new ConcurrentHashMap<>();
     /** 每 key「最近一次失效时刻」的 version stamp（#跨实例失效脏窗口修复）。 */
     private final ConcurrentHashMap<K, Long> invalidatedAt = new ConcurrentHashMap<>();
 
@@ -88,14 +95,15 @@ public class LocalCacheWithBroadcast<K, V> {
             return loader.get();
         }
         long now = System.currentTimeMillis();
-        Holder<V> hit = map.get(key);
+        Entry<V> hit = map.get(key);
         long invalidatedAt = this.invalidatedAt.getOrDefault(key, 0L);
         if (hit != null && hit.expireAt() > now && hit.loadedAt() >= invalidatedAt) {
             // 未过期 且 加载时刻不早于本实例最近一次失效 → 命中有效（含跨实例失效的 version stamp 判定）
+            hit.touch(now); // 记录本次访问：冷条目被再次访问即提升为热条目，免于被冷扫描冲掉
             return hit.value();
         }
         V loaded = loader.get();
-        put(key, new Holder<>(loaded, now + ttlMillis, now));
+        put(key, new Entry<>(loaded, now + ttlMillis, now, now));
         return loaded;
     }
 
@@ -187,17 +195,65 @@ public class LocalCacheWithBroadcast<K, V> {
         return map.size();
     }
 
-    private void put(K key, Holder<V> holder) {
-        if (map.size() >= maxEntries) {
-            // 保护性熔断：整体清空（非 LRU）——缓存是加速手段，绝不能成为内存风险源。
-            map.clear();
-            log.warn("本地缓存达到上限 {}，已整体清空（退回直读）: channel={}", maxEntries, channel);
+    /** 仅测试/巡检用：某 key 当前是否处于热段（不存在返回 false）。 */
+    boolean isHot(K key) {
+        Entry<V> e = map.get(key);
+        return e != null && e.isHot();
+    }
+
+    private void put(K key, Entry<V> entry) {
+        Entry<V> prev = map.put(key, entry);
+        // 覆盖已存在 key（过期后重载 / 同 key 重写）不增长条目数，无需淘汰
+        if (prev == null) {
+            evictToBound(key);
         }
-        map.put(key, holder);
+    }
+
+    /**
+     * 维持硬上限：优先淘汰<b>冷段</b>里最久未访问的条目，冷段不足时才动热段。
+     *
+     * <p><b>为什么批量（5% 余量）</b>：{@link ConcurrentHashMap} 上找「最久未访问」只能全表扫描；
+     * 若每次写入都扫一遍，缓存满之后的写入会退化成 O(n)。按余量一次淘汰多条，把扫描摊薄到
+     * 每 ~5% 容量一次。</p>
+     *
+     * @param protectedKey 刚写入的键，绝不在本次淘汰范围内（保证写入方立即可读到自己的值）
+     */
+    private void evictToBound(K protectedKey) {
+        int size = map.size();
+        if (size <= maxEntries) {
+            return;
+        }
+        int margin = Math.max(1, maxEntries / 20);                    // 5% 批量余量
+        int target = Math.min(size - maxEntries + margin, size - 1);  // 至少留一条（受保护的键）
+        if (target <= 0) {
+            return;
+        }
+        List<Map.Entry<K, Entry<V>>> victims = new ArrayList<>(size);
+        for (Map.Entry<K, Entry<V>> e : map.entrySet()) {
+            if (!Objects.equals(e.getKey(), protectedKey)) {
+                victims.add(e);
+            }
+        }
+        // 冷段在前（false < true），同段内最久未访问在前
+        victims.sort(Comparator
+                .comparing((Map.Entry<K, Entry<V>> e) -> e.getValue().isHot())
+                .thenComparingLong(e -> e.getValue().lastAccess()));
+        int removed = 0;
+        for (Map.Entry<K, Entry<V>> v : victims) {
+            if (removed >= target) {
+                break;
+            }
+            if (map.remove(v.getKey(), v.getValue())) {
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            log.debug("本地缓存超过上限 {}，按冷/热+LRU 淘汰 {} 条: channel={}", maxEntries, removed, channel);
+        }
     }
 
     private void evictExpired(long now) {
-        Iterator<Map.Entry<K, Holder<V>>> it = map.entrySet().iterator();
+        Iterator<Map.Entry<K, Entry<V>>> it = map.entrySet().iterator();
         while (it.hasNext()) {
             if (it.next().getValue().expireAt() <= now) {
                 it.remove();
@@ -205,7 +261,36 @@ public class LocalCacheWithBroadcast<K, V> {
         }
     }
 
-    /** 带过期时点与加载时点的缓存条目（不可变）。loadedAt 供跨实例失效 version stamp 判定。 */
-    private record Holder<V>(V value, long expireAt, long loadedAt) {
+    /**
+     * 带过期时点 / 加载时点 / 访问痕迹的缓存条目。
+     *
+     * <p>{@code loadedAt} 供跨实例失效 version stamp 判定；{@code lastAccess} 与 {@code hot}
+     * 构成两段式淘汰（冷优先、同段 LRU）——热条目不会因为一次冷 key 扫描被整片清掉。</p>
+     */
+    private static final class Entry<V> {
+        private final V value;
+        private final long expireAt;
+        private final long loadedAt;
+        private volatile long lastAccess;
+        private volatile boolean hot;
+
+        private Entry(V value, long expireAt, long loadedAt, long lastAccess) {
+            this.value = value;
+            this.expireAt = expireAt;
+            this.loadedAt = loadedAt;
+            this.lastAccess = lastAccess;
+        }
+
+        V value() { return value; }
+        long expireAt() { return expireAt; }
+        long loadedAt() { return loadedAt; }
+        long lastAccess() { return lastAccess; }
+        boolean isHot() { return hot; }
+
+        /** 记录一次命中：更新时间戳，并把冷条目提升为热条目（二次访问即热）。 */
+        void touch(long now) {
+            lastAccess = now;
+            hot = true;
+        }
     }
 }

@@ -115,8 +115,12 @@ class LocalCacheWithBroadcastTest {
         assertEquals(0, cache.size());
     }
 
+    /**
+     * 超限必须<b>有界淘汰</b>而不是整体清空：旧实现（{@code map.clear()}）会让一次冷 key 扫描
+     * 把所有热条目一起冲掉，命中率骤降——这是「热/冷桶迁移未做」的具体缺口。
+     */
     @Test
-    void maxEntriesTriggersWholeClear() {
+    void maxEntriesIsBoundedWithoutWholeClear() {
         RecordingPublisher pub = new RecordingPublisher();
         var cache = newCache("A", pub, true, 2); // 上限 2
         AtomicInteger loads = new AtomicInteger();
@@ -124,8 +128,52 @@ class LocalCacheWithBroadcastTest {
 
         cache.getOrLoad(1L, loader);
         cache.getOrLoad(2L, loader);
-        cache.getOrLoad(3L, loader); // 超过上限 → 整体清空后仅留刚写入的 3
-        assertEquals(1, cache.size());
+        cache.getOrLoad(3L, loader); // 超过上限 → 按冷段 LRU 淘汰，绝不整体清空
+
+        assertTrue(cache.size() <= 2, "必须维持硬上限，实际=" + cache.size());
+        assertTrue(cache.size() >= 1, "至少保留刚写入的键");
+
+        int before = loads.get();
+        cache.getOrLoad(3L, loader);
+        assertEquals(before, loads.get(), "刚写入的键必须保留（旧实现会被整体清空而重载）");
+    }
+
+    @Test
+    void coldEntryPromotedToHotAfterSecondAccess() {
+        RecordingPublisher pub = new RecordingPublisher();
+        var cache = newCache("A", pub, true, 100);
+        AtomicInteger loads = new AtomicInteger();
+        Supplier<String> loader = () -> "v" + loads.incrementAndGet();
+
+        cache.getOrLoad(7L, loader);
+        assertFalse(cache.isHot(7L), "首次加载应落在冷段");
+        cache.getOrLoad(7L, loader); // 二次访问
+        assertTrue(cache.isHot(7L), "二次访问应提升为热条目");
+    }
+
+    /**
+     * 核心回归：一次大量冷 key 写入（典型如榜单/索引扫描）不得把热条目淘汰掉。
+     * 旧实现「超限整体 clear」在此用例下必然失败。
+     */
+    @Test
+    void hotEntriesSurviveColdBurst() {
+        RecordingPublisher pub = new RecordingPublisher();
+        var cache = newCache("A", pub, true, 50);
+        AtomicInteger loads = new AtomicInteger();
+        Supplier<String> loader = () -> "v" + loads.incrementAndGet();
+
+        cache.getOrLoad(1L, loader);
+        cache.getOrLoad(1L, loader); // 提升为热
+        assertTrue(cache.isHot(1L));
+
+        for (long k = 100L; k < 300L; k++) { // 200 个冷 key 洪泛，容量只有 50
+            cache.getOrLoad(k, loader);
+        }
+
+        int before = loads.get();
+        cache.getOrLoad(1L, loader);
+        assertEquals(before, loads.get(), "冷 key 洪泛后热条目必须仍命中");
+        assertTrue(cache.size() <= 50, "冷洪泛后仍须维持硬上限，实际=" + cache.size());
     }
 
     @Test
