@@ -14,6 +14,10 @@ import java.util.List;
  * （空串 = 已到末页），{@link #hasMore()} 为本页是否填满，
  * {@link #page()} 为本页<b>绝对翻页序号</b>（keyset 模式由游标 depth 续传累加，供曝光特征定位）。</p>
  *
+ * <p><b>{@link #requestId()}（P0-1a 召回归因）</b>：本次列表拉取的唯一 ID，由网关生成并随响应下发，
+ * 前端在 {@code /api/v1/feed/behavior} 上报时原样回传。离线训练作业据此把客户端互动事件与
+ * 服务端 {@code IMPRESSION}（已带通道/池层级）按 request_id 关联，间接获得每条互动的召回归因。</p>
+ *
  * <p><b>为什么是 {@code List<MediaItem>} 而不是 {@code FeedItemView}</b>：本视图是网关对外
  * （前端 / 下游服务）的展示模型，客户端已注入点赞/评论计数与已赞态（抖音式「计数接卡片」），
  * 这些只存在于网关侧、引擎下发的原始契约里没有，故此处必须是 {@link MediaItem}。</p>
@@ -25,5 +29,6 @@ public record FeedRecommendedPage(
         @JsonProperty("items") List<MediaItem> items,
         @JsonProperty("nextCursor") String nextCursor,
         @JsonProperty("hasMore") boolean hasMore,
-        @JsonProperty("page") int page) {
+        @JsonProperty("page") int page,
+        @JsonProperty("requestId") String requestId) {
 }

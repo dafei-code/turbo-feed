@@ -3,6 +3,7 @@ package com.turbofeed.feedengine.contract;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.shared.model.ContractVersion;
 import com.turbofeed.shared.model.FeedItemView;
+import com.turbofeed.shared.model.RecommendedItem;
 
 import java.util.List;
 
@@ -79,5 +80,32 @@ public final class ItemViewCodec {
             return List.of();
         }
         return ContractVersion.filterConsumable(items, FeedItemView.SCHEMA_VERSION, FeedItemView::schemaVersion);
+    }
+
+    /**
+     * 反序列化「一整个 JSON 数组」形态的<b>带召回归因的条目</b>（{@link RecommendedItem}，推荐流缓存用），
+     * 并剔除版本不可消费的条目（按内嵌 {@link FeedItemView} 的 schemaVersion 判定）。
+     *
+     * <p><b>为什么单独一个方法</b>：{@link #parseList} 服务于<b>裸条目</b>缓存（时间线冷启动候选等），
+     * 本方法服务于<b>带归因条目</b>缓存（推荐流 {@code tf:feed:rec:*}）。二者缓存 Key 作用域、
+     * TTL 完全一致，但条目形状不同——归因只存在于推荐流响应，不能污染时间线读路径。</p>
+     *
+     * @param objectMapper 调用方注入的 mapper
+     * @param json         JSON 数组串；{@code null} 返回空列表
+     * @return 只含可消费条目的列表；整体解析失败返回空列表（不抛）
+     */
+    public static List<RecommendedItem> parseListRecommended(ObjectMapper objectMapper, String json) {
+        if (json == null) {
+            return List.of();
+        }
+        List<RecommendedItem> items;
+        try {
+            items = objectMapper.readValue(json,
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, RecommendedItem.class));
+        } catch (Exception ignore) {
+            return List.of();
+        }
+        return ContractVersion.filterConsumable(items, FeedItemView.SCHEMA_VERSION,
+                ri -> ri == null || ri.item() == null ? null : ri.item().schemaVersion());
     }
 }

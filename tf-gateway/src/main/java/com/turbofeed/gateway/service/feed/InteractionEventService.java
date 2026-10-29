@@ -44,13 +44,22 @@ public class InteractionEventService {
      * <p>匿名用户（userId 为空）跳过——个性化训练样本需绑定用户。
      * {@code @Async} 经 interactionExecutor 异步落库，fail-open：异常仅告警，绝不阻塞 feed 主流程。</p>
      *
-     * @param userId   已登录用户（来自 JWT）；匿名为 null，跳过
-     * @param itemId   内容主键（MediaItem#timelineKey()）
-     * @param page     页码
-     * @param position 该条目在本次结果里的位次
+     * <p><b>P0-1a 召回归因</b>：{@code channel}/{@code pool}/{@code requestId} 由网关从引擎响应
+     * （{@link com.turbofeed.gateway.client.RecommendedFeedResult#attribution()}）取出并随本次列表
+     * 请求的 requestId 一并写入，使 A/B 实验可据此按「通道 × 实验桶」做效果对照。三者均可空
+     * （非个性化/降级/离线关联失败场景）。</p>
+     *
+     * @param userId     已登录用户（来自 JWT）；匿名为 null，跳过
+     * @param itemId     内容主键（MediaItem#timelineKey()）
+     * @param page       页码
+     * @param position   该条目在本次结果里的位次
+     * @param channel    召回通道（HOT/INTEREST/CF/VECTOR/FOLLOW/POOL/COLD），可空
+     * @param pool       流量池层级（仅 channel=POOL 时有值），可空
+     * @param requestId  本次列表请求 ID（网关生成、前端回传），用于离线关联，可空
      */
     @Async("interactionExecutor")
-    public void recordImpression(String userId, String itemId, int page, int position) {
+    public void recordImpression(String userId, String itemId, int page, int position,
+                                 String channel, Integer pool, String requestId) {
         if (userId == null || userId.isBlank() || itemId == null || itemId.isBlank()) {
             return;
         }
@@ -58,7 +67,7 @@ public class InteractionEventService {
             return;
         }
         try {
-            repository.insert(Long.parseLong(userId), itemId, "IMPRESSION", position, page, null, null, null, null);
+            repository.insert(Long.parseLong(userId), itemId, "IMPRESSION", position, page, channel, pool, requestId, null);
         } catch (Exception e) {
             log.warn("写交互事件失败(impression, fail-open): userId={}, itemId={}, {}", userId, itemId, e.getMessage());
         }

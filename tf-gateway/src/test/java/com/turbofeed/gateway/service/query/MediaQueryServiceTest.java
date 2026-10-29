@@ -2,11 +2,14 @@ package com.turbofeed.gateway.service.query;
 
 import com.turbofeed.gateway.client.FeedEngineClient;
 import com.turbofeed.gateway.client.FeedRecommendedPage;
+import com.turbofeed.gateway.client.RecommendedFeedResult;
 import com.turbofeed.gateway.config.FeedEngineProperties;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.service.feed.InteractionEventService;
 import com.turbofeed.gateway.service.like.MediaLikeService;
 import com.turbofeed.gateway.service.review.MediaStatus;
+import com.turbofeed.shared.model.FeedItemView;
+import com.turbofeed.shared.model.RecommendedItem;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -74,8 +77,8 @@ class MediaQueryServiceTest {
         MediaQueryService svc = service();
         setCursorEnabled(svc, true);
         stubEnrich();
-        FeedRecommendedPage clientPage = new FeedRecommendedPage(List.of(item("post/1/a")), "NEXT", true, 1);
-        when(feedEngineClient.recommended(anyInt(), anyInt(), any(), any())).thenReturn(Optional.of(clientPage));
+        FeedRecommendedPage clientPage = new FeedRecommendedPage(List.of(item("post/1/a")), "NEXT", true, 1, "");
+        when(feedEngineClient.recommended(anyInt(), anyInt(), any(), any())).thenReturn(Optional.of(new RecommendedFeedResult(clientPage, Map.of())));
 
         FeedRecommendedPage result = svc.listRecommended(0, 20, "1001", "SOMECURSOR");
 
@@ -92,8 +95,8 @@ class MediaQueryServiceTest {
         MediaQueryService svc = service();
         setCursorEnabled(svc, true);
         stubEnrich();
-        FeedRecommendedPage clientPage = new FeedRecommendedPage(List.of(item("post/1/a")), "", false, 0);
-        when(feedEngineClient.recommended(anyInt(), anyInt(), any(), any())).thenReturn(Optional.of(clientPage));
+        FeedRecommendedPage clientPage = new FeedRecommendedPage(List.of(item("post/1/a")), "", false, 0, "");
+        when(feedEngineClient.recommended(anyInt(), anyInt(), any(), any())).thenReturn(Optional.of(new RecommendedFeedResult(clientPage, Map.of())));
 
         svc.listRecommended(3, 20, "1001", "");
 
@@ -107,8 +110,8 @@ class MediaQueryServiceTest {
         MediaQueryService svc = service();
         setCursorEnabled(svc, false);
         stubEnrich();
-        FeedRecommendedPage clientPage = new FeedRecommendedPage(List.of(item("post/1/a")), "", false, 0);
-        when(feedEngineClient.recommended(anyInt(), anyInt(), any(), any())).thenReturn(Optional.of(clientPage));
+        FeedRecommendedPage clientPage = new FeedRecommendedPage(List.of(item("post/1/a")), "", false, 0, "");
+        when(feedEngineClient.recommended(anyInt(), anyInt(), any(), any())).thenReturn(Optional.of(new RecommendedFeedResult(clientPage, Map.of())));
 
         svc.listRecommended(2, 20, "1001", "SOMECURSOR");
 
@@ -145,5 +148,39 @@ class MediaQueryServiceTest {
         assertEquals("", result.nextCursor());
         assertFalse(result.hasMore());
         verify(mediaRepository).listApprovedGlobal(eq(20), eq(0L));
+    }
+
+    /**
+     * P0-1a 归因打通：引擎下发的召回归因（通道/池层级）必须随服务端 IMPRESSION 落盘，
+     * 且本次列表的 requestId 一并写入，供离线训练作业按 channel × requestId 关联互动。
+     */
+    @Test
+    void attribution_flowsIntoImpression_withChannelAndRequestId() throws Exception {
+        MediaQueryService svc = service();
+        setCursorEnabled(svc, false);
+        stubEnrich();
+        MediaItem it = item("post/1/a");
+        FeedRecommendedPage clientPage = new FeedRecommendedPage(List.of(it), "", false, 0, "");
+        // 引擎回传该条目来自 CF 召回（非流量池，pool 为空）
+        FeedItemView contract = new FeedItemView(
+                it.timelineKey(), "media/x", "http://x/" + it.timelineKey(), null, "APPROVED",
+                Instant.now(), "cap", null, null);
+        Map<String, RecommendedItem> attribution = Map.of(
+                it.timelineKey(), new RecommendedItem(contract, "CF", null));
+        when(feedEngineClient.recommended(anyInt(), anyInt(), any(), any()))
+                .thenReturn(Optional.of(new RecommendedFeedResult(clientPage, attribution)));
+
+        FeedRecommendedPage result = svc.listRecommended(0, 20, "1001", null);
+
+        ArgumentCaptor<String> channelCap = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Integer> poolCap = ArgumentCaptor.forClass(Integer.class);
+        ArgumentCaptor<String> requestCap = ArgumentCaptor.forClass(String.class);
+        verify(interactionEventService).recordImpression(
+                eq("1001"), eq(it.timelineKey()), eq(0), eq(0),
+                channelCap.capture(), poolCap.capture(), requestCap.capture());
+        assertEquals("CF", channelCap.getValue(), "召回归因通道必须回填到 IMPRESSION");
+        assertNull(poolCap.getValue(), "非流量池条目 pool 应为空");
+        assertNotNull(requestCap.getValue(), "requestId 必须下发并回填到 IMPRESSION");
+        assertFalse(requestCap.getValue().isBlank());
     }
 }

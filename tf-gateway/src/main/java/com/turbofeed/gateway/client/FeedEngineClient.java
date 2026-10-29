@@ -9,6 +9,7 @@ import com.turbofeed.shared.model.ContractVersion;
 import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.model.PlayableView;
+import com.turbofeed.shared.model.RecommendedItem;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,8 +23,10 @@ import org.springframework.web.client.RestClient;
 import static com.turbofeed.gateway.security.InternalTokenInterceptor.HEADER;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * tf-feed-engine 的 HTTP 客户端（网关 → 引擎，同步）。
@@ -138,7 +141,7 @@ public class FeedEngineClient {
      * @return {@code Optional.of(page)} = 引擎正常响应；{@link Optional#empty()} = 引擎不可用，
      *         调用方据此决定降级
      */
-    public Optional<FeedRecommendedPage> recommended(int page, int size, String userId, String cursor) {
+    public Optional<RecommendedFeedResult> recommended(int page, int size, String userId, String cursor) {
         int limit = size <= 0 ? 20 : size;
         try {
             String body = restClient.get()
@@ -169,23 +172,28 @@ public class FeedEngineClient {
             }
             JsonNode data = root.path("data");
             if (data.isMissingNode() || data.isNull()) {
-                return Optional.of(new FeedRecommendedPage(List.of(), "", false, 0));
+                return Optional.of(new RecommendedFeedResult(new FeedRecommendedPage(List.of(), "", false, 0, ""), Map.of()));
             }
-            // 引擎下发的是契约类型 FeedItemView；网关侧 FeedRecommendedPage.items 是 MediaItem 视图
-            // （已注入计数/已赞态），两者字段口径不同，不能直接 convertValue 到 MediaItem 字段上。
-            // 先按契约类型抽出原始条目列表，再做版本协商（M3）与映射。
-            List<FeedItemView> rawItems = objectMapper.convertValue(data.get("items"),
-                    objectMapper.getTypeFactory().constructCollectionType(List.class, FeedItemView.class));
+            // 引擎下发的是带召回归因的契约类型 RecommendedItem（item=FeedItemView + recallChannel + poolLevel）。
+            // 网关侧 FeedRecommendedPage.items 是 MediaItem 视图（已注入计数/已赞态），字段口径不同，
+            // 不能直接 convertValue 到 MediaItem 字段上——先按契约类型抽出原始条目列表，再做版本协商（M3）与映射。
+            List<RecommendedItem> rawItems = objectMapper.convertValue(data.get("items"),
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, RecommendedItem.class));
             String nextCursor = data.path("nextCursor").asText("");
             boolean hasMore = data.path("hasMore").asBoolean(false);
             // 引擎回传的绝对翻页序号（keyset 模式下由游标 depth 续传累加），与入参 page 区分命名避免遮蔽
             int returnedPage = data.path("page").asInt(0);
             // 版本协商（M3）：引擎可能已先升级并写出更高版本的条目，按错误语义渲染等于静默出错。
             // 口径与引擎侧 ItemViewCodec 一致——不可消费的条目跳过，而不是让整页失败。
-            List<MediaItem> items = ContractVersion.filterConsumable(rawItems,
-                    FeedItemView.SCHEMA_VERSION, FeedItemView::schemaVersion)
-                    .stream().map(FeedItemMapper::toView).toList();
-            return Optional.of(new FeedRecommendedPage(items, nextCursor, hasMore, returnedPage));
+            List<RecommendedItem> consumable = ContractVersion.filterConsumable(rawItems,
+                    FeedItemView.SCHEMA_VERSION, ri -> ri.item().schemaVersion());
+            List<MediaItem> items = consumable.stream().map(ri -> FeedItemMapper.toView(ri.item())).toList();
+            // 召回归因映射（timelineKey → RecommendedItem）：仅网关内部使用，供服务端曝光落盘回填
+            // 通道/池层级（不序列化给前端）。前端拿 FeedRecommendedPage.requestId 回传即可离线关联。
+            Map<String, RecommendedItem> attribution = consumable.stream()
+                    .collect(Collectors.toMap(ri -> ri.item().timelineKey(), ri -> ri, (a, b) -> a));
+            return Optional.of(new RecommendedFeedResult(
+                    new FeedRecommendedPage(items, nextCursor, hasMore, returnedPage, ""), attribution));
         } catch (Exception e) {
             health.recordReadFailure(e.toString());
             log.warn("Feed 引擎读取失败（由调用方按 degraded-mode 决定降级口径）: page={}, size={}, cursor={}, {}",

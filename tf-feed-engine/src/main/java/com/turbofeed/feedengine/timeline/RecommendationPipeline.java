@@ -16,6 +16,7 @@ import com.turbofeed.feedengine.ranking.UserRealtimeProfile;
 import com.turbofeed.feedengine.recall.VectorRecallChannel;
 import com.turbofeed.feedengine.social.FollowService;
 import com.turbofeed.shared.model.FeedItemView;
+import com.turbofeed.shared.model.RecommendedItem;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -187,7 +188,7 @@ public class RecommendationPipeline {
      * @param byPool    各流量池候选（按池序 1..{@code MAX_POOL_LEVELS}，含 ZSET score 作入流时刻）
      * @return 本页内容；无内容时为空列表（不是 {@code null}）
      */
-    public List<FeedItemView> recommend(String userId, int page, int limit,
+    public List<RecommendedItem> recommend(String userId, int page, int limit,
                                         Map<Integer, List<ZSetOperations.TypedTuple<String>>> byPool,
                                         FeedCursor cursor) {
 
@@ -213,6 +214,11 @@ public class RecommendationPipeline {
 
         RecallContext ctx = new RecallContext(userId, page, limit, cursor, interest, shortInterest,
                 session, negative, realtimeProfile, followeeAuthors, new LinkedHashMap<>(), recallSupport);
+
+        // P0-1a 召回归因：按 timelineKey 记录每条内容的召回通道与流量池层级，供 A/B 尺子按「通道 × 实验桶」做效果对照。
+        // 冷启动探索池(G7)注入的新鲜内容无显式通道标注 → 末尾映射为 COLD。
+        Map<String, String> channelOfKey = new LinkedHashMap<>();
+        Map<String, Integer> poolOfKey = new LinkedHashMap<>();
 
         // ==================================================================
         // PRE_POOL 召回：热点 / 兴趣 / item-CF（不依赖池解析结果）。热点通道写 hotKeys，兴趣通道读 hotKeys 并写
@@ -340,6 +346,11 @@ public class RecommendationPipeline {
             // 精排统一交给 RankingModel（含作者健康分降权）。恒重排——少一个分支就少一处静默分歧。
             List<ScoredItem> slice = new ArrayList<>(items.subList(start, end));
             slice.sort((a, b) -> Double.compare(scoreOf(b, ctx), scoreOf(a, ctx)));
+            for (ScoredItem s : slice) {
+                String pk = s.item().timelineKey();
+                poolOfKey.put(pk, pool);
+                channelOfKey.put(pk, "POOL");
+            }
             poolPart.addAll(slice);
         }
 
@@ -387,6 +398,7 @@ public class RecommendationPipeline {
             if (!recallSupport.passFilters(it, ctx)) {
                 continue;
             }
+            channelOfKey.put(it.timelineKey(), "HOT");
             result.add(it);
         }
         // 关注流位紧随热门之后（同为强信号位）：热点是"全站探索"、关注是"社交分发"，都先于兴趣/向量/流量池。
@@ -394,6 +406,7 @@ public class RecommendationPipeline {
             if (!recallSupport.passFilters(s.item(), ctx)) {
                 continue;
             }
+            channelOfKey.put(s.item().timelineKey(), "FOLLOW");
             result.add(s.item());
         }
         // 兴趣召回位紧随热点之后：热点是"全站探索"，兴趣是"个性化兑现"，都先于流量池的通用排序。
@@ -401,6 +414,7 @@ public class RecommendationPipeline {
             if (!recallSupport.passFilters(s.item(), ctx)) {
                 continue;
             }
+            channelOfKey.put(s.item().timelineKey(), "INTEREST");
             result.add(s.item());
         }
         // item-CF 召回位紧随兴趣之后（同为个性化记忆位）：热点=全站探索、兴趣/共现=个性化兑现，都先于流量池。
@@ -408,6 +422,7 @@ public class RecommendationPipeline {
             if (!recallSupport.passFilters(s.item(), ctx)) {
                 continue;
             }
+            channelOfKey.put(s.item().timelineKey(), "CF");
             result.add(s.item());
         }
         // 向量召回位紧随 item-CF 之后（同为个性化位）：热点=全站探索、兴趣/共现/向量=个性化兑现，都先于流量池。
@@ -415,6 +430,7 @@ public class RecommendationPipeline {
             if (!recallSupport.passFilters(s.item(), ctx)) {
                 continue;
             }
+            channelOfKey.put(s.item().timelineKey(), "VECTOR");
             result.add(s.item());
         }
         // 流量池部分（已打散）入流。
@@ -431,7 +447,19 @@ public class RecommendationPipeline {
         // 生态调控层（G9：抖音式「整页全局占比配额」，与 G8 滑窗重排互补）：对整页内容做全局作者/标签封顶，
         // 防单一作者/话题垄断整页；保序裁低位超额尾部，fail-open 回退原序（整页范围生效，含冷启动注入位）。
         result = applyRerank(RerankPhase.FINAL, ctx, result);
-        return result;
+        // P0-1a 召回归因：把最终页（经 G8/G7/G9 重排后）逐条包装为 RecommendedItem，附 recallChannel（含流量池层级）。
+        // 冷启动探索池(G7)在 FINAL 之前注入、未在 channelOfKey 登记的内容 → 记 COLD。
+        List<RecommendedItem> attributed = new ArrayList<>(result.size());
+        for (FeedItemView it : result) {
+            String key = it.timelineKey();
+            String ch = channelOfKey.get(key);
+            if (ch != null) {
+                attributed.add(new RecommendedItem(it, ch, poolOfKey.get(key)));
+            } else {
+                attributed.add(new RecommendedItem(it, "COLD", null));
+            }
+        }
+        return attributed;
     }
 
     /** 按 phase 运行所有召回通道，返回 type → 产出（各通道只产出自己 type 的一份）。 */

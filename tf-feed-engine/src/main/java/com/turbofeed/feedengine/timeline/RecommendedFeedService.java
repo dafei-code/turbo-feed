@@ -3,6 +3,7 @@ package com.turbofeed.feedengine.timeline;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.feedengine.contract.ItemViewCodec;
 import com.turbofeed.shared.model.FeedItemView;
+import com.turbofeed.shared.model.RecommendedItem;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -110,7 +111,7 @@ public class RecommendedFeedService {
      * 则不拼 Key、不读不写，直接实时读时间线。刻意不用「当版本 0」兜底——那会在抖动窗口内
      * 把不同用户的结果写到同一版本的 Key 上，一旦 Key 拼装漏了身份维度即串号。</p>
      */
-    public List<FeedItemView> recommended(int page, int size, String userId) {
+    public List<RecommendedItem> recommended(int page, int size, String userId) {
         int limit = size <= 0 ? 20 : size;
         // A6：匿名与登录用户都缓存，但 Key 作用域不同——
         //   匿名：tf:feed:rec:{version}:{page}:{limit}          （跨用户共享）
@@ -133,14 +134,14 @@ public class RecommendedFeedService {
                 String cached = redisTemplate.opsForValue().get(key);
                 if (cached != null) {
                     // 走统一入口：本处原是裸 readValue 的旁路，缓存里若混入了高版本条目会按错误语义渲染
-                    return ItemViewCodec.parseList(objectMapper, cached);
+                    return ItemViewCodec.parseListRecommended(objectMapper, cached);
                 }
             } catch (Exception e) {
                 log.warn("推荐流缓存读取失败，回落时间线实时读取: key={}, {}", key, e.getMessage());
             }
         }
 
-        List<FeedItemView> fresh = feedTimelineStore.readPage(userId, page, limit);
+        List<RecommendedItem> fresh = feedTimelineStore.readPage(userId, page, limit);
 
         if (key != null) {
             try {
@@ -169,7 +170,7 @@ public class RecommendedFeedService {
         int limit = size <= 0 ? 20 : size;
         if (cursor == null) {
             // 页码模式：复用既有分页 + 缓存（键含页码），不产出游标
-            List<FeedItemView> items = recommended(page, limit, userId);
+            List<RecommendedItem> items = recommended(page, limit, userId);
             return new FeedRecommendedPage(items, "", items.size() == limit, page);
         }
         // 游标模式：本页绝对翻页序号由游标 depth 携带（首页 depth=0，逐页 +1），供曝光特征定位
@@ -185,12 +186,12 @@ public class RecommendedFeedService {
                     : REC_KEY_PREFIX + version + ":cursor:" + cursor.encode();
             ttl = personalized ? USER_REC_CACHE_TTL : REC_CACHE_TTL;
         }
-        List<FeedItemView> fresh;
+        List<RecommendedItem> fresh;
         if (key != null) {
             try {
                 String cached = redisTemplate.opsForValue().get(key);
                 if (cached != null) {
-                    return wrapWithCursor(ItemViewCodec.parseList(objectMapper, cached), limit, depth);
+                    return wrapWithCursor(ItemViewCodec.parseListRecommended(objectMapper, cached), limit, depth);
                 }
             } catch (Exception e) {
                 log.warn("推荐流游标缓存读取失败，回落实时读: key={}, {}", key, e.getMessage());
@@ -208,17 +209,17 @@ public class RecommendedFeedService {
     }
 
     /** 包一页内容为 {@link FeedRecommendedPage}，并据末条的入流 score 计算 {@code nextCursor}（depth+1）。 */
-    private FeedRecommendedPage wrapWithCursor(List<FeedItemView> items, int limit, int page) {
+    private FeedRecommendedPage wrapWithCursor(List<RecommendedItem> items, int limit, int page) {
         if (items == null) {
             items = List.of();
         }
         String next = "";
         if (!items.isEmpty()) {
-            FeedItemView last = items.get(items.size() - 1);
-            Long s = feedTimelineStore.inflowScoreOf(last.timelineKey());
+        RecommendedItem last = items.get(items.size() - 1);
+        Long s = feedTimelineStore.inflowScoreOf(last.item().timelineKey());
             if (s != null) {
                 // nextCursor 携带 depth+1：下一页续拉时其绝对翻页序号即本页 +1
-                next = FeedCursor.of(s, last.timelineKey(), page + 1).encode();
+                next = FeedCursor.of(s, last.item().timelineKey(), page + 1).encode();
             }
         }
         boolean hasMore = items.size() == limit;

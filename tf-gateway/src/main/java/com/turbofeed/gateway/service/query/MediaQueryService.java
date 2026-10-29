@@ -4,11 +4,13 @@ import com.turbofeed.shared.redis.RedisKeys;
 
 import com.turbofeed.gateway.client.FeedEngineClient;
 import com.turbofeed.gateway.client.FeedRecommendedPage;
+import com.turbofeed.gateway.client.RecommendedFeedResult;
 import com.turbofeed.gateway.config.FeedEngineProperties;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.service.feed.InteractionEventService;
 import com.turbofeed.gateway.service.like.MediaLikeService;
 import com.turbofeed.gateway.service.review.MediaStatus;
+import com.turbofeed.shared.model.RecommendedItem;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 媒体查询服务（读侧）：提供「用户 → 其上传内容」的列表与单条状态查询。
@@ -119,16 +122,21 @@ public class MediaQueryService {
         int limit = size <= 0 ? 20 : size;
         boolean useCursor = cursorPagingEnabled && cursor != null && !cursor.isBlank();
         // 游标模式把 cursor 透传给引擎、且不传 page；页码模式传 page、cursor 置空（引擎按 cursor==null 走页码分支）。
-        Optional<FeedRecommendedPage> fromEngine = feedEngineClient.recommended(page, limit, userId, useCursor ? cursor : null);
+        Optional<RecommendedFeedResult> fromEngine = feedEngineClient.recommended(page, limit, userId, useCursor ? cursor : null);
         if (fromEngine.isPresent()) {
-            FeedRecommendedPage pageView = fromEngine.get();
+            FeedRecommendedPage pageView = fromEngine.get().page();
+            // 召回归因映射（timelineKey → RecommendedItem）：仅网关内部使用，供服务端曝光落盘回填通道/池层级。
+            Map<String, RecommendedItem> attribution = fromEngine.get().attribution();
+            // 本次列表请求唯一 ID：随响应下发、前端在 /api/v1/feed/behavior 上报时原样回传，
+            // 离线训练作业据此把客户端互动与 IMPRESSION 按 request_id 关联。
+            String requestId = UUID.randomUUID().toString();
             // 抖音式卡片计数注入：点赞数（网关 Redis Set 基数，去重权威值）/ 已赞态 /
             // 评论数（引擎共享实时分 comments 字段，客户端 COMMENT 行为事件实时累加）。
             List<MediaItem> enriched = enrichCounts(pageView.items(), userId);
             // 曝光用引擎回传的绝对翻页序号（pageView.page()），而非网关 page 入参——
             // 游标模式下网关 page 恒为 0，必须用游标 depth 续传出的绝对序号，否则所有续拉页都记成第 0 页。
-            emitImpressions(userId, enriched, pageView.page());
-            return new FeedRecommendedPage(enriched, pageView.nextCursor(), pageView.hasMore(), pageView.page());
+            emitImpressions(userId, enriched, pageView.page(), attribution, requestId);
+            return new FeedRecommendedPage(enriched, pageView.nextCursor(), pageView.hasMore(), pageView.page(), requestId);
         }
         // 引擎不可用 → 降级（保全接口形态，绝不跨分片广播）
         return degrade(page, limit, userId);
@@ -146,24 +154,31 @@ public class MediaQueryService {
             log.warn("Feed 引擎不可用，降级回源分片库广播查询（degraded-mode=local-scan，仅限本地/演示）: page={}, size={}",
                     page, limit);
             List<MediaItem> items = enrichCounts(mediaRepository.listApprovedGlobal(limit, offset), userId);
-            return new FeedRecommendedPage(items, "", false, page);
+            return new FeedRecommendedPage(items, "", false, page, "");
         }
         log.warn("Feed 引擎不可用，降级返回空列表（degraded-mode=empty，拒绝跨分片广播）: page={}, size={}",
                 page, limit);
-        return new FeedRecommendedPage(List.of(), "", false, page);
+        return new FeedRecommendedPage(List.of(), "", false, page, "");
     }
 
     /**
-     * 服务端曝光发射（A1 训练样本底座）：推荐流组页返回时，对每条内容异步记一次 IMPRESSION。
+     * 服务端曝光发射（A1/P0-1a 训练样本底座）：推荐流组页返回时，对每条内容异步记一次 IMPRESSION。
      *
      * <p>匿名用户（userId 为空）跳过——个性化训练样本需绑定用户；异步 fire-and-forget，
      * 不阻塞返回（落库失败由 {@link InteractionEventService} fail-open 兜底）。</p>
      *
-     * @param userId 已登录用户（来自 JWT）；匿名为 null
-     * @param items  本次返回的推荐内容
-     * @param page   页码
+     * <p><b>P0-1a 召回归因回填</b>：从 {@code attribution} 按 timelineKey 查得本条目召回归因
+     * （通道/池层级），连同本次列表 {@code requestId} 一并写入 interaction_event，使 A/B 实验可
+     * 按「通道 × 实验桶」做效果对照。查不到归因（降级/缓存兜底条目）对应通道/池写空，不阻断曝光落盘。</p>
+     *
+     * @param userId      已登录用户（来自 JWT）；匿名为 null
+     * @param items       本次返回的推荐内容
+     * @param page        页码（引擎回传的绝对翻页序号，非网关入参）
+     * @param attribution 召回归因映射（timelineKey → RecommendedItem），仅网关内部使用
+     * @param requestId   本次列表请求 ID（随响应下发、前端回传），用于离线关联
      */
-    private void emitImpressions(String userId, List<MediaItem> items, int page) {
+    private void emitImpressions(String userId, List<MediaItem> items, int page,
+                                 Map<String, RecommendedItem> attribution, String requestId) {
         if (userId == null || userId.isBlank() || items == null || items.isEmpty()) {
             return;
         }
@@ -171,7 +186,10 @@ public class MediaQueryService {
             MediaItem item = items.get(i);
             String key = item.timelineKey();
             if (key != null && !key.isBlank()) {
-                interactionEventService.recordImpression(userId, key, page, i);
+                RecommendedItem ri = attribution == null ? null : attribution.get(key);
+                String channel = ri == null ? null : ri.recallChannel();
+                Integer pool = ri == null ? null : ri.poolLevel();
+                interactionEventService.recordImpression(userId, key, page, i, channel, pool, requestId);
             }
         }
     }

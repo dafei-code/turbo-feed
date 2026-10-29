@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.feedengine.contract.ItemViewCodec;
 import com.turbofeed.shared.model.FeedItemView;
+import com.turbofeed.shared.model.RecommendedItem;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -192,7 +193,7 @@ public class FeedTimelineStore {
      * @param size   单页条数（&lt;=0 取默认 20）
      * @return 时间倒序的内容列表（当前页）；空表示无更多内容或 Redis 不可用
      */
-    public List<FeedItemView> readPage(String userId, int page, int size) {
+    public List<RecommendedItem> readPage(String userId, int page, int size) {
         int limit = size <= 0 ? 20 : size;
         return readPageInternal(userId, page, limit, null);
     }
@@ -209,11 +210,11 @@ public class FeedTimelineStore {
      * @param cursor 续拉游标（{@code null} = 首页）
      * @return 时间倒序的内容列表（当前页）；空表示无更多内容或 Redis 不可用
      */
-    public List<FeedItemView> readPage(String userId, int limit, FeedCursor cursor) {
+    public List<RecommendedItem> readPage(String userId, int limit, FeedCursor cursor) {
         return readPageInternal(userId, 0, limit <= 0 ? 20 : limit, cursor);
     }
 
-    private List<FeedItemView> readPageInternal(String userId, int page, int limit, FeedCursor cursor) {
+    private List<RecommendedItem> readPageInternal(String userId, int page, int limit, FeedCursor cursor) {
         double maxScore = (cursor == null) ? Double.POSITIVE_INFINITY : cursor.score();
         // 先按池收集近 N 天、每池最新的候选（保留 ZSET score 以便回退路径按入流时刻排序）。
         // 游标模式以 maxScore 为上界（含），漏斗/合并阶段再精确排除游标所指项。
@@ -271,7 +272,9 @@ public class FeedTimelineStore {
                 from = (int) Math.min(offset, items.size());
                 to = (int) Math.min(offset + limit, items.size());
             }
-            return items.subList(from, to);
+            // 回退路径（pool-read-weight 关闭）无召回归因：item 原样返回，channel/pool 置 null
+            return items.subList(from, to).stream()
+                    .map(it -> new RecommendedItem(it, null, null)).toList();
         }
         return recommendationPipeline.recommend(userId, page, limit, byPool, cursor);
     }
