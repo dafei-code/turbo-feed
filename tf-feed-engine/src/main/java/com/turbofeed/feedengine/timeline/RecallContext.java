@@ -38,6 +38,7 @@ public class RecallContext {
     // ===== 召回通道共享的跨通道排除集（LinkedHashSet 保序且去重）=====
     public final Set<String> hotKeys = new LinkedHashSet<>();
     public final Set<String> interestKeys = new LinkedHashSet<>();
+    public final Set<String> cfKeys = new LinkedHashSet<>();
     public final Set<String> vectorKeys = new LinkedHashSet<>();
     public final Set<String> followKeys = new LinkedHashSet<>();
     /** 评分阶段懒加载的作者健康分缓存（本页共享）。 */

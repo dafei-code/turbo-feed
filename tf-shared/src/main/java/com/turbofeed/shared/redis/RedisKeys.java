@@ -95,6 +95,39 @@ public final class RedisKeys {
         return USER_INTEREST_RECENT + userId;
     }
 
+    // ==================== 用户收藏列表（gateway 写 / engine 读）====================
+
+    /**
+     * 「我的收藏」列表 ZSET：{@code tf:favorite:user:{userId} => ZSET<postId, score=收藏时刻ms>}。
+     *
+     * <p>由 tf-gateway 写入（收藏主链路 {@code MediaFavoriteService#addToUserFav}），
+     * tf-feed-engine 的 item-CF 召回通道（{@code ItemCfRecallChannel}）作为<b>种子来源</b>只读——
+     * 取用户近期收藏的内容身份（timelineKey）去查它们的共现邻居。收敛到这里的原因同
+     * {@link #FOLLOW}：此前网关内 {@code MediaFavoriteService#USER_FAV_KEY_PREFIX} 私有硬编码一份，
+     * 引擎侧若再写一份会重演「双份定义、单边改动静默失配」的失败模式。</p>
+     */
+    public static final String USER_FAVORITE = "tf:favorite:user:";
+
+    public static String userFavorite(long userId) {
+        return USER_FAVORITE + userId;
+    }
+
+    // ==================== item-CF 共现矩阵（gateway 写 / engine 读）====================
+
+    /**
+     * 内容-内容共现邻居 ZSET：{@code tf:cf:item:{postId} => ZSET<neighborPostId, coocWeight>}。
+     *
+     * <p>记忆式 item-CF（抖音式「看了又看 / 收藏又收藏」补充召回通道）的存储核心：
+     * tf-gateway 在收藏 / 取消收藏时对称维护（{@code ItemCooccurrenceService#bumpPair} / {@code decayPair}），
+     * tf-feed-engine 的 {@code ItemCfRecallChannel} 以用户收藏为种子查邻居并 merge 去重。
+     * 单条 ZSET 即「一篇内容最像它的 N 篇」的轻量共现视图，毫秒级读取、零训练延迟。</p>
+     */
+    public static final String CF_ITEM = "tf:cf:item:";
+
+    public static String cfItem(String postId) {
+        return CF_ITEM + postId;
+    }
+
     // ==================== 审核信号外供 KV（gateway 写 / engine 读）====================
 
     /** 审核信号 KV 默认命名空间：{@code tf:mod:}（命名空间可经配置覆盖）。 */

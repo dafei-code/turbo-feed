@@ -7,6 +7,7 @@ import com.turbofeed.gateway.service.feed.BehaviorReport;
 import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
 import com.turbofeed.gateway.util.LikeCountScript;
 import com.turbofeed.gateway.util.SnowflakeIdGenerator;
+import com.turbofeed.shared.redis.RedisKeys;
 import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,8 +71,6 @@ public class MediaFavoriteService {
     static final String COUNT_KEY_PREFIX = "tf:favorite:count:";
     /** 收藏用户维度限流 key 前缀（与上传 rl:upload:、点赞 rl:like: 隔离计数，共用一套阈值配置）。 */
     private static final String RL_FAVORITE_PREFIX = "rl:favorite:";
-    /** 我的收藏列表 ZSET 前缀：{@code tf:favorite:user:{userId} => ZSet<postId, score=收藏时刻ms>}。 */
-    static final String USER_FAV_KEY_PREFIX = "tf:favorite:user:";
     /** 热键打散槽数：与媒体点赞/counter bucket-count=64 对齐。 */
     private static final int SLOT_COUNT = 64;
     /** 去重集合 TTL：略长于内容公域生命周期（与媒体点赞对齐）。 */
@@ -87,13 +86,15 @@ public class MediaFavoriteService {
     private final SnowflakeIdGenerator snowflakeIdGenerator;
     private final Executor interactionExecutor;
     private final UploadRateLimiter rateLimiter;
+    /** 内容-内容共现矩阵维护（记忆式 item-CF 写侧，抖音式「收藏又收藏」补充召回通道）。 */
+    private final ItemCooccurrenceService itemCooccurrenceService;
     /** 计数增量发布器（opt-in）：{@code turbofeed.counter.service.enabled=false} 时工厂不提供 Bean，恒为空。 */
     private final ObjectProvider<CounterEventPublisher> counterPublisher;
 
     public MediaFavoriteService(StringRedisTemplate redisTemplate, BehaviorEventPublisher behaviorPublisher,
                                 MediaFavoriteJdbcRepository favoriteRepository, SnowflakeIdGenerator snowflakeIdGenerator,
                                 @Qualifier("interactionExecutor") Executor interactionExecutor,
-                                UploadRateLimiter rateLimiter,
+                                UploadRateLimiter rateLimiter, ItemCooccurrenceService itemCooccurrenceService,
                                 ObjectProvider<CounterEventPublisher> counterPublisher) {
         this.redisTemplate = redisTemplate;
         this.behaviorPublisher = behaviorPublisher;
@@ -101,6 +102,7 @@ public class MediaFavoriteService {
         this.snowflakeIdGenerator = snowflakeIdGenerator;
         this.interactionExecutor = interactionExecutor;
         this.rateLimiter = rateLimiter;
+        this.itemCooccurrenceService = itemCooccurrenceService;
         this.counterPublisher = counterPublisher;
     }
 
@@ -114,9 +116,9 @@ public class MediaFavoriteService {
         return USERS_KEY_PREFIX + postId + ":" + slot;
     }
 
-    /** 我的收藏列表 ZSET Key。 */
+    /** 我的收藏列表 ZSET Key（跨服务单一真值，见 {@link RedisKeys#USER_FAVORITE}）。 */
     private static String userFavKey(long userId) {
-        return USER_FAV_KEY_PREFIX + userId;
+        return RedisKeys.userFavorite(userId);
     }
 
     /**
@@ -176,6 +178,8 @@ public class MediaFavoriteService {
                             log.warn("收藏异步落库失败（fail-open，不影响主流程）: postId={}, userId={}, {}",
                                     postId, userId, ex.getMessage());
                         }
+                        // ⑤ 维护 item-CF 共现矩阵（写侧，fail-open 内部已兜底）
+                        itemCooccurrenceService.onFavorite(postId, userId);
                     });
                     return true;
                 }
@@ -199,6 +203,8 @@ public class MediaFavoriteService {
                             log.warn("取消收藏异步落库失败（fail-open，不影响主流程）: postId={}, userId={}, {}",
                                     postId, userId, ex.getMessage());
                         }
+                        // ⑤ 衰减 item-CF 共现矩阵（写侧，fail-open 内部已兜底）
+                        itemCooccurrenceService.onUnfavorite(postId, userId);
                     });
                     return false;
                 }

@@ -51,7 +51,8 @@ public class VectorFeedRecallChannel implements RecallChannel {
         for (List<FeedItemView> l : ctx.parsed.values()) {
             for (FeedItemView it : l) {
                 String tk = it == null ? null : it.timelineKey();
-                if (tk != null && !ctx.hotKeys.contains(tk) && !ctx.interestKeys.contains(tk)) {
+                if (tk != null && !ctx.hotKeys.contains(tk) && !ctx.interestKeys.contains(tk)
+                        && !ctx.cfKeys.contains(tk)) {
                     candidates.add(it);
                 }
             }
@@ -69,7 +70,8 @@ public class VectorFeedRecallChannel implements RecallChannel {
             }
             String tk = it.timelineKey();
             if (tk == null || !vectorKeys.add(tk) || ctx.hotKeys.contains(tk)
-                    || ctx.interestKeys.contains(tk) || ctx.followeeAuthors.contains(authorIdOf(it))) {
+                    || ctx.interestKeys.contains(tk) || ctx.cfKeys.contains(tk)
+                    || ctx.followeeAuthors.contains(authorIdOf(it))) {
                 continue;
             }
             part.add(new ScoredItem(it, recencyOf(it)));

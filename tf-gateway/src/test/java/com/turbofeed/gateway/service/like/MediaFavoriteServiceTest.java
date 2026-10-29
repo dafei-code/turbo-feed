@@ -68,6 +68,7 @@ class MediaFavoriteServiceTest {
     @Mock ZSetOperations<String, String> zSetOps;
     @Mock BehaviorEventPublisher behaviorPublisher;
     @Mock MediaFavoriteJdbcRepository favoriteRepository;
+    @Mock ItemCooccurrenceService itemCooccurrenceService;
     @Mock SnowflakeIdGenerator snowflakeIdGenerator;
     @Mock UploadRateLimiter rateLimiter;
     @Mock ObjectProvider<CounterEventPublisher> counterPublisher;
@@ -118,7 +119,7 @@ class MediaFavoriteServiceTest {
                 .thenReturn(Set.of());
         when(zSetOps.score(anyString(), any())).thenReturn(null);
         service = new MediaFavoriteService(redisTemplate, behaviorPublisher, favoriteRepository,
-                snowflakeIdGenerator, directExecutor, rateLimiter, counterPublisher);
+                snowflakeIdGenerator, directExecutor, rateLimiter, itemCooccurrenceService, counterPublisher);
     }
 
     /** 构造 N 项 × 64 槽的 SCARD 结果，使第 idx 项的 64 槽之和恰为 wantSum。 */
@@ -398,5 +399,26 @@ class MediaFavoriteServiceTest {
         service.apply(POST_ID, 42L, true);
 
         verify(counterEventPublisher).incr(POST_ID, "FAVORITE", 1);
+    }
+
+    @Test
+    void apply_favorite_triggersCooccurrenceOnNewFavorite() {
+        when(setOps.add(anyString(), eq("42"))).thenReturn(1L);
+
+        service.apply(POST_ID, 42L, true);
+
+        // 新收藏主链路异步块应触发 item-CF 共现增量维护（directExecutor 同步完成）
+        verify(itemCooccurrenceService).onFavorite(POST_ID, 42L);
+    }
+
+    @Test
+    void apply_unfavorite_triggersCooccurrenceDecay() {
+        when(setOps.add(anyString(), eq("42"))).thenReturn(0L);
+        when(setOps.remove(anyString(), eq("42"))).thenReturn(1L);
+
+        service.apply(POST_ID, 42L, false);
+
+        // 取消收藏主链路异步块应触发 item-CF 共现对称衰减
+        verify(itemCooccurrenceService).onUnfavorite(POST_ID, 42L);
     }
 }

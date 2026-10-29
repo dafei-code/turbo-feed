@@ -76,6 +76,26 @@ public class MediaFavoriteJdbcRepository {
      * （即回到改造前的行为）。所以这条兜底是<b>单调改善</b>：能拦住多少算多少，拦不住也不会
      * 比现在更差。</p>
      */
+    /**
+     * 全表扫描所有（用户, 内容）收藏对（item-CF 共现矩阵<b>批重建</b>用，默认关、手动/定时触发）。
+     *
+     * <p><b>口径</b>：返回 {@code (user_id, post_id)} 全量对，由调用方按 {@code user_id} 分组后
+     * 两两累加共现权重。这是<b>冷启动 / 灾备</b>手段——常态走增量维护（
+     * {@code ItemCooccurrenceService#onFavorite} / {@code onUnfavorite}），不依赖本方法。</p>
+     *
+     * <p><b>成本提示</b>：本方法会把全表对读入内存，<b>严禁</b>高频 / 每分钟调用；仅用于初次构建
+     * 共现矩阵、或 Redis 拓扑重建后需要全量回灌的场景（受 {@code turbofeed.feed.cf.*} 开关约束）。</p>
+     */
+    public List<FavoritePair> listAllUserPostPairs() {
+        return jdbcTemplate.query(
+                "SELECT user_id, post_id FROM media_favorite",
+                (rs, i) -> new FavoritePair(rs.getLong("user_id"), rs.getString("post_id")));
+    }
+
+    /** 一条（用户, 内容）收藏对（批重建分组用）。 */
+    public record FavoritePair(long userId, String postId) {
+    }
+
     public boolean existsFavorite(String postId, long userId) {
         try {
             Integer n = jdbcTemplate.queryForObject(

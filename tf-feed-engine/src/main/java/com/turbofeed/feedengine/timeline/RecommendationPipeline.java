@@ -158,6 +158,12 @@ public class RecommendationPipeline {
     @Value("${turbofeed.feed.follow-recall-ratio:0.1}")
     private double followRecallRatio;
     /**
+     * 记忆式 item-CF 召回占每页槽位的比例（抖音式多路召回里的「收藏又收藏 / 看了又看」补充通道，P1）。
+     * {@code 0} = 关闭，读路径退化为「热点 + 兴趣 + 向量 + 关注 + 流量池」，不做共现记忆召回。
+     */
+    @Value("${turbofeed.feed.cf-recall-ratio:0.1}")
+    private double cfRecallRatio;
+    /**
      * 推荐过滤规则链开关（默认开启新链）。关闭时 RecallSupport.passFilters 回退到与旧内联完全等价的判定，
      * 作为一键回滚保险——行为零变更。
      */
@@ -168,7 +174,7 @@ public class RecommendationPipeline {
      * 把一批池候选编排成推荐流的一页（漏斗全链路）。
      *
      * <p>编排顺序（抖音式漏斗，自左向右逐层收窄）：
-     * <b>多池候选 → 粗排(G1，逐池重排+截断) → 多路召回(热点/兴趣/向量/关注) →
+     * <b>多池候选 → 粗排(G1，逐池重排+截断) → 多路召回(热点/兴趣/item-CF/向量/关注) →
      * 精排(RankingModel) → 多样性重排(G8) → 冷启动混排(G7) → 生态调控(G9)</b>。</p>
      *
      * @param userId    当前用户（{@code null} 为匿名，走冷启动排序）
@@ -205,11 +211,13 @@ public class RecommendationPipeline {
                 session, negative, realtimeProfile, followeeAuthors, new LinkedHashMap<>(), recallSupport);
 
         // ==================================================================
-        // PRE_POOL 召回：热点 / 兴趣（不依赖池解析结果）。热点通道写 hotKeys，兴趣通道读 hotKeys 并写 interestKeys。
+        // PRE_POOL 召回：热点 / 兴趣 / item-CF（不依赖池解析结果）。热点通道写 hotKeys，兴趣通道读 hotKeys 并写
+        // interestKeys，item-CF 通道读 hotKeys/interestKeys 并写 cfKeys。
         // ==================================================================
         Map<RecallType, List<ScoredItem>> preParts = runRecall(ctx, RecallPhase.PRE_POOL);
         List<ScoredItem> hotPart = preParts.getOrDefault(RecallType.HOT, List.of());
         List<ScoredItem> interestPart = preParts.getOrDefault(RecallType.INTEREST, List.of());
+        List<ScoredItem> cfPart = preParts.getOrDefault(RecallType.CF, List.of());
         List<FeedItemView> hotItems = new ArrayList<>(hotPart.size());
         for (ScoredItem s : hotPart) {
             hotItems.add(s.item());   // 热点位后续单独钉最前，不进 ScoredItem 流
@@ -233,9 +241,10 @@ public class RecommendationPipeline {
                         t != null && t.getScore() != null ? t.getScore() : 0d, it.timelineKey())) {
                     continue;
                 }
-                // 同页去重：已在热点槽位 / 兴趣召回位露出的内容不再占流量池槽位；关注作者内容也不在池位重复刷。
+                // 同页去重：已在热点槽位 / 兴趣召回位 / item-CF 召回位露出的内容不再占流量池槽位；
+                // 关注作者内容也不在池位重复刷。
                 if (ctx.hotKeys.contains(it.timelineKey()) || ctx.interestKeys.contains(it.timelineKey())
-                        || ctx.vectorKeys.contains(it.timelineKey())
+                        || ctx.cfKeys.contains(it.timelineKey()) || ctx.vectorKeys.contains(it.timelineKey())
                         || ctx.followeeAuthors.contains(authorIdOf(it))) {
                     continue;
                 }
@@ -299,7 +308,8 @@ public class RecommendationPipeline {
         List<ScoredItem> vectorPart = postParts.getOrDefault(RecallType.VECTOR, List.of());
         List<ScoredItem> followPart = postParts.getOrDefault(RecallType.FOLLOW, List.of());
 
-        int remainingSlots = Math.max(limit - hotItems.size() - followPart.size() - interestPart.size() - vectorPart.size(), 0);
+        int remainingSlots = Math.max(limit - hotItems.size() - followPart.size() - interestPart.size()
+                - cfPart.size() - vectorPart.size(), 0);
         int[] alloc = allocateSlots(remainingSlots, weights, parsed);
         long pageNum = Math.max(page, 0);
         List<FeedItemView> result = new ArrayList<>(limit);
@@ -338,6 +348,9 @@ public class RecommendationPipeline {
             collectModerationKeys(it, candidatePosts, candidateAuthors);
         }
         for (ScoredItem s : interestPart) {
+            collectModerationKeys(s.item(), candidatePosts, candidateAuthors);
+        }
+        for (ScoredItem s : cfPart) {
             collectModerationKeys(s.item(), candidatePosts, candidateAuthors);
         }
         for (ScoredItem s : followPart) {
@@ -386,7 +399,14 @@ public class RecommendationPipeline {
             }
             result.add(s.item());
         }
-        // 向量召回位紧随兴趣之后（同为个性化位）：热点=全站探索、兴趣/向量=个性化兑现，都先于流量池。
+        // item-CF 召回位紧随兴趣之后（同为个性化记忆位）：热点=全站探索、兴趣/共现=个性化兑现，都先于流量池。
+        for (ScoredItem s : cfPart) {
+            if (!recallSupport.passFilters(s.item(), ctx)) {
+                continue;
+            }
+            result.add(s.item());
+        }
+        // 向量召回位紧随 item-CF 之后（同为个性化位）：热点=全站探索、兴趣/共现/向量=个性化兑现，都先于流量池。
         for (ScoredItem s : vectorPart) {
             if (!recallSupport.passFilters(s.item(), ctx)) {
                 continue;
@@ -434,6 +454,7 @@ public class RecommendationPipeline {
         double ratio = switch (t) {
             case HOT -> hotRecallRatio;
             case INTEREST -> interestRecallRatio;
+            case CF -> cfRecallRatio;
             case VECTOR -> vectorRecallRatio;
             case FOLLOW -> followRecallRatio;
         };
@@ -442,6 +463,9 @@ public class RecommendationPipeline {
         }
         int slots = (int) Math.floor(ctx.limit * Math.min(ratio, 1.0d));
         if (t == RecallType.INTEREST && (ctx.userId == null || ctx.interest.isEmpty())) {
+            return 0;
+        }
+        if (t == RecallType.CF && ctx.userId == null) {
             return 0;
         }
         if (t == RecallType.VECTOR && ctx.userId == null) {
