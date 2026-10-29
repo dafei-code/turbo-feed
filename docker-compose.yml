@@ -197,8 +197,18 @@ services:
       TURBOFEED_GATEWAY_BASE_URL: http://tf-gateway:8080
       TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN:?请在 .env 中设置 TURBOFEED_INTERNAL_TOKEN，网关与引擎必须同值}
       TURBOFEED_MQ_ENABLED: "false"
+      # 行为明细落盘（推荐训练样本的来源）。默认关：本地开发不该静默写文件。
+      # ⚠️ 变量名必须带 FEED：属性是 turbofeed.feed.behavior-log.enabled，
+      #    写成 TURBOFEED_BEHAVIOR_LOG_ENABLED 会被 Spring 静默忽略（不报错、读到默认 false）。
+      TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED: ${TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED:-false}
+      TURBOFEED_FEED_BEHAVIOR_LOG_DIR: /app/logs/behavior
     ports:
       - "8083:8083"
+    volumes:
+      # 行为明细落命名卷：容器重建 / 重建镜像都不丢。
+      # 不挂卷时数据只存在容器可写层，`docker compose down` 即永久丢失——
+      # 这正是「开关打开了但数据没攒住」的根因。
+      - behavior-logs:/app/logs
     depends_on:
       redis:
         condition: service_healthy
@@ -230,3 +240,5 @@ volumes:
   mysql-data:
   redis-data:
   minio-data:
+  # 行为明细（behavior-log）持久卷。按天分文件的 JSONL，后续由采集侧导入对象存储/数仓。
+  behavior-logs:

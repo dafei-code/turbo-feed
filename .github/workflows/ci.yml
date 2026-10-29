@@ -144,6 +144,11 @@ jobs:
       TURBOFEED_INTERNAL_TOKEN: ci-placeholder
       TURBOFEED_SNOWFLAKE_WORKER_ID: '1'
       TURBOFEED_SNOWFLAKE_DATACENTER_ID: '1'
+      # 下面三项只有生产编排（deploy/compose/docker-compose.prod.yml）用得到：
+      # 开发编排里它们有默认值，CI 提供占位值不影响那边的解析结果。
+      TURBOFEED_REDIS_PASSWORD: ci-placeholder
+      TURBOFEED_REDIS_CLUSTER_NODES: redis-0:7000,redis-1:7000,redis-2:7000
+      TURBOFEED_MEDIA_PUBLIC_URL_BASE: https://ci.example.com/turbo-feed-media/
 
     steps:
       - name: Checkout
@@ -175,3 +180,29 @@ jobs:
         # 单独校验：mq 下的 namesrv/broker 平时不在默认编排里，
         # 语法或变量写错不会被默认 profile 的检查发现。
         run: docker compose --profile mq config --quiet
+
+      - name: 冒烟——生产编排可解析
+        # 生产编排是自包含文件（不复用根目录 compose），没人校验就会悄悄腐烂：
+        # 变量名写错、YAML 锚点失效、卷名拼错，都要等真部署那天才炸。
+        run: docker compose -f deploy/compose/docker-compose.prod.yml config --quiet
+
+      - name: 反证——生产编排缺必填时必须失败
+        env:
+          TURBOFEED_INTERNAL_TOKEN: ''
+        run: |
+          if docker compose -f deploy/compose/docker-compose.prod.yml config --quiet 2>/dev/null; then
+            echo "::error::生产编排在缺内部令牌时竟然通过了——\${VAR:?} 强制必填被回退"
+            exit 1
+          fi
+          echo "已确认：生产编排缺必填时如期失败"
+
+      - name: 冒烟——启动前校验脚本可运行
+        # preflight.sh 是「配置对不对」的唯一门禁，它自己写错（语法 / set -u）
+        # 比没有还糟：会让人以为校验过了。这里用全空配置跑一遍，必须非零退出。
+        run: |
+          bash -n deploy/scripts/preflight.sh
+          if bash deploy/scripts/preflight.sh deploy/env/.env.example >/dev/null 2>&1; then
+            echo "::error::全空模板竟然通过了 preflight——必填校验失效"
+            exit 1
+          fi
+          echo "已确认：空模板被 preflight 拦下"

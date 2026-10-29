@@ -1,0 +1,249 @@
+# =============================================================================
+# turbo-feed 生产形态编排（自包含，不依赖根目录 docker-compose.yml）
+#
+# 用法：
+#   cp deploy/env/.env.example deploy/env/.env      # 填真实值，.env 不入仓库
+#   bash deploy/scripts/preflight.sh deploy/env/.env # 启动前校验
+#   docker compose -f deploy/compose/docker-compose.prod.yml --env-file deploy/env/.env up -d
+#
+# ── 为什么另起一个文件而不是写 override ──────────────────────────────────────
+#   Compose 合并多文件时，`ports` / `volumes` 这类列表是**追加**而不是替换。
+#   想让生产「不暴露中间件端口」必须写 `ports: !reset []`，而该标签要求 Compose ≥ 2.24，
+#   降级到老版本会静默失效——端口照样暴露，且没有任何报错。自包含文件没有这个语义陷阱。
+#
+# ── 与开发编排（根目录 docker-compose.yml）的差异 ────────────────────────────
+#   1. **端口收敛**：只有网关对宿主发布端口；MySQL / Redis / MinIO / engine / counter
+#      一律只在内部网络可达。开发编排为了本机连库方便把它们全暴露了，生产不该这样。
+#   2. **重启策略**：一律 `unless-stopped`，宿主机重启或进程崩溃能自愈。
+#   3. **资源限制**：没有限额时，一个服务的堆膨胀会拖垮整台机器（尤其 JVM 按宿主机算堆）。
+#   4. **日志轮转**：json-file 默认无上限，跑久了能把磁盘写满（这是个真实且高频的故障）。
+#   5. **行为明细持久卷**：behavior-logs 挂在引擎上，容器重建不丢训练样本。
+#
+# ── 仍然没有的东西（别误以为这套就等于可上线）─────────────────────────────────
+#   - 没有 TLS 终结 / 反向代理（网关裸 HTTP，生产必须前置 Nginx/Traefik/云 LB）
+#   - 没有密钥管理（.env 是明文文件；生产应走 KMS / Vault / K8s Secret）
+#   - 没有备份与恢复演练、没有灰度与回滚
+#   - 单机 compose 无跨节点容灾；真要高可用需上 K8s 或至少多节点 + 外部中间件
+# =============================================================================
+name: turbo-feed
+
+services:
+  # ───────────────────────────── 中间件 ─────────────────────────────
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${TURBOFEED_DB_PASSWORD:?请在 deploy/env/.env 中设置 TURBOFEED_DB_PASSWORD}
+      MYSQL_DATABASE: turbo_feed_1
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/00-create-databases.sql:/docker-entrypoint-initdb.d/00-create-databases.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${TURBOFEED_DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # AOF 必须开：Redis 在本项目里不只是缓存——令牌黑名单、点赞计数、关注关系都以它为权威源。
+    # 丢了不报错，只表现为「已登出的令牌又能用」「计数归零」，属静默故障。
+    command: redis-server --appendonly yes --appendfsync everysec
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${TURBOFEED_MINIO_ACCESS_KEY:?请在 deploy/env/.env 中设置 TURBOFEED_MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${TURBOFEED_MINIO_SECRET_KEY:?请在 deploy/env/.env 中设置 TURBOFEED_MINIO_SECRET_KEY}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  minio-init:
+    image: minio/mc
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb -p local/turbo-feed-media || true
+      "
+    environment:
+      MINIO_ROOT_USER: ${TURBOFEED_MINIO_ACCESS_KEY:?请在 deploy/env/.env 中设置 TURBOFEED_MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${TURBOFEED_MINIO_SECRET_KEY:?请在 deploy/env/.env 中设置 TURBOFEED_MINIO_SECRET_KEY}
+
+  # ───────────────────────────── 应用服务 ─────────────────────────────
+  tf-gateway:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        MODULE: tf-gateway
+    image: turbo-feed-gateway:${TURBOFEED_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: "8080"
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      # 生产默认走集群（compose 的默认值是 single，那是给本地开发用的）。
+      # 真正的三主三从拓扑见 deploy/redis/docker-compose-cluster.yml。
+      TURBOFEED_REDIS_MODE: ${TURBOFEED_REDIS_MODE:-cluster}
+      TURBOFEED_REDIS_CLUSTER_NODES: ${TURBOFEED_REDIS_CLUSTER_NODES:?请设置集群节点列表，如 redis-0:7000,redis-1:7000,...}
+      TURBOFEED_REDIS_PASSWORD: ${TURBOFEED_REDIS_PASSWORD:?请在 deploy/env/.env 中设置 TURBOFEED_REDIS_PASSWORD}
+      TURBOFEED_DB_0_URL: jdbc:mysql://mysql:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      TURBOFEED_DB_1_URL: jdbc:mysql://mysql:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      TURBOFEED_REPLICA_DB_0_URL: jdbc:mysql://mysql:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      TURBOFEED_REPLICA_DB_1_URL: jdbc:mysql://mysql:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      TURBOFEED_DB_USERNAME: ${TURBOFEED_DB_USERNAME:?请在 deploy/env/.env 中设置 TURBOFEED_DB_USERNAME}
+      TURBOFEED_DB_PASSWORD: ${TURBOFEED_DB_PASSWORD:?请在 deploy/env/.env 中设置 TURBOFEED_DB_PASSWORD}
+      # prod profile 要求 JWT_SECRET 至少 32 字符（HS256 密钥强度），缺失则启动失败
+      TURBOFEED_JWT_SECRET: ${TURBOFEED_JWT_SECRET:?请在 deploy/env/.env 中设置 TURBOFEED_JWT_SECRET}
+      TURBOFEED_SNOWFLAKE_WORKER_ID: ${TURBOFEED_SNOWFLAKE_WORKER_ID:-1}
+      TURBOFEED_SNOWFLAKE_DATACENTER_ID: ${TURBOFEED_SNOWFLAKE_DATACENTER_ID:-1}
+      TURBOFEED_FEED_ENGINE_BASE_URL: http://tf-feed-engine:8083
+      TURBOFEED_MINIO_ENDPOINT: http://minio:9000
+      TURBOFEED_MINIO_ACCESS_KEY: ${TURBOFEED_MINIO_ACCESS_KEY:?请在 deploy/env/.env 中设置 TURBOFEED_MINIO_ACCESS_KEY}
+      TURBOFEED_MINIO_SECRET_KEY: ${TURBOFEED_MINIO_SECRET_KEY:?请在 deploy/env/.env 中设置 TURBOFEED_MINIO_SECRET_KEY}
+      TURBOFEED_MEDIA_PUBLIC_URL_BASE: ${TURBOFEED_MEDIA_PUBLIC_URL_BASE:?生产必须是外部可达的 URL 前缀}
+      # 网关与引擎必须同值；prod profile 无默认值，缺失直接启动失败（fail-fast）
+      TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN:?请在 deploy/env/.env 中设置 TURBOFEED_INTERNAL_TOKEN}
+      TURBOFEED_MQ_ENABLED: ${TURBOFEED_MQ_ENABLED:-false}
+    ports:
+      # 唯一对宿主发布的端口。裸 HTTP——生产必须在前面放 TLS 终结（Nginx/Traefik/云 LB）。
+      - "${TURBOFEED_GATEWAY_HOST_PORT:-8080}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  tf-feed-engine:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        MODULE: tf-feed-engine
+    image: turbo-feed-engine:${TURBOFEED_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: "8083"
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      TURBOFEED_REDIS_MODE: ${TURBOFEED_REDIS_MODE:-cluster}
+      TURBOFEED_REDIS_CLUSTER_NODES: ${TURBOFEED_REDIS_CLUSTER_NODES:?请设置集群节点列表}
+      TURBOFEED_REDIS_PASSWORD: ${TURBOFEED_REDIS_PASSWORD:?请在 deploy/env/.env 中设置 TURBOFEED_REDIS_PASSWORD}
+      TURBOFEED_GATEWAY_BASE_URL: http://tf-gateway:8080
+      TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN:?请在 deploy/env/.env 中设置 TURBOFEED_INTERNAL_TOKEN}
+      TURBOFEED_MQ_ENABLED: ${TURBOFEED_MQ_ENABLED:-false}
+      # ── 行为明细（推荐训练样本）───────────────────────────────────────
+      # ⚠️ 变量名必须带 FEED：属性是 turbofeed.feed.behavior-log.enabled。
+      #    写成 TURBOFEED_BEHAVIOR_LOG_ENABLED 不会报错，只会静默读到默认 false——
+      #    表现为「开关设了、日志没异常、数据一条没有」。
+      TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED: ${TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED:-true}
+      TURBOFEED_FEED_BEHAVIOR_LOG_DIR: /app/logs/behavior
+      TURBOFEED_FEED_BEHAVIOR_LOG_QUEUE_CAPACITY: ${TURBOFEED_FEED_BEHAVIOR_LOG_QUEUE_CAPACITY:-50000}
+    # 不发布端口：只在内部网络被网关调用。需要直连排障时临时用 `docker compose exec`。
+    volumes:
+      - behavior-logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      tf-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8083/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  tf-counter:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        MODULE: tf-counter
+    image: turbo-feed-counter:${TURBOFEED_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: "8081"
+      SPRING_PROFILES_ACTIVE: prod
+    # 不发布端口：计数服务只被网关/引擎内部调用。
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+volumes:
+  mysql-data:
+  redis-data:
+  minio-data:
+  # 行为明细持久卷。备份/采集这两个动作必须显式配置，见 docs/architecture/behavior-data-pipeline.md
+  behavior-logs:
