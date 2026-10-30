@@ -38,4 +38,24 @@ public enum ModerationAction {
     public boolean denies() {
         return this == BLOCK || this == REVIEW;
     }
+
+    /**
+     * 严重度排序（决策层取「最严重」动作的依据）。
+     *
+     * <p><b>为什么不用 {@code ordinal()}</b>：枚举声明顺序是为了<b>可读性</b>排的
+     * （PASS / LIMIT / REVIEW / BLOCK），一旦后续有人为了别处方便调整顺序，
+     * 严重度比较会静默反转。显式定级把「排序意图」和「声明顺序」解耦，
+     * 顺序怎么调都不影响裁定结果。</p>
+     *
+     * <p>级别：{@code BLOCK(3) > REVIEW(2) > LIMIT(1) > PASS(0)}。
+     * 取值与 {@link #denies()} 保持同一语义——REVIEW 当前等价 BLOCK，故同属高严重度。</p>
+     */
+    public int severity() {
+        return switch (this) {
+            case BLOCK -> 3;
+            case REVIEW -> 2;
+            case LIMIT -> 1;
+            case PASS -> 0;
+        };
+    }
 }

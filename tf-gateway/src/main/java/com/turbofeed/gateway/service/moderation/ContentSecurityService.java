@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,8 +32,8 @@ import java.util.concurrent.atomic.LongAdder;
  *   ① 长度校验（按场景上限，最便宜的检查放最前）
  *     ↓ check(scene, text, userId)             ← 纯检测入口：返回裁定，不抛异常
  *   ② 归一化（TextNormalizer：NFKC / 剥分隔符 / 繁简 / 小写）
- *   ③ 匹配（AhoCorasick 单次扫描，O(n)）
- *   ④ 决策：白名单豁免？→ 分类查表得动作
+ *   ③ 匹配（AhoCorasick 单次扫描收集全部命中，O(n)）
+ *   ④ 决策：全部命中 → 白名单逐项减除 → 剩余按严重度取最大动作
  *   ⑤ 计数（命中 / 豁免 / 各动作分场景计数）
  *     ↓
  *   ContentVerdict（动作 + 命中词 + 分类 + 原文位置）
@@ -224,28 +225,55 @@ public class ContentSecurityService {
             return ContentVerdict.pass(scene);
         }
 
-        SensitiveWordHit hit = sensitiveWordService.match(normalized.text());
-        if (hit == null) {
+        // 收集全部命中（含同位置更短的词），按严重度决策，避免「首词定生死」漏拦
+        List<SensitiveWordHit> all = sensitiveWordService.matchAll(normalized.text());
+        if (all.isEmpty()) {
             return ContentVerdict.pass(scene);
         }
 
-        if (properties.isWhitelistEnabled() && whitelistService.isExempt(hit.word(), scene, userId)) {
-            count(scene, RESULT_WHITELISTED);
-            log.info("敏感词命中但被白名单豁免: scene={}, word={}, category={}, userId={}",
-                    scene, hit.word(), hit.category(), userId);
-            return ContentVerdict.exempt(scene, hit.word(), hit.category());
+        // 白名单只减不增：被豁免的词移出决策集；剩余命中按动作严重度取最大者裁定。
+        // 若所有命中都被豁免 → 整体放行（exempt），仍保留样本词供「易误杀词」统计。
+        boolean anyWhitelisted = false;
+        SensitiveWordHit whitelistedSample = null;
+        ModerationAction worst = ModerationAction.PASS;
+        SensitiveWordHit worstHit = null;
+
+        for (SensitiveWordHit hit : all) {
+            if (properties.isWhitelistEnabled() && whitelistService.isExempt(hit.word(), scene, userId)) {
+                anyWhitelisted = true;
+                if (whitelistedSample == null) {
+                    whitelistedSample = hit;
+                }
+                continue;
+            }
+            ModerationAction action = properties.actionOf(hit.category());
+            if (action.severity() > worst.severity()) {
+                worst = action;
+                worstHit = hit;
+            }
         }
 
-        ModerationAction action = properties.actionOf(hit.category());
-        count(scene, action.name());
+        if (anyWhitelisted) {
+            count(scene, RESULT_WHITELISTED);
+        }
+
+        if (worstHit == null) {
+            // 全部命中都被白名单豁免：放行（保留首个被豁免词的记录供统计）
+            SensitiveWordHit sample = whitelistedSample != null ? whitelistedSample : all.get(0);
+            log.info("敏感词命中但被白名单全豁免: scene={}, word={}, category={}, userId={}",
+                    scene, sample.word(), sample.category(), userId);
+            return ContentVerdict.exempt(scene, sample.word(), sample.category());
+        }
+
+        count(scene, worst.name());
 
         // 归一化下标 → 原文下标：命中区间是半开区间 [start, end)，
         // 只需回溯首尾两个字符；若首字符回溯失败（理论上不会）则整段标记为「位置未知」
-        int start = normalized.toOriginalIndex(hit.start());
-        int lastOriginal = normalized.toOriginalIndex(hit.end() - 1);
+        int start = normalized.toOriginalIndex(worstHit.start());
+        int lastOriginal = normalized.toOriginalIndex(worstHit.end() - 1);
         int end = (start < 0 || lastOriginal < 0) ? -1 : lastOriginal + 1;
 
-        return new ContentVerdict(action, scene, hit.word(), hit.category(), false,
+        return new ContentVerdict(worst, scene, worstHit.word(), worstHit.category(), false,
                 end < 0 ? -1 : start, end);
     }
 

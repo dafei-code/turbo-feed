@@ -9,6 +9,7 @@ import com.turbofeed.shared.result.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -23,9 +24,10 @@ import java.util.Map;
  * 拦截；方法级 {@link RequirePermission} 声明所需权限为 {@link Permission#SYSTEM_CONFIG}，
  * 仅有 ADMIN 角色持有该权限——审核员(REVIEWER)与普通用户(USER)一律 {@code 40301}。</p>
  *
- * <p><b>热更新</b>：增/删/启停都会在 controller 内立即触发 {@link SensitiveWordService#reload()}
- * 重建 AC 自动机，最坏情况下后台请求 +1ms（词库 < 10k 时全量重建 < 1ms）。下次定时刷新
- * （30s）即便没人为触发，{@code (COUNT, MAX(updated_at))} 指纹变化也会重建——双保险。</p>
+ * <p><b>热更新</b>：增/删/启停只写 DB 并触发<b>后台异步</b>重建（{@link SensitiveWordService#triggerReload()}），
+ * HTTP 请求立即返回，不受词库大小影响（1M 词全量重建 ~1.2s 也不会卡 admin 线程）。
+ * 重建在单飞后台线程完成、原子切换生效；下次定时刷新（30s）即便没人为触发，
+ * {@code (COUNT, MAX(updated_at))} 指纹变化也会重建——双保险。批量导入见 {@code POST /batch}。</p>
  *
  * <p><b>为什么不用 {@code /words/{id} 路径变量</b>：保持与
  * {@link AdminMediaController} 一致的 query 风格（admin 模块已习惯 query 传参），
@@ -64,6 +66,22 @@ public class AdminSensitiveWordController {
             @RequestParam("word") String word,
             @RequestParam(value = "category", defaultValue = "DEFAULT") String category) {
         return Result.ok(sensitiveWordService.add(word, category));
+    }
+
+    /**
+     * 批量导入敏感词（一次加很多词的正确姿势）。
+     *
+     * <p>请求体为词条字符串数组（JSON），这批词统一归属 {@code category}。服务层把 N 条写入
+     * 合并成一次 DB 批处理、且只触发一次后台重建，避免逐条添加时反复全量重建 AC。
+     * 实际生效有毫秒级延迟（后台线程建快照 + 原子切换），属正常。</p>
+     */
+    @PostMapping("/batch")
+    @RequirePermission(Permission.SYSTEM_CONFIG)
+    public Result<Map<String, Object>> batchAdd(
+            @RequestBody List<String> words,
+            @RequestParam(value = "category", defaultValue = "DEFAULT") String category) {
+        int added = sensitiveWordService.batchAdd(words, category);
+        return Result.ok(Map.of("added", added));
     }
 
     /** 禁用（软删除，保留审计）。 */

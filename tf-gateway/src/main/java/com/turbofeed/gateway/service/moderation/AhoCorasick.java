@@ -1,9 +1,11 @@
 package com.turbofeed.gateway.service.moderation;
 
+import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -27,9 +29,10 @@ import java.util.Map;
  * {@link java.util.concurrent.atomic.AtomicReference} 整体替换实例实现热更新，
  * 读路径零锁——读请求始终拿到一个完整的、不可变的 AC，遍历过程中不会被替换影响。</p>
  *
- * <p><b>匹配语义</b>：返回第一个命中的敏感词<b>及其位置</b>（{@link #firstMatchDetail}，
- * {@link #firstMatch} 是其取词重载），用于 fail-closed 拦截；如需返回全部命中，
- * 遍历 fail 链收集，本骨架暂不实现。</p>
+ * <p><b>匹配语义</b>：提供两种粒度—— {@link #firstMatchDetail} 返回<b>第一个</b>命中
+ * （写路径「只要有一个就拒」的旧用法，保留兼容）； {@link #allMatches} 在一次扫描里
+ * 收集<b>全部</b>命中（含沿 fail 链同时命中的更短词），供决策层按严重度取最大动作，
+ * 避免「首词定生死」漏拦（文本先命中低危词、后命中违禁词时，旧逻辑用首词裁定会放行）。</p>
  *
  * <p><b>变体支持由预处理层负责</b>：本类只做纯字符串匹配，不做拼音/繁简/拆字归一化。
  * 喂进来的文本必须先过 {@link TextNormalizer}（NFKC / 剥分隔符 / 繁简折叠 / 小写）——
@@ -66,11 +69,56 @@ public final class AhoCorasick {
     }
 
     /**
+     * 扫描文本，返回<b>全部</b>命中的词及其位置（按文本扫描顺序，非 {@code null}）。
+     *
+     * <p>在每个扫描位置收集两类命中：① 当前终结节点上的词（最长匹配）② 沿 fail 链
+     * 上所有终结节点上的更短词（多模同时命中的常见情况，例如「毛主席」同时命中
+     * 「主席」）。同位置先收集最长、再收集更短，跨位置按扫描序排列，结果确定可测。</p>
+     *
+     * <p>与 {@link #firstMatchDetail} 的区别：后者遇首个命中即返回，本方法把一次扫描中
+     * 能收集到的所有命中都带回去。决策层据此取<b>最严重</b>动作，是 P0 修复
+     * 「首词定生死漏拦」的核心。不返回 {@code null}（空文本或零命中返回空列表），
+     * 调用方无需判空。</p>
+     *
+     * @param text 待扫描文本
+     * @return 命中列表（按扫描顺序）；无命中返回空列表
+     */
+    public List<Match> allMatches(String text) {
+        if (text == null || text.isEmpty()) {
+            return List.of();
+        }
+        List<Match> hits = new ArrayList<>();
+        Node cur = root;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            Node next = cur.children.get(c);
+            while (next == null && cur != root) {
+                cur = cur.fail;
+                next = cur.children.get(c);
+            }
+            if (next != null) {
+                cur = next;
+            }
+            if (cur.word != null) {
+                hits.add(new Match(cur.word, i + 1 - cur.word.length(), i + 1));
+            }
+            // 沿 fail 链收集更短的命中（多模同时命中的常见情况）
+            for (Node f = cur.fail; f != root; f = f.fail) {
+                if (f.word != null) {
+                    hits.add(new Match(f.word, i + 1 - f.word.length(), i + 1));
+                }
+            }
+        }
+        return hits;
+    }
+
+    /**
      * 扫描文本，返回第一个命中的词及其位置；无命中返回 {@code null}。
      *
      * <p>「第一个」的语义是<b>按文本扫描顺序，最早结束的那个命中</b>——
-     * 不是词库里排序最靠前的词。要在同一次扫描里拿全部命中需遍历 fail 链收集，
-     * 骨架阶段不需要（写路径一旦命中即拒，无需求全）。</p>
+     * 不是词库里排序最靠前的词。本方法用于「只要有一个命中就拒」的旧写路径与
+     * 快速存在性判断 {@link #firstMatch} / {@link #contains}；需要<b>全部</b>命中以
+     * 做严重度决策的调用方应使用 {@link #allMatches}。</p>
      */
     public Match firstMatchDetail(String text) {
         if (text == null || text.isEmpty()) {

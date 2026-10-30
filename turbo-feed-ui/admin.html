@@ -423,6 +423,36 @@
     .stat-grid { grid-template-columns: repeat(2, 1fr); }
     .chart-row, .two-col, .banner-layout { grid-template-columns: 1fr; }
   }
+
+  /* ========== 敏感词管理 ========== */
+  .sw-input {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 8px 11px;
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+    min-width: 120px;
+  }
+  .sw-input:focus { border-color: var(--accent); }
+  .sw-area {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 8px 11px;
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+    resize: vertical;
+    width: 260px;
+    font-family: inherit;
+  }
+  .sw-area:focus { border-color: var(--accent); }
+  .sw-tools { display: flex; gap: 22px; flex-wrap: wrap; margin: 12px 0 10px; align-items: flex-start; }
+  .sw-tools .blk { display: flex; flex-direction: column; gap: 6px; }
+  .sw-tools .lab { font-size: 12px; color: var(--text-dim); }
+  .sw-tools .row { display: flex; gap: 8px; align-items: center; }
 </style>
 </head>
   <script src="sanitize.js"></script>
@@ -460,6 +490,10 @@
     <div class="nav-item" data-page-node-id="GGKfwHYjKD3ZcSi6OwLY1t">
       <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="pJtHn1HTUnKEA0zVpeKvBM"><line x1="12" y1="20" x2="12" y2="10" data-page-node-id="Tfn9PJlCauunKkwoSLBVOU"/><line x1="18" y1="20" x2="18" y2="4" data-page-node-id="4o2o7C2bqINCHaHru27wnf"/><line x1="6" y1="20" x2="6" y2="16" data-page-node-id="HrPGiOyF6ZAWXMpyN3C1ql"/></svg>
       计数中心
+    </div>
+    <div class="nav-item" data-target="wordPanel" data-page-node-id="SwMod9Wd7Lq2KpXr0cVfAE">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="MdZc8LpQr5Vn2Kx0sTbWxz"><polygon points="22 3 2 3 10 12.5 10 19 14 21 14 12.5 22 3" data-page-node-id="LpQr5Vn2Kx0sTbWxz9"/></svg>
+      敏感词管理
     </div>
 
     <div class="nav-group" data-page-node-id="cp90l5ROH3BahlpgYYWGBr">工程</div>
@@ -632,6 +666,53 @@
       </table>
     </div>
 
+    <!-- 敏感词管理（动态词库，热更新） -->
+    <div class="panel" id="wordPanel" style="margin-top:20px" data-page-node-id="SwWordPanel01">
+      <div class="p-head" data-page-node-id="SwWordHead01">
+        <div class="title" data-page-node-id="SwWordTitle01">敏感词管理（动态词库）</div>
+        <button class="mini-btn" onclick="loadWords()" data-page-node-id="SwWordRefresh01">刷新</button>
+      </div>
+      <div class="upload-tip" data-page-node-id="SwWordTip01">
+        词库热更新：增 / 删 / 启停只写 DB 并触发<b>后台异步重建</b>，不阻塞接口，<b>毫秒级生效</b>。
+        分类决定处置动作（默认 <code data-page-node-id="SwWordCode01">BLOCK</code> 拦截）；批量导入整批同一分类。
+        强制刷新用于「怀疑节点未生效」时同步重建。
+      </div>
+
+      <div class="sw-tools" data-page-node-id="SwWordTools01">
+        <div class="blk" data-page-node-id="SwWordBlkAdd01">
+          <div class="lab" data-page-node-id="SwWordLabAdd01">新增 / 更新敏感词（按词条 upsert）</div>
+          <div class="row" data-page-node-id="SwWordRowAdd01">
+            <input id="wordInput" class="sw-input" placeholder="词条" data-page-node-id="SwWordInput01">
+            <input id="catInput" class="sw-input" placeholder="分类(默认 DEFAULT)" data-page-node-id="SwWordCat01">
+            <button class="mini-btn ok" onclick="addWord()" data-page-node-id="SwWordAddBtn01">新增</button>
+          </div>
+        </div>
+        <div class="blk" data-page-node-id="SwWordBlkBatch01">
+          <div class="lab" data-page-node-id="SwWordLabBatch01">批量导入（每行一个词，整批同一分类）</div>
+          <div class="row" data-page-node-id="SwWordRowBatch01">
+            <textarea id="batchInput" class="sw-area" rows="2" placeholder="词1&#10;词2&#10;词3" data-page-node-id="SwWordBatchArea01"></textarea>
+            <input id="batchCatInput" class="sw-input" placeholder="分类(默认 DEFAULT)" data-page-node-id="SwWordBatchCat01">
+            <button class="mini-btn ok" onclick="batchAdd()" data-page-node-id="SwWordBatchBtn01">批量导入</button>
+          </div>
+        </div>
+        <div class="blk" data-page-node-id="SwWordBlkReload01">
+          <div class="lab" data-page-node-id="SwWordLabReload01">运维</div>
+          <div class="row" data-page-node-id="SwWordRowReload01">
+            <button class="mini-btn" onclick="forceReload()" data-page-node-id="SwWordReloadBtn01">强制刷新 AC</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="wordStat" style="font-size:12px;color:var(--text-dim);margin-bottom:8px" data-page-node-id="SwWordStat01"></div>
+
+      <table class="table" id="wordTable" data-page-node-id="SwWordTable01">
+        <thead data-page-node-id="SwWordThead01"><tr data-page-node-id="SwWordTr01"><th data-page-node-id="SwWordTh1">词条</th><th data-page-node-id="SwWordTh2">分类</th><th data-page-node-id="SwWordTh3">状态</th><th data-page-node-id="SwWordTh4">操作</th></tr></thead>
+        <tbody id="wordBody" data-page-node-id="SwWordBody01">
+          <tr data-page-node-id="SwWordLoad01"><td colspan="4" style="color:var(--text-dim)">加载中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
   </main>
 </div>
 
@@ -668,13 +749,18 @@
     });
   }
 
-  // 静态演示版：仅侧边栏选中态交互，无后端逻辑
+  // 静态演示版：仅侧边栏选中态交互，无后端逻辑（带 data-target 的菜单平滑滚动到对应面板）
   document.querySelectorAll('.nav-item').forEach(function (item) {
     item.addEventListener('click', function () {
       document.querySelectorAll('.nav-item').forEach(function (i) { i.classList.remove('active'); });
       item.classList.add('active');
       var crumb = document.querySelector('.topbar .crumb b');
       if (crumb) crumb.textContent = item.textContent.trim().split('\n')[0].trim();
+      var target = item.dataset.target;
+      if (target) {
+        var el = document.getElementById(target);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     });
   });
 
@@ -752,8 +838,129 @@
       .catch(function (e) { alert('审核请求失败：' + e.message); });
   }
 
-  // 进入页面即加载一次审核队列
+  // ================= 敏感词管理（动态词库，热更新） =================
+  // 列表：返回 data = { items:[{id,word,category,enabled,revision}], dbCount, acLoadedSize }
+  function loadWords() {
+    fetch(API_BASE + '/api/v1/admin/moderation/words?page=0&size=200', {
+      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        var body = document.getElementById('wordBody');
+        if (!res.data || !res.data.items || res.data.items.length === 0) {
+          body.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim)">词库为空，添加第一个敏感词吧</td></tr>';
+        } else {
+          body.innerHTML = '';
+          res.data.items.forEach(function (it) {
+            var tr = document.createElement('tr');
+            var status = it.enabled
+              ? '<span class="hot-tag tag-cold">启用</span>'
+              : '<span class="hot-tag tag-warm">禁用</span>';
+            var toggleBtn = it.enabled
+              ? '<button class="mini-btn bad" onclick="disableWord(' + jsLit(it.id) + ')">禁用</button>'
+              : '<button class="mini-btn ok" onclick="enableWord(' + jsLit(it.id) + ')">启用</button>';
+            tr.innerHTML = '<td style="word-break:break-all">' + esc(it.word)
+              + '</td><td>' + esc(it.category || 'DEFAULT')
+              + '</td><td>' + status + '</td><td>'
+              + toggleBtn
+              + ' <button class="mini-btn bad" onclick="deleteWord(' + jsLit(it.id) + ')">删除</button>'
+              + '</td>';
+            body.appendChild(tr);
+          });
+        }
+        var stat = document.getElementById('wordStat');
+        if (res.data) {
+          stat.textContent = 'DB 总条数 ' + (res.data.dbCount != null ? res.data.dbCount : '-')
+            + ' · AC 已加载 ' + (res.data.acLoadedSize != null ? res.data.acLoadedSize : '-');
+        }
+      })
+      .catch(function (e) {
+        var body = document.getElementById('wordBody');
+        body.innerHTML = '<tr><td colspan="4" style="color:var(--brand)">加载失败：' + esc(e.message) + '</td></tr>';
+      });
+  }
+
+  function addWord() {
+    var w = document.getElementById('wordInput').value.trim();
+    var c = document.getElementById('catInput').value.trim() || 'DEFAULT';
+    if (!w) { alert('请输入词条'); return; }
+    var url = API_BASE + '/api/v1/admin/moderation/words?word=' + encodeURIComponent(w)
+      + '&category=' + encodeURIComponent(c);
+    fetch(url, {
+      method: 'POST',
+      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0) {
+          document.getElementById('wordInput').value = '';
+          loadWords();
+        } else {
+          alert('添加失败：' + (res.message || '未知错误'));
+        }
+      })
+      .catch(function (e) { alert('添加失败：' + e.message); });
+  }
+
+  function batchAdd() {
+    var raw = document.getElementById('batchInput').value;
+    var words = raw.split('\n').map(function (s) { return s.trim(); })
+      .filter(function (s) { return s.length > 0; });
+    if (words.length === 0) { alert('请粘贴要导入的词（每行一个）'); return; }
+    var c = document.getElementById('batchCatInput').value.trim() || 'DEFAULT';
+    var url = API_BASE + '/api/v1/admin/moderation/words/batch?category=' + encodeURIComponent(c);
+    var h = TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {};
+    h['Content-Type'] = 'application/json';
+    fetch(url, { method: 'POST', headers: h, body: JSON.stringify(words) })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0) {
+          document.getElementById('batchInput').value = '';
+          var added = (res.data && res.data.added != null) ? res.data.added : words.length;
+          loadWords();
+          alert('已提交批量导入：' + added + ' 条（后台异步重建，毫秒级生效）');
+        } else {
+          alert('批量导入失败：' + (res.message || '未知错误'));
+        }
+      })
+      .catch(function (e) { alert('批量导入失败：' + e.message); });
+  }
+
+  function disableWord(id) { wordAction('/api/v1/admin/moderation/words/disable?id=' + encodeURIComponent(id), '禁用'); }
+  function enableWord(id)  { wordAction('/api/v1/admin/moderation/words/enable?id=' + encodeURIComponent(id), '启用'); }
+  function deleteWord(id) {
+    if (!confirm('确认删除该敏感词？不可恢复。')) return;
+    wordAction('/api/v1/admin/moderation/words/delete?id=' + encodeURIComponent(id), '删除');
+  }
+  function wordAction(url, label) {
+    fetch(API_BASE + url, {
+      method: 'POST',
+      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0) { loadWords(); }
+        else { alert(label + '失败：' + (res.message || '未知错误')); }
+      })
+      .catch(function (e) { alert(label + '失败：' + e.message); });
+  }
+
+  function forceReload() {
+    fetch(API_BASE + '/api/v1/admin/moderation/words/reload', {
+      method: 'POST',
+      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0) {
+          loadWords();
+          alert('已强制刷新 AC，当前加载 ' + (res.data != null ? res.data : '?') + ' 条');
+        } else {
+          alert('刷新失败：' + (res.message || '未知错误'));
+        }
+      })
+      .catch(function (e) { alert('刷新失败：' + e.message); });
+  }
+
+  // 进入页面即加载审核队列 + 敏感词词库
   loadReviewQueue();
+  loadWords();
 </script>
 
 </body>

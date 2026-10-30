@@ -3,6 +3,7 @@ package com.turbofeed.gateway.service.moderation;
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.shared.result.ErrorCode;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -13,6 +14,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -25,7 +29,9 @@ import java.util.concurrent.atomic.AtomicReference;
  *       无锁、无阻塞、无中断风险。</li>
  *   <li><b>变更检测</b>：30s 定时 {@code (COUNT, MAX(updated_at))} 指纹对比，
  *       比对变化才重建（INSERT/UPDATE/DELETE 任一改变指纹）。</li>
- *   <li><b>即时刷新</b>：admin 增删后同步调用 {@link #reload()}，不等 30s 窗口。</li>
+ *   <li><b>即时刷新</b>：admin 增删后触发<b>后台异步</b>重建（{@link #triggerReload()}），
+ *       不阻塞 HTTP 线程——DB 写入立即返回，AC 重建在单飞后台线程完成并原子切换；
+ *       30s 定时刷新仍作最终兜底。</li>
  *   <li><b>失败安全</b>：刷新异常保留旧快照（不抛、不清空）。</li>
  * </ul>
  *
@@ -76,6 +82,25 @@ public class SensitiveWordService {
 
     /** 上次成功加载的词条数（供 health / admin 展示）。 */
     private volatile int loadedSize = 0;
+
+    /**
+     * 后台重建线程池（单线程，保证重建串行、避免并发全量重建相互踩踏）。
+     *
+     * <p>admin 变更只把 DB 写入落地，真正的 AC 重建交给它，HTTP 线程零等待——
+     * 这是「大词库下动态添加也不卡管理面」的关键。守护线程，随 Spring 上下文关闭。</p>
+     */
+    private final ExecutorService reloadExecutor =
+            Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "sensitive-word-reloader");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
+     * 单飞标志：重建进行中时，后续触发只置脏、不再重复提交任务。
+     * 进行中的那次重建读的是最新 DB，重建后再比对指纹，期间的新变更会被追平（见 {@link #triggerReload}）。
+     */
+    private final AtomicBoolean reloadInFlight = new AtomicBoolean(false);
 
     /** 启动时同步加载一次（避免前 30s 词库为空）。 */
     @PostConstruct
@@ -137,24 +162,44 @@ public class SensitiveWordService {
     }
 
     /**
+     * 在<b>已归一化</b>的文本上扫描，返回<b>全部</b>命中（词 + 分类 + 位置），按扫描顺序。
+     *
+     * <p>逐条把 {@link AhoCorasick.Match} 映射为分类齐全的 {@link SensitiveWordHit}。
+     * 决策层（{@link ContentSecurityService#check}）用全部命中取最严重动作，
+     * 避免「首词定生死」漏拦。无命中返回空列表（不返回 {@code null}）。</p>
+     *
+     * @param normalizedText 归一化后的文本
+     * @return 命中列表（按扫描顺序）；无命中返回空列表
+     */
+    public List<SensitiveWordHit> matchAll(String normalizedText) {
+        if (normalizedText == null || normalizedText.isEmpty()) {
+            return List.of();
+        }
+        Dictionary d = dictRef.get();
+        List<AhoCorasick.Match> matches = d.ac().allMatches(normalizedText);
+        if (matches.isEmpty()) {
+            return List.of();
+        }
+        List<SensitiveWordHit> hits = new ArrayList<>(matches.size());
+        for (AhoCorasick.Match m : matches) {
+            hits.add(new SensitiveWordHit(m.word(), d.categoryOf(m.word()), m.start(), m.end()));
+        }
+        return hits;
+    }
+
+    /**
      * 在<b>已归一化</b>的文本上扫描，返回首个命中（词 + 分类 + 位置）。
      *
-     * <p>位置是该归一化文本的下标，调用方需用
-     * {@link TextNormalizer.Normalized#toOriginalIndex(int)} 回溯原文。</p>
+     * <p>委托 {@link #matchAll} 取首条，保持旧调用方行为不变；
+     * 需要<b>全部</b>命中的决策应使用 {@link #matchAll}。位置是该归一化文本的下标，
+     * 调用方需用 {@link TextNormalizer.Normalized#toOriginalIndex(int)} 回溯原文。</p>
      *
      * @param normalizedText 归一化后的文本
      * @return 命中详情；无命中返回 {@code null}
      */
     public SensitiveWordHit match(String normalizedText) {
-        if (normalizedText == null || normalizedText.isEmpty()) {
-            return null;
-        }
-        Dictionary d = dictRef.get();
-        AhoCorasick.Match m = d.ac().firstMatchDetail(normalizedText);
-        if (m == null) {
-            return null;
-        }
-        return new SensitiveWordHit(m.word(), d.categoryOf(m.word()), m.start(), m.end());
+        List<SensitiveWordHit> all = matchAll(normalizedText);
+        return all.isEmpty() ? null : all.get(0);
     }
 
     /** 当前词库大小（已加载到 AC 的词条数）。 */
@@ -180,23 +225,75 @@ public class SensitiveWordService {
         }
         String cat = (category == null || category.isBlank()) ? "DEFAULT" : category.trim();
         SensitiveWord sw = repository.upsert(word.trim(), cat);
-        reload();
+        triggerReload(); // 后台异步重建，不阻塞 admin 线程
         return sw;
     }
 
     public void disable(long id) {
         repository.disable(id);
-        reload();
+        triggerReload();
     }
 
     public void enable(long id) {
         repository.enable(id);
-        reload();
+        triggerReload();
     }
 
     public void delete(long id) {
         repository.delete(id);
-        reload();
+        triggerReload();
+    }
+
+    /**
+     * 批量导入（一次加很多词的正确姿势）：一个 DB 批量 upsert + 一次后台重建。
+     *
+     * <p>逐条 {@link #add} 会在 HTTP 线程外触发多次重建；批量接口把 N 次写入合并成
+     * 一条批处理 SQL，且只触发<b>一次</b>后台重建，是运营「整批导入词库」的低开销入口。</p>
+     *
+     * @param words    待导入词条（去空白、非空）
+     * @param category 这批词统一归属的分类
+     * @return 实际写入条数（去重后）
+     */
+    public int batchAdd(List<String> words, String category) {
+        if (words == null || words.isEmpty()) {
+            return 0;
+        }
+        String cat = (category == null || category.isBlank()) ? "DEFAULT" : category.trim();
+        int n = repository.batchUpsert(words, cat);
+        triggerReload();
+        return n;
+    }
+
+    /**
+     * 后台异步重建（单飞）：admin 变更走这里，HTTP 线程立即返回。
+     *
+     * <p><b>单飞语义</b>：若重建正在进行，本次触发只置脏、不重复提交任务；进行中的那次
+     * 重建读的是最新 DB，完成后比对指纹，若期间又有新变更则<b>再追一轮</b>（最多 3 轮），
+     * 保证「最后写的那条词」一定进入下一个生效快照——既不被漏、也不重复全量重建。</p>
+     */
+    public void triggerReload() {
+        if (!reloadInFlight.compareAndSet(false, true)) {
+            return; // 已在飞行中，本轮变更会被进行中的重建追平
+        }
+        reloadExecutor.submit(() -> {
+            try {
+                int guard = 0;
+                do {
+                    doReload(null);
+                    guard++;
+                } while (guard < 3 && !repository.checkSum().equals(lastCheckSum));
+            } catch (Exception e) {
+                log.warn("敏感词库后台刷新失败（保留旧 Trie）: {}", e.getMessage());
+            } finally {
+                reloadInFlight.set(false);
+            }
+        });
+    }
+
+    /** Spring 上下文销毁时关闭后台重建线程池，避免线程泄漏。 */
+    @PreDestroy
+    public void shutdown() {
+        reloadExecutor.shutdown();
     }
 
     public List<SensitiveWord> list(int limit, long offset) {

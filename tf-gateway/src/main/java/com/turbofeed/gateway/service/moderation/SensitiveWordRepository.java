@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -104,6 +105,45 @@ public class SensitiveWordRepository {
     /** 硬删除（不可恢复，骨架阶段不开放给管理后台；如需可在 controller 用 @RequirePermission 限定 ADMIN）。 */
     public void delete(long id) {
         jdbcTemplate.update("DELETE FROM sensitive_word WHERE id = ?", id);
+    }
+
+    /**
+     * 批量新增 / 更新（按 word 唯一键 upsert），一次 SQL 完成 N 条写入。
+     *
+     * <p>批量导入词库的正确姿势：相比逐条 {@link #upsert}（每条一次往返），本方法把 N 条
+     * 合并成一条批处理，大幅降低 DB 往返；配合服务层「一次后台重建」即实现低开销的
+     * 不停机批量加词。</p>
+     *
+     * @param words    待导入词条（调用方保证已 trim、非空）
+     * @param category 这批词统一归属的分类
+     * @return 写入条数
+     */
+    public int batchUpsert(List<String> words, String category) {
+        if (words == null || words.isEmpty()) {
+            return 0;
+        }
+        List<String> cleaned = new ArrayList<>(words.size());
+        for (String w : words) {
+            if (w != null && !w.trim().isEmpty()) {
+                cleaned.add(w.trim());
+            }
+        }
+        if (cleaned.isEmpty()) {
+            return 0;
+        }
+        List<Object[]> batchArgs = new ArrayList<>(cleaned.size());
+        for (String w : cleaned) {
+            batchArgs.add(new Object[]{w, category});
+        }
+        int[] affected = jdbcTemplate.batchUpdate(
+                "INSERT INTO sensitive_word (word, category, enabled, revision) VALUES (?, ?, 1, 1) "
+                        + "ON DUPLICATE KEY UPDATE category = VALUES(category), enabled = 1, revision = revision + 1",
+                batchArgs);
+        int total = 0;
+        for (int a : affected) {
+            total += a;
+        }
+        return total;
     }
 
     /** 变更指纹（行数 + 最大更新时间）。 */
