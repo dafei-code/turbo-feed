@@ -46,7 +46,7 @@ flowchart LR
 | `tf-feed-engine` | 可执行服务    | 8083 | **公域时间线读模型**（多池 ZSET + 反查索引 + 推荐流旁路缓存）、关注流读（G6 拉模式，读 Redis ZSET）、`/internal/**` 接口、MQ 顺序消费 | ✅ 读模型已实现；扇出蓝图未实现 |
 | `tf-counter`     | 可执行服务    | 8081 | 仅 `CounterApplication` + 配置；声明了 Caffeine / Redisson / H2             | ⬜ 模块骨架           |
 | `tf-hotspot`     | 进程内 SDK  | —    | 滑动窗口热 Key 探测 + 广播 + Caffeine L1（设计蓝图）                                | ⬜ **0 个源文件**     |
-| `tf-benchmark`   | 压测模块     | —    | 五场景压测器 + Markdown 报告生成（设计蓝图）                                         | ⬜ **0 个源文件**     |
+| `tf-benchmark`   | 压测模块     | —    | 五场景 HTTP 压测器 + 预热 + 最近秩分位 + Markdown 报告（不入服务拓扑）                | ✅ 已实现             |
 | `tf-shared`      | 纯 POJO 库 | —    | `Result` / `ErrorCode` / `FeedItemView` / `FeedTimelineEvent`，零第三方依赖 | ✅                |
 | `turbo-feed-ui`  | 静态前端     | —    | 纯 HTML（无构建）：登录 / 注册 / 发布 / 公域 Feed 轮播 / 审核与管理工作台                     | ✅                |
 

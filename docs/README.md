@@ -36,11 +36,14 @@ docs/
 │   ├── tf-hotspot.md         # 热点探测 SDK：设计蓝图（尚未实现）
 │   ├── tf-redis.md           # Redis 拓扑装配单一事实源：三态切换 / AutoConfiguration 机制
 │   ├── tf-shared.md          # 公共契约：Result / ErrorCode / FeedItemView / FeedTimelineEvent
-│   └── tf-benchmark.md       # 压测模块：**空壳未实现**（M6 兑现或撤下承诺）
+│   └── tf-benchmark.md       # 压测模块：五场景压测器 + Markdown 报告（**已实现**，不入服务拓扑）
 ├── api/                      # 接口文档
 │   └── gateway-api.md        # HTTP 接口：全量端点 / 参数 / 返回结构 / 错误码 / curl
 ├── ops/                      # 运维层文档
 │   └── deployment.md         # 构建部署 / 必需环境变量 / 配置开关 / 生产前必改清单
+├── benchmark/                # 压测报告归档（tf-benchmark 实跑产出，按轮次）
+│   ├── README.md             # 轮次索引 / 阶梯汇总 / 读法与诚实边界 / 复现命令
+│   └── 2026-10-30-feed-*.md  # 第 1 轮 feed 场景五档阶梯（100/300/600/1200/2000 QPS）
 └── changelog/                # 变更记录（每变更一份，编号递增；历史快照，不回头改）
 ```
 
@@ -54,7 +57,7 @@ docs/
 |---|---|
 | 新接手工程师 | [C4 架构模型](architecture/c4-model.md) → [架构总览](architecture/overview.md) → [tf-gateway](modules/tf-gateway.md) → [API](api/gateway-api.md) → 本地跑起来见 [部署](ops/deployment.md) |
 | 前端 / 联调 | [API 文档](api/gateway-api.md)（含登录换取 JWT 与上传示例） |
-| 运维 / 部署 | [部署文档](ops/deployment.md) → [服务拆分](architecture/service-split.md) |
+| 运维 / 部署 | [部署文档](ops/deployment.md) → [服务拆分](architecture/service-split.md) → [压测基线](benchmark/README.md) |
 | 线上排障 | [失败模式对账 §6](architecture/failure-mode-ledger.md)（**第一步永远先拿 traceId**） |
 | 想知道「为什么这么设计」 | [ADR 索引](adr/README.md)（7 份，含否决过的方案与代价） |
 | 审核 / 产品 | [审核体系蓝图](architecture/moderation-design.md)（P0~P3，**规划中**）→ [tf-gateway §4 审核状态机](modules/tf-gateway.md)（现状） |
