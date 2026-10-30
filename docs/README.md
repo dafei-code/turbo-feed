@@ -28,7 +28,7 @@ docs/
 │   ├── improvement-plan.md   # 评审问题诊断 + 改进落地追踪（M0~M6）
 │   ├── moderation-design.md  # 审核体系设计蓝图（P0~P3，**规划中未实施**）
 │   ├── content-security-design.md # 内容安全（文本）：五层架构 / 归一化 / 白名单（**S1 已落地，S2+ 规划**）
-│   └── recommendation-design.md  # 推荐与用户画像：分表数据聚合分析 / CDC 出仓 / 召回排序（**规划中未实施**）
+│   └── recommendation-design.md  # 推荐与用户画像：抖音式推荐漏斗已落地(G1–G9) / CDC 出仓与画像标签待演进
 ├── modules/                  # 模块级技术文档（与 Maven 模块一一对应，有 CI 检查）
 │   ├── tf-gateway.md         # 网关：认证与 RBAC / 一帖多图上传 / 审核状态机 / 分片 / 配置
 │   ├── tf-counter.md         # 计数服务：已落地（分桶 / MQ 削峰 / 批量落库 / 三级读缓存）+ 与 tf-hotspot 联动待补

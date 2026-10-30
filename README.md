@@ -21,6 +21,7 @@
 - 词库忘了导入、服务却全 200？—— 启动自检 + 运行态指标，`fail-startup-on-empty-dictionary` 可在部署期直接拒绝启动。
 - 内部接口 `/internal/**` 裸奔？—— `X-Internal-Token` 双侧校验，**非 dev/local profile 缺令牌启动即失败**。
 - MQ 挂了 Feed 断流？—— Outbox + 顺序消息 + 死信清扫 + Prometheus 指标；未启用 MQ 时自动降级进程内投递，克隆即跑。
+- 公域流只是时间倒序？—— 完整推荐漏斗：多路召回（热点/兴趣/item-CF/向量/关注）+ 粗排 G1 + 精排（Linear/DeepFM/多目标）+ 多样性/冷启动/生态重排，全部 fail-open。
 
 ---
 
@@ -29,7 +30,7 @@
 ```
 turbo-feed/
 ├── tf-gateway/      :8080  接入层（32.8k 行）：认证/RBAC · 媒体上传(一帖多图) · 审核状态机 · 内容安全 · Sentinel
-├── tf-feed-engine/   :8083  Feed 引擎（15.8k 行）：多池 ZSET 时间线 + 反查索引 + 推荐流旁路缓存 + 实验分桶
+├── tf-feed-engine/   :8083  Feed 引擎（15.8k 行）：抖音式推荐漏斗(召回/粗排/精排/重排) + 多池 ZSET 时间线 + 反查索引 + 实验分桶
 ├── tf-counter/       :8081  计数服务（1.4k 行）：Redis 分桶 + MQ 削峰 + 批量落库 + 三级读缓存(L1 Caffeine/L2 Redis/L3 DB)
 ├── tf-shared/             契约库：跨服务传输模型（Result / ErrorCode / FeedItemView / FeedTimelineEvent），零依赖
 ├── tf-redis/              Redis 接入单一事实源：单机/哨兵/集群拓扑装配，引入即生效
@@ -50,6 +51,39 @@ MySQL + ShardingSphere 5.5.3（HASH_MOD，混合：7 表 hashMod4 + 6 表 hashMo
 RocketMQ（rocketmq-spring 2.3.5，顺序消息）· MinIO 8.5.7（对象存储）· 计数服务预留 Redisson 3.27.2 / Caffeine / H2
 
 ---
+
+## 核心：抖音式推荐漏斗（召回 → 粗排 → 精排 → 重排 → 冷启动混排）
+
+位于 `tf-feed-engine`，`RecommendationPipeline` 只负责编排顺序、门控、跨通道去重与池切片分配；
+每一层都组件化、可插拔，且**全程 fail-open**——任一层异常都退化为"不生效"，绝不让推荐页开天窗。
+
+```
+多路召回（RecallChannel，按 phase 自动收集）
+  热门 HotRecallChannel · 兴趣标签 InterestRecallChannel · 关注/社交 FollowRecallChannel(读 tf:follow 社交图)
+  · Item-CF ItemCfRecallChannel · 向量召回 VectorFeedRecallChannel(Redis user/item embedding, 条件装配)
+  · 标签向量 TagVectorRecallChannel(TagCooccurrenceTrainer 训练共现)
+        ↓ 跨通道去重 + 池切片分配
+粗排 PreRank（LinearPreRankModel + PreRankFilter，廉价打分先砍候选量）
+        ↓
+精排 RankingModel（可配置切换，默认 LINEAR 零回归）
+  · LINEAR        线性加权多目标（默认，与改造前语义一致）
+  · DEEPFM        字段感知 FM：确定性 hash 嵌入做二阶特征交叉；远程 RankModelClient 缝接真实 DeepFM serving
+  · MULTI_TARGET  多目标联合预估（CTR/CVR/完播时长/互动）
+        ↓
+重排 RerankStage：多样性 DiversityRerankService · 冷启动混排 ColdStartRerankStage · 生态调控
+        ↓
+一页 ScoredItem
+```
+
+围绕漏斗的配套能力：
+
+- **实时特征流**：`RealtimeFeatureService` 每页算一次特征喂给精排；`SessionSequenceService` 取最近 N 条互动做"跟手"信号；兴趣画像 Top30 标签 + session 序列。
+- **审核与推荐解耦**：`ReviewSignalClient` 直读 `tf:mod:` KV，召回层过滤 INTERCEPT/MONITOR 内容与低健康分作者，排序层懒读作者健康分降权——不阻塞、不耦合。
+- **向量召回有条件装配**：`VectorUserSourceEnabledCondition` 控制 user embedding 源是否启用，未配置/未训练时自动退回，不报错。
+- **A/B 尺子**：`ExperimentBucket` 把 userId 稳定映射 100 桶，可对某一桶覆写召回配比做对照实验。
+
+> 诚实标注：DEEPFM 当前是本地确定性 FM 实现（交叉项默认权重很小，权重为 0 时 ≡ 线性模型），
+> 真实远程 serving 走 `RankModelClient` 缝接，尚未接入训练好的线上模型；MULTI_TARGET 同理。
 
 ## 亮点一：一个"教科书级"的内容安全模块
 
