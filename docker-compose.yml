@@ -197,10 +197,10 @@ services:
       TURBOFEED_GATEWAY_BASE_URL: http://tf-gateway:8080
       TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN:?请在 .env 中设置 TURBOFEED_INTERNAL_TOKEN，网关与引擎必须同值}
       TURBOFEED_MQ_ENABLED: "false"
-      # 行为明细落盘（推荐训练样本的来源）。默认关：本地开发不该静默写文件。
-      # ⚠️ 变量名必须带 FEED：属性是 turbofeed.feed.behavior-log.enabled，
-      #    写成 TURBOFEED_BEHAVIOR_LOG_ENABLED 会被 Spring 静默忽略（不报错、读到默认 false）。
-      TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED: ${TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED:-false}
+      # 行为明细落盘（训练样本的唯一来源）。默认开：与 prod 编排保持一致，起容器即攒样本。
+      # ⚠️ 变量名必须带 FEED：不是 Spring 不认（yaml 里还有 ${TURBOFEED_BEHAVIOR_LOG_ENABLED} 兜底），
+      #    而是**本文件只把带 FEED 的这个名字转发进容器**——不带 FEED 的变量进不去，会被静默忽略。
+      TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED: ${TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED:-true}
       TURBOFEED_FEED_BEHAVIOR_LOG_DIR: /app/logs/behavior
     ports:
       - "8083:8083"

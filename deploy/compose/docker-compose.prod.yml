@@ -191,8 +191,8 @@ services:
       TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN:?请在 deploy/env/.env 中设置 TURBOFEED_INTERNAL_TOKEN}
       TURBOFEED_MQ_ENABLED: ${TURBOFEED_MQ_ENABLED:-false}
       # ── 行为明细（推荐训练样本）───────────────────────────────────────
-      # ⚠️ 变量名必须带 FEED：属性是 turbofeed.feed.behavior-log.enabled。
-      #    写成 TURBOFEED_BEHAVIOR_LOG_ENABLED 不会报错，只会静默读到默认 false——
+      # ⚠️ 变量名必须带 FEED：不是 Spring 不认（yaml 里还有 ${TURBOFEED_BEHAVIOR_LOG_ENABLED} 兜底），
+      #    而是**本文件只把带 FEED 的这个名字转发进容器**——不带 FEED 的变量进不去，
       #    表现为「开关设了、日志没异常、数据一条没有」。
       TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED: ${TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED:-true}
       TURBOFEED_FEED_BEHAVIOR_LOG_DIR: /app/logs/behavior

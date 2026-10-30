@@ -38,11 +38,18 @@
 | 文件格式 | JSONL，一行一个 `FeedBehaviorEvent` |
 | 文件切分 | 按天：`feed-behavior-YYYYMMDD.jsonl` |
 | 目录 | `turbofeed.feed.behavior-log.dir`，默认 `logs/behavior`，容器内为 `/app/logs/behavior` |
-| 开关 | `turbofeed.feed.behavior-log.enabled`，**默认 false** |
+| 开关 | `turbofeed.feed.behavior-log.enabled`。代码默认 `false`，**生产编排默认 `true`**（`deploy/compose`），本机开发已常开 |
 | 持久化 | 生产编排挂命名卷 `behavior-logs:/app/logs` |
 | 故障语义 | 全链路 fail-open；埋点挂掉不影响统计与画像（两者各自独立写入） |
 
-**为什么默认关闭**：落盘是"为了攒数据"的行为，不该在任何人的开发机上静默写文件。需要采集时显式打开。
+**为什么代码默认 false、部署默认 true**：默认值要按「谁承担后果」来定——代码/配置骨架的 `false` 保护的是
+「任何人的机器都不该被静默写盘」；而部署编排是运维显式声明的环境，攒训练样本正是它存在的理由，所以 `true`。
+两者不矛盾：**默认不写，部署要写**。
+
+> **2026-10-30 已开启**：本机 `application.yml`（gitignored）置 `enabled: true`，
+> 生产 `deploy/compose/docker-compose.prod.yml` 与 `.env.example` 默认已为 `true`。
+> 开启后实测：30 条事件在 **Redis 完全不可用**的情况下仍 100% 落盘（统计写失败只告警），
+> 重启后追加写不截断（30 → 35 行），JSONL 逐行可解析。
 
 **"队列满即丢"是设计而非缺陷**：丢埋点损失的是样本量，卡住请求损失的是可用性。
 
@@ -123,9 +130,16 @@
 TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED=true
 ```
 
-> ⚠️ **变量名必须带 `FEED`**。属性是 `turbofeed.feed.behavior-log.enabled`，
-> 写成 `TURBOFEED_BEHAVIOR_LOG_ENABLED` 时 Spring **不会报错**，只会静默读到默认值 `false`——
-> 表现为「环境变量设了、日志没异常、数据一条没有」。`deploy/scripts/preflight.sh` 会拦这个错误。
+> ⚠️ **变量名必须带 `FEED`——但原因不是「Spring 不认」。**
+> 实测（2026-10-30）：直接 `java` 起引擎时，`TURBOFEED_BEHAVIOR_LOG_ENABLED` **也能生效**——
+> 因为 `application.yml` 里该属性本身就写成了 `${TURBOFEED_BEHAVIOR_LOG_ENABLED:false}` 占位符。
+> 真正的原因是 **compose 只转发 `TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED` 这一个名字进容器**，
+> 不带 FEED 的那个变量根本进不去，于是静默读默认值。
+> 表现为「.env 里设了、日志没异常、数据一条没有」。
+>
+> **自证方式**（不依赖任何推测）：启动日志第一屏必须出现
+> `行为明细落盘已启用: dir=..., queueCapacity=...`；关闭时是 `行为明细落盘已关闭`。
+> `deploy/scripts/preflight.sh` 会在 `.env` 里出现不带 FEED 的变量名时直接阻断。
 
 ### 6.2 确认真的在写
 
@@ -183,4 +197,4 @@ docker run --rm -v turbo-feed_behavior-logs:/data -v "$PWD":/out alpine \
 | `deploy/compose/docker-compose.prod.yml` | 生产编排：`behavior-logs` 卷 + 开关注入 |
 | `deploy/env/.env.example` | 环境变量清单（含变量名陷阱说明） |
 | `deploy/scripts/preflight.sh` | 启动前校验（含错误变量名检测） |
-| `docker-compose.yml` | 开发编排：同样挂卷，默认不开 |
+| `docker-compose.yml` | 开发编排：同样挂卷，**默认已开**（与 prod 一致） |

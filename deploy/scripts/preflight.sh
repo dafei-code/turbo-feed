@@ -130,7 +130,7 @@ esac
 echo "[5/5] 行为明细"
 # ⚠️ 只认带 FEED 的那个名字；不带 FEED 的写法会被 Spring 静默忽略。
 if [ -n "${TURBOFEED_BEHAVIOR_LOG_ENABLED:-}" ]; then
-  fail "检测到 TURBOFEED_BEHAVIOR_LOG_ENABLED（少了 FEED），该变量不会生效；正确的是 TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED"
+  fail "检测到 TURBOFEED_BEHAVIOR_LOG_ENABLED（少了 FEED）：compose 只转发带 FEED 的名字进容器，这个设置不会生效；改成 TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED"
 fi
 if [ "${TURBOFEED_FEED_BEHAVIOR_LOG_ENABLED:-false}" = "true" ]; then
   DIR="${TURBOFEED_FEED_BEHAVIOR_LOG_DIR:-/app/logs/behavior}"
