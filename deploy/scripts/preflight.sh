@@ -140,6 +140,26 @@ else
   ok "未开启（默认）。训练样本将没有明细来源"
 fi
 
+# ── 5b. 行为明细归档（P1）──────────────────────────────────────────────
+# 归档的变量名也必须带 BEHAVIOR_LOG（compose 只转发带此前缀的名字进容器）。
+if [ -n "${TURBOFEED_BEHAVIOR_LOG_ARCHIVE_ENABLED:-}" ]; then
+  fail "检测到 TURBOFEED_BEHAVIOR_LOG_ARCHIVE_ENABLED（少了 BEHAVIOR_LOG）：compose 只转发带此前缀的名字进容器，这个设置不会生效；改成 TURBOFEED_BEHAVIOR_LOG_ARCHIVE_ENABLED"
+fi
+if [ "${TURBOFEED_BEHAVIOR_LOG_ARCHIVE_ENABLED:-false}" = "true" ]; then
+  for v in TURBOFEED_BEHAVIOR_LOG_ARCHIVE_MINIO_ENDPOINT TURBOFEED_BEHAVIOR_LOG_ARCHIVE_MINIO_ACCESS_KEY TURBOFEED_BEHAVIOR_LOG_ARCHIVE_MINIO_SECRET_KEY TURBOFEED_BEHAVIOR_LOG_ARCHIVE_BUCKET; do
+    val=$(eval "printf '%s' \"\${$v:-}\"")
+    if [ -z "$val" ]; then
+      fail "归档已开启但 ${v} 为空（MinIO 端点/凭据/桶缺失，归档将一直失败）"
+    fi
+  done
+  if [ "$ERR" -eq 0 ]; then
+    ok "归档已开启：端点 ${TURBOFEED_BEHAVIOR_LOG_ARCHIVE_MINIO_ENDPOINT}，桶 ${TURBOFEED_BEHAVIOR_LOG_ARCHIVE_BUCKET}（key 前缀 ${TURBOFEED_BEHAVIOR_LOG_ARCHIVE_BASE_KEY_PREFIX:-behavior}，本地保留 ${TURBOFEED_BEHAVIOR_LOG_ARCHIVE_LOCAL_RETENTION_HOURS:-168}h）"
+    warn "归档依赖 behavior-log 落盘本身已开启；两者需同时置 true"
+  fi
+else
+  ok "归档未开启（默认）。数据只在单机卷，磁盘故障即全失——生产应开启"
+fi
+
 # ── 汇总 ────────────────────────────────────────────────────────────────────
 echo
 if [ "$ERR" -gt 0 ]; then

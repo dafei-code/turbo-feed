@@ -79,6 +79,15 @@
             <groupId>org.apache.rocketmq</groupId>
             <artifactId>rocketmq-spring-boot-starter</artifactId>
         </dependency>
+        <!-- 对象存储客户端（MinIO / 兼容 S3）：P1 行为明细归档落盘的唯一可行落点。
+             仅 turbofeed.feed.behavior-log.archive.enabled=true 时由 BehaviorLogArchiver 使用
+             （@ConditionalOnProperty），默认关闭不加载本依赖任何类，不影响克隆即跑。Java 17 兼容（SDK 要求 11+）。
+             与 tf-gateway 同版本（io.minio:minio:8.5.7）。 -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.5.7</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>

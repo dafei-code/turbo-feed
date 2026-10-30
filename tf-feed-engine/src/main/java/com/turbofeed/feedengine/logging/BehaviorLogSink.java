@@ -15,7 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,7 +59,7 @@ public class BehaviorLogSink {
 
     private static final Logger log = LoggerFactory.getLogger(BehaviorLogSink.class);
 
-    private static final DateTimeFormatter DAY = DateTimeFormatter.BASIC_ISO_DATE;
+    private static final DateTimeFormatter HOUR = DateTimeFormatter.ofPattern("yyyyMMdd-HH");
     private static final String FILE_PREFIX = "feed-behavior-";
     private static final String FILE_SUFFIX = ".jsonl";
 
@@ -77,7 +77,7 @@ public class BehaviorLogSink {
     private volatile Thread worker;
     private volatile boolean running;
     private volatile BufferedWriter writer;
-    private volatile String currentDay;
+    private volatile String currentHour;
     /**
      * 显式 flush 请求（由 {@link #flush()} 置位、工作线程消费）。
      *
@@ -211,7 +211,7 @@ public class BehaviorLogSink {
 
     private void append(String line) {
         try {
-            BufferedWriter w = writerFor(LocalDate.now().format(DAY));
+            BufferedWriter w = writerFor(LocalDateTime.now().format(HOUR));
             if (w == null) {
                 dropped.incrementAndGet();
                 return;
@@ -224,17 +224,17 @@ public class BehaviorLogSink {
         }
     }
 
-    /** 按天切换文件；返回 null 表示打开失败（调用方按丢弃处理）。 */
-    private BufferedWriter writerFor(String day) throws IOException {
-        if (writer != null && day.equals(currentDay)) {
+    /** 按小时切换文件；返回 null 表示打开失败（调用方按丢弃处理）。 */
+    private BufferedWriter writerFor(String hour) throws IOException {
+        if (writer != null && hour.equals(currentHour)) {
             return writer;
         }
         closeQuietly();
-        Path file = dir.resolve(FILE_PREFIX + day + FILE_SUFFIX);
+        Path file = dir.resolve(FILE_PREFIX + hour + FILE_SUFFIX);
         BufferedWriter w = Files.newBufferedWriter(file, StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.APPEND);
         writer = w;
-        currentDay = day;
+        currentHour = hour;
         return w;
     }
 
@@ -258,7 +258,7 @@ public class BehaviorLogSink {
             warnOnce("行为明细文件关闭失败: {}", e.getMessage());
         } finally {
             writer = null;
-            currentDay = null;
+            currentHour = null;
         }
     }
 

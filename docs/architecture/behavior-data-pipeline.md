@@ -1,8 +1,8 @@
 # 行为数据链路（behavior-log）设计与存储方案
 
 > **状态：部分实施。**
-> 已实施：明细落盘 + 容器持久卷 + 部署接线（`deploy/compose/docker-compose.prod.yml`）。
-> **未实施**：采集导出到对象存储/数仓、备份与清理策略、实时链路。本文的 P1/P2/P3 属规划。
+> 已实施：明细落盘 + 容器持久卷 + 部署接线 + **P1 归档到 MinIO**（每小时压缩上传、按 dt/hh 分区、本地保留期清理）。
+> **未实施**：实时链路（Kafka/Flink）、列式 Parquet 建模、ClickHouse 看板。本文的 P2/P3 属规划。
 >
 > 适用读者：要打开 `behavior-log`、或要基于这些明细做训练样本/看板的人。
 
@@ -36,11 +36,12 @@
 | --- | --- |
 | 写入方式 | 单工作线程 + 有界 `ArrayBlockingQueue`，队列满**直接丢弃并计数**（`dropped()`） |
 | 文件格式 | JSONL，一行一个 `FeedBehaviorEvent` |
-| 文件切分 | 按天：`feed-behavior-YYYYMMDD.jsonl` |
+| 文件切分 | 按小时：`feed-behavior-YYYYMMDD-HH.jsonl`（当前小时文件仍在追加，归档只碰已完成小时） |
 | 目录 | `turbofeed.feed.behavior-log.dir`，默认 `logs/behavior`，容器内为 `/app/logs/behavior` |
 | 开关 | `turbofeed.feed.behavior-log.enabled`。代码默认 `false`，**生产编排默认 `true`**（`deploy/compose`），本机开发已常开 |
 | 持久化 | 生产编排挂命名卷 `behavior-logs:/app/logs` |
-| 故障语义 | 全链路 fail-open；埋点挂掉不影响统计与画像（两者各自独立写入） |
+| **P1 归档** | `turbofeed.feed.behavior-log.archive.enabled`（默认 `false`）。开启后每小时把已完成小时的 JSONL 压缩为 `*.jsonl.gz` 上传 MinIO，key = `behavior/dt=YYYY-MM-DD/hh=HH/feed-behavior-YYYYMMDD-HH.jsonl.gz`；幂等（`.archived` 标记）、fail-open（失败下个周期重试）、本地保留期到期清理。实现见 `logging.BehaviorLogArchiver` / `MinioBehaviorLogUploader` |
+| 故障语义 | 全链路 fail-open；埋点挂掉不影响统计与画像（两者各自独立写入），归档失败不影响主流程 |
 
 **为什么代码默认 false、部署默认 true**：默认值要按「谁承担后果」来定——代码/配置骨架的 `false` 保护的是
 「任何人的机器都不该被静默写盘」；而部署编排是运维显式声明的环境，攒训练样本正是它存在的理由，所以 `true`。
@@ -96,7 +97,7 @@
 | --- | --- | --- | --- |
 | 采集 | 客户端 SDK + 日志网关 | 引擎进程内直接记 | **没有客户端曝光/滑动手势埋点**，只有服务端可见事件 |
 | 传输 | Kafka 可重放 | 进程内队列，满即丢 | 进程崩溃即丢；**不可重放** |
-| 落盘 | S3 Parquet 分区 | 本地 JSONL，按天 | 已挂卷（容器重建不丢），但**无副本、无分区、未压缩** |
+| 落盘 | S3 Parquet 分区 | 本地 JSONL（按小时切）+ MinIO 归档压缩（key 按 dt/hh 分区） | 已补齐**多副本 + 按 dt/hh 分区 + gzip 压缩**；但仍是 JSONL 非列式 Parquet，扫描效率弱于标准 |
 | 实时 | Flink → ClickHouse | 无 | 无实时看板/实时特征 |
 | 离线 | Hive/Spark 读 Parquet | 脚本直接读 JSONL | 量小够用，大了必崩 |
 | 建模 | ODS/DWD/DWS/ADS | 无分层 | 脏数据直接进训练 |
@@ -112,7 +113,7 @@
 | 阶段 | 动作 | 成本 | 解决什么 | 前置依赖 |
 | --- | --- | --- | --- | --- |
 | **P0（已完成）** | 服务容器挂 `behavior-logs` 命名卷；开关 + 目录经环境变量注入 | 已完成 | 容器重建/换镜像不丢数据 | 无 |
-| **P1** | 引擎侧定时（每小时）把当日 JSONL 压缩后上传 MinIO：`behavior/dt=YYYY-MM-DD/hh=HH/*.jsonl.gz` | 2~3 天 | 持久性（多副本）、按天可回溯、可被离线任务直接读 | MinIO（已部署） |
+| **P1（已完成）** | 引擎侧定时（每小时）把已完成小时的 JSONL 压缩后上传 MinIO：`behavior/dt=YYYY-MM-DD/hh=HH/*.jsonl.gz`；幂等（`.archived` 标记）、本地保留期清理 | 已完成 | 持久性（多副本）、按 dt/hh 可回溯、可被离线任务直接读、fail-open | MinIO（已部署） |
 | **P2** | 离线任务把 JSONL 转 **Parquet**，建 Hive/Spark 外表；`clickhouse-local` 也可直接查 | 1~2 天 | 列式压缩、扫描快、能接 BI | P1 |
 | **P3** | 单机 **ClickHouse** 承接看板查询 | 1 天 | 运营看板、漏斗、留存 | P2 |
 | **P4** | Kafka + Flink | 大 | 实时特征、秒级看板 | 日增千万级才值得 |
@@ -176,12 +177,38 @@ docker run --rm -v turbo-feed_behavior-logs:/data -v "$PWD":/out alpine \
 
 ---
 
+### 6.5 归档到 MinIO（P1）
+
+默认关闭。打开后引擎每小时把**已完成小时**的 JSONL 压缩上传，key 形如
+`behavior/dt=2026-10-30/hh=09/feed-behavior-20261030-09.jsonl.gz`，与 Hive/Spark 分区目录一致。
+
+```bash
+# deploy/env/.env 中（变量名必须带 BEHAVIOR_LOG，原因同 §6.1 的 FEED 陷阱）
+TURBOFEED_BEHAVIOR_LOG_ARCHIVE_ENABLED=true
+TURBOFEED_BEHAVIOR_LOG_ARCHIVE_MINIO_ENDPOINT=http://minio:9000
+# accessKey / secretKey 复用 TURBOFEED_MINIO_ACCESS_KEY / TURBOFEED_MINIO_SECRET_KEY
+TURBOFEED_BEHAVIOR_LOG_ARCHIVE_BUCKET=turbo-feed
+TURBOFEED_BEHAVIOR_LOG_ARCHIVE_BASE_KEY_PREFIX=behavior
+TURBOFEED_BEHAVIOR_LOG_ARCHIVE_LOCAL_RETENTION_HOURS=168   # 归档成功后本地保留 7 天再清
+```
+
+> **行为契约**
+> - 当前小时文件仍在被后台写线程追加，归档**只处理早于当前小时**的文件，保证上传的是不可变完整文件。
+> - 每个成功上传的本地文件写一个同名 `.archived` 空标记 → 归档任务**幂等**，MinIO 抖动/重启后下个周期补传即可，不重传不丢。
+> - 单文件上传失败只告警不抛，本地文件保留、下个周期重试（fail-open，不拖垮主流程）。
+> - 归档成功且文件小时早于 `now - localRetentionHours` 时，删本地 `.jsonl` 与 `.archived`；**未归档成功的文件即使超期也保留**（数据安全优先）。
+> - 桶不存在时上传器会**最佳努力自动创建**（`ensureBucket`），无需在 `minio-init` 里预建。
+
+`deploy/scripts/preflight.sh` 在 `ARCHIVE_ENABLED=true` 时校验 MinIO 端点 / accessKey / secretKey / 桶非空，缺失直接阻断启动。
+
+---
+
 ## 7. 未决风险
 
 | 风险 | 影响 | 缓解 |
 | --- | --- | --- |
-| 无采集链路 | 数据只在单机卷里，磁盘故障即全失 | P1；过渡期人工导出到 MinIO |
-| 无清理策略 | 磁盘线性增长，最终写满导致容器异常 | 人工巡检 + P1 顺带做保留期 |
+| ~~无采集链路~~ | 数据只在单机卷里，磁盘故障即全失 | ✅ **P1 已落地**：每小时压缩上传 MinIO（多副本 + dt/hh 分区），过渡期人工导出不再必需 |
+| 无清理策略（归档前） | 磁盘线性增长，最终写满导致容器异常 | ✅ P1 顺带做本地保留期清理；归档前仍建议人工巡检卷占用 |
 | 无客户端埋点 | 曝光未真正展示、滑动手势等事件拿不到，训练样本偏向"服务端已下发" | 需客户端 SDK，属独立工作项 |
 | 队列满丢弃不可见 | `dropped()` 只是内存计数，未接 Prometheus | 建议补 `tf_behavior_log_dropped_total` 指标 |
 | JSONL 无 schema 校验 | 字段漂移只能靠下游解析失败发现 | P2 转 Parquet 时引入显式 schema |
@@ -192,9 +219,12 @@ docker run --rm -v turbo-feed_behavior-logs:/data -v "$PWD":/out alpine \
 
 | 文件 | 作用 |
 | --- | --- |
-| `tf-feed-engine/.../logging/BehaviorLogSink.java` | 落盘实现 |
+| `tf-feed-engine/.../logging/BehaviorLogSink.java` | 落盘实现（按小时切文件） |
+| `tf-feed-engine/.../logging/BehaviorLogArchiver.java` | **P1 归档器**：每小时 gzip 上传 MinIO，幂等 + fail-open + 本地保留期 |
+| `tf-feed-engine/.../logging/MinioBehaviorLogUploader.java` | MinIO / S3 兼容上传实现（防腐层 `BehaviorLogUploader`） |
+| `tf-feed-engine/.../logging/BehaviorLogArchiveProperties.java` | 归档配置（`turbofeed.feed.behavior-log.archive.*`） |
 | `tf-shared/.../model/FeedBehaviorEvent.java` | 事件契约（字段即协议） |
-| `deploy/compose/docker-compose.prod.yml` | 生产编排：`behavior-logs` 卷 + 开关注入 |
+| `deploy/compose/docker-compose.prod.yml` | 生产编排：`behavior-logs` 卷 + 落盘/归档开关注入 |
 | `deploy/env/.env.example` | 环境变量清单（含变量名陷阱说明） |
-| `deploy/scripts/preflight.sh` | 启动前校验（含错误变量名检测） |
+| `deploy/scripts/preflight.sh` | 启动前校验（含错误变量名 / 归档凭据检测） |
 | `docker-compose.yml` | 开发编排：同样挂卷，**默认已开**（与 prod 一致） |
