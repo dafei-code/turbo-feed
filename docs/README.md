@@ -21,7 +21,7 @@ docs/
 │   ├── overview.md           # 系统总体架构：模块 / 通信 / 技术栈 / 关键决策
 │   ├── c4-model.md           # C4 模型：上下文 / 容器 / 组件三层（Mermaid 图）
 │   ├── service-split.md      # 微服务拆分方案：部署单元 / 端口 / 通信矩阵
-│   ├── sharding.md           # 分库分表：分片键选型 / 6 张逻辑表 / 演进与踩坑
+│   ├── sharding.md           # 分库分表：分片键选型 / 13 张逻辑表 / 演进与踩坑
 │   ├── contract-evolution.md # 跨服务契约演进：版本协商 / 校验挂点 / 兼容性矩阵
 │   ├── failure-mode-ledger.md# 全链路失败模式对账：投递语义 / 降级口径 / 指标与告警
 │   ├── threat-model-degradation.md # 威胁模型与降级矩阵
