@@ -296,7 +296,16 @@ public class SensitiveWordService {
         reloadExecutor.shutdown();
     }
 
-    public List<SensitiveWord> list(int limit, long offset) {
-        return repository.findAll(limit, offset);
+    /**
+     * 后台管理列表（支持关键词搜索 / 分类过滤）。
+     *
+     * @param keyword  包含匹配词（空=不过滤）
+     * @param category 分类精确过滤（空或 ALL=全部）
+     * @return {@code {items, dbCount(过滤后总数), acLoadedSize(当前 AC 加载数)}}
+     */
+    public Map<String, Object> list(int limit, long offset, String keyword, String category) {
+        List<SensitiveWord> rows = repository.findByKeyword(keyword, category, limit, offset);
+        long filtered = repository.countByKeyword(keyword, category);
+        return Map.of("items", rows, "dbCount", filtered, "acLoadedSize", loadedSize);
     }
 }

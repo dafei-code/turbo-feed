@@ -47,14 +47,12 @@ public class AdminSensitiveWordController {
     @RequirePermission(Permission.SYSTEM_CONFIG)
     public Result<Map<String, Object>> list(
             @RequestParam(value = "page", defaultValue = "0") int page,
-            @RequestParam(value = "size", defaultValue = "50") int size) {
+            @RequestParam(value = "size", defaultValue = "50") int size,
+            @RequestParam(value = "keyword", required = false) String keyword,
+            @RequestParam(value = "category", required = false) String category) {
         int limit = size <= 0 ? 50 : size;
         long offset = (long) Math.max(0, page) * limit;
-        List<SensitiveWord> rows = sensitiveWordService.list(limit, offset);
-        return Result.ok(Map.of(
-                "items", rows,
-                "dbCount", sensitiveWordService.count(),
-                "acLoadedSize", sensitiveWordService.currentSize()));
+        return Result.ok(sensitiveWordService.list(limit, offset, keyword, category));
     }
 
     /**

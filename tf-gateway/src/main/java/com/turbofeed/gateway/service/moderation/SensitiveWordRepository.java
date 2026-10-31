@@ -61,6 +61,45 @@ public class SensitiveWordRepository {
     }
 
     /**
+     * 后台列表关键词搜索（含禁用）：word 包含匹配 + 可选分类精确过滤。
+     *
+     * <p>空关键词 + 空分类 = 等价于 {@link #findAll}（全量分页）。
+     * 分类传空串或 {@code ALL} 视为「不过滤分类」，便于前端「全部分类」选项。</p>
+     */
+    public List<SensitiveWord> findByKeyword(String keyword, String category, int limit, long offset) {
+        StringBuilder sql = new StringBuilder("SELECT " + COLUMNS + " FROM sensitive_word WHERE 1=1");
+        List<Object> args = new ArrayList<>();
+        if (keyword != null && !keyword.isBlank()) {
+            sql.append(" AND word LIKE ?");
+            args.add("%" + keyword.trim() + "%");
+        }
+        if (category != null && !category.isBlank() && !"ALL".equalsIgnoreCase(category.trim())) {
+            sql.append(" AND category = ?");
+            args.add(category.trim());
+        }
+        sql.append(" ORDER BY id LIMIT ? OFFSET ?");
+        args.add(limit);
+        args.add(offset);
+        return jdbcTemplate.query(sql.toString(), MAPPER, args.toArray());
+    }
+
+    /** {@link #findByKeyword} 的计数配套（过滤条件一致）。 */
+    public long countByKeyword(String keyword, String category) {
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM sensitive_word WHERE 1=1");
+        List<Object> args = new ArrayList<>();
+        if (keyword != null && !keyword.isBlank()) {
+            sql.append(" AND word LIKE ?");
+            args.add("%" + keyword.trim() + "%");
+        }
+        if (category != null && !category.isBlank() && !"ALL".equalsIgnoreCase(category.trim())) {
+            sql.append(" AND category = ?");
+            args.add(category.trim());
+        }
+        Long c = jdbcTemplate.queryForObject(sql.toString(), Long.class, args.toArray());
+        return c == null ? 0L : c;
+    }
+
+    /**
      * 变更指纹：{@code (count, maxUpdatedAt)}。
      *
      * <p>INSERT → count↑ 或 maxUpdatedAt↑；UPDATE → maxUpdatedAt↑（{@code ON UPDATE CURRENT_TIMESTAMP}）；

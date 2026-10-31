@@ -495,6 +495,10 @@
       <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="MdZc8LpQr5Vn2Kx0sTbWxz"><polygon points="22 3 2 3 10 12.5 10 19 14 21 14 12.5 22 3" data-page-node-id="LpQr5Vn2Kx0sTbWxz9"/></svg>
       敏感词管理
     </div>
+    <div class="nav-item" data-target="whitelistPanel" data-page-node-id="SwWlNav01">
+      <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="SwWlNavSvg01"><path d="M9 11l3 3L22 4" data-page-node-id="SwWlNavP1"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" data-page-node-id="SwWlNavP2"/></svg>
+      白名单管理
+    </div>
 
     <div class="nav-group" data-page-node-id="cp90l5ROH3BahlpgYYWGBr">工程</div>
     <div class="nav-item" data-page-node-id="cHb8w4HYzS7LqjHACCD6aU">
@@ -679,6 +683,21 @@
       </div>
 
       <div class="sw-tools" data-page-node-id="SwWordTools01">
+        <div class="blk" data-page-node-id="SwWordBlkSearch01">
+          <div class="lab" data-page-node-id="SwWordLabSearch01">搜索（词包含匹配 / 分类精确）</div>
+          <div class="row" data-page-node-id="SwWordRowSearch01">
+            <input id="wordSearch" class="sw-input" placeholder="关键词（包含匹配）" data-page-node-id="SwWordSearch01" onkeydown="if(event.key==='Enter')loadWords()">
+            <select id="wordCat" class="sw-input" data-page-node-id="SwWordCatSel01">
+              <option value="">全部分类</option>
+              <option value="DEFAULT">DEFAULT</option>
+              <option value="POLITICS">POLITICS</option>
+              <option value="PORN">PORN</option>
+              <option value="VIOLENCE">VIOLENCE</option>
+              <option value="AD">AD</option>
+            </select>
+            <button class="mini-btn" onclick="loadWords()" data-page-node-id="SwWordSearchBtn01">搜索</button>
+          </div>
+        </div>
         <div class="blk" data-page-node-id="SwWordBlkAdd01">
           <div class="lab" data-page-node-id="SwWordLabAdd01">新增 / 更新敏感词（按词条 upsert）</div>
           <div class="row" data-page-node-id="SwWordRowAdd01">
@@ -709,6 +728,57 @@
         <thead data-page-node-id="SwWordThead01"><tr data-page-node-id="SwWordTr01"><th data-page-node-id="SwWordTh1">词条</th><th data-page-node-id="SwWordTh2">分类</th><th data-page-node-id="SwWordTh3">状态</th><th data-page-node-id="SwWordTh4">操作</th></tr></thead>
         <tbody id="wordBody" data-page-node-id="SwWordBody01">
           <tr data-page-node-id="SwWordLoad01"><td colspan="4" style="color:var(--text-dim)">加载中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 白名单管理（误杀治理出口，热更新） -->
+    <div class="panel" id="whitelistPanel" style="margin-top:20px" data-page-node-id="SwWlPanel01">
+      <div class="p-head" data-page-node-id="SwWlHead01">
+        <div class="title" data-page-node-id="SwWlTitle01">白名单管理（误杀豁免出口）</div>
+        <button class="mini-btn" onclick="loadWhitelist()" data-page-node-id="SwWlRefresh01">刷新</button>
+      </div>
+      <div class="upload-tip" data-page-node-id="SwWlTip01">
+        白名单是词库的<b>减法出口</b>：某词在昵称 / 评论里总被误杀（如「黄焖鸡」「水乳交融」），在此按
+        <b>场景 × 主体</b> 精确豁免，不影响其他场景。字段语义见表单提示；热更新同词库（毫秒级生效）。
+      </div>
+
+      <div class="sw-tools" data-page-node-id="SwWlTools01">
+        <div class="blk" data-page-node-id="SwWlBlkAdd01">
+          <div class="lab" data-page-node-id="SwWlLabAdd01">新增 / 更新豁免条目</div>
+          <div class="row" data-page-node-id="SwWlRowAdd01">
+            <input id="wlWord" class="sw-input" placeholder="被豁免的词" data-page-node-id="SwWlWord01">
+            <select id="wlScene" class="sw-input" data-page-node-id="SwWlScene01">
+              <option value="*">场景：全部(*)</option>
+              <option value="NICKNAME">昵称</option>
+              <option value="CAPTION">标题/描述</option>
+              <option value="COMMENT">评论</option>
+            </select>
+            <select id="wlScope" class="sw-input" data-page-node-id="SwWlScope01">
+              <option value="GLOBAL">范围：全局(GLOBAL)</option>
+              <option value="USER">单用户(USER)</option>
+            </select>
+            <input id="wlOwner" class="sw-input" placeholder="ownerId(仅 USER)" data-page-node-id="SwWlOwner01">
+            <input id="wlReason" class="sw-input" placeholder="豁免原因(建议填写)" data-page-node-id="SwWlReason01">
+            <button class="mini-btn ok" onclick="addWhitelist()" data-page-node-id="SwWlAddBtn01">新增</button>
+          </div>
+        </div>
+        <div class="blk" data-page-node-id="SwWlBlkReload01">
+          <div class="lab" data-page-node-id="SwWlLabReload01">运维</div>
+          <div class="row" data-page-node-id="SwWlRowReload01">
+            <button class="mini-btn" onclick="whitelistReload()" data-page-node-id="SwWlReloadBtn01">强制刷新索引</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="wlStat" style="font-size:12px;color:var(--text-dim);margin-bottom:8px" data-page-node-id="SwWlStat01"></div>
+
+      <table class="table" id="wlTable" data-page-node-id="SwWlTable01">
+        <thead data-page-node-id="SwWlThead01"><tr data-page-node-id="SwWlTr01">
+          <th data-page-node-id="SwWlTh1">词</th><th data-page-node-id="SwWlTh2">场景</th><th data-page-node-id="SwWlTh3">范围</th><th data-page-node-id="SwWlTh4">ownerId</th><th data-page-node-id="SwWlTh5">原因</th><th data-page-node-id="SwWlTh6">状态</th><th data-page-node-id="SwWlTh7">操作</th>
+        </tr></thead>
+        <tbody id="wlBody" data-page-node-id="SwWlBody01">
+          <tr data-page-node-id="SwWlLoad01"><td colspan="7" style="color:var(--text-dim)">加载中…</td></tr>
         </tbody>
       </table>
     </div>
@@ -841,7 +911,12 @@
   // ================= 敏感词管理（动态词库，热更新） =================
   // 列表：返回 data = { items:[{id,word,category,enabled,revision}], dbCount, acLoadedSize }
   function loadWords() {
-    fetch(API_BASE + '/api/v1/admin/moderation/words?page=0&size=200', {
+    var kw = document.getElementById('wordSearch') ? document.getElementById('wordSearch').value.trim() : '';
+    var cat = document.getElementById('wordCat') ? document.getElementById('wordCat').value : '';
+    var q = 'page=0&size=200'
+      + (kw ? '&keyword=' + encodeURIComponent(kw) : '')
+      + (cat ? '&category=' + encodeURIComponent(cat) : '');
+    fetch(API_BASE + '/api/v1/admin/moderation/words?' + q, {
       headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
     }).then(function (r) { return r.json(); })
       .then(function (res) {
@@ -958,9 +1033,115 @@
       .catch(function (e) { alert('刷新失败：' + e.message); });
   }
 
-  // 进入页面即加载审核队列 + 敏感词词库
+  // ================= 白名单管理（误杀豁免出口，热更新） =================
+  // 列表：data = { items:[{id,word,scene,scope,ownerId,reason,enabled,revision}], dbCount, loadedSize }
+  function loadWhitelist() {
+    fetch(API_BASE + '/api/v1/admin/moderation/whitelist?page=0&size=200', {
+      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        var body = document.getElementById('wlBody');
+        if (!res.data || !res.data.items || res.data.items.length === 0) {
+          body.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim)">白名单为空（初始即正常，无需配置）</td></tr>';
+        } else {
+          body.innerHTML = '';
+          res.data.items.forEach(function (it) {
+            var tr = document.createElement('tr');
+            var status = it.enabled
+              ? '<span class="hot-tag tag-cold">启用</span>'
+              : '<span class="hot-tag tag-warm">禁用</span>';
+            var toggleBtn = it.enabled
+              ? '<button class="mini-btn bad" onclick="disableWhitelist(' + jsLit(it.id) + ')">禁用</button>'
+              : '<button class="mini-btn ok" onclick="enableWhitelist(' + jsLit(it.id) + ')">启用</button>';
+            tr.innerHTML = '<td style="word-break:break-all">' + esc(it.word)
+              + '</td><td>' + esc(it.scene || '*')
+              + '</td><td>' + esc(it.scope || 'GLOBAL')
+              + '</td><td>' + (it.ownerId || 0)
+              + '</td><td style="word-break:break-all">' + esc(it.reason || '')
+              + '</td><td>' + status + '</td><td>'
+              + toggleBtn
+              + ' <button class="mini-btn bad" onclick="deleteWhitelist(' + jsLit(it.id) + ')">删除</button>'
+              + '</td>';
+            body.appendChild(tr);
+          });
+        }
+        var stat = document.getElementById('wlStat');
+        if (res.data) {
+          stat.textContent = 'DB 总条数 ' + (res.data.dbCount != null ? res.data.dbCount : '-')
+            + ' · 内存已加载 ' + (res.data.loadedSize != null ? res.data.loadedSize : '-');
+        }
+      })
+      .catch(function (e) {
+        var body = document.getElementById('wlBody');
+        body.innerHTML = '<tr><td colspan="7" style="color:var(--brand)">加载失败：' + esc(e.message) + '</td></tr>';
+      });
+  }
+
+  function addWhitelist() {
+    var w = document.getElementById('wlWord').value.trim();
+    if (!w) { alert('请输入被豁免的词'); return; }
+    var scene = document.getElementById('wlScene').value;
+    var scope = document.getElementById('wlScope').value;
+    var ownerId = parseInt(document.getElementById('wlOwner').value, 10) || 0;
+    var reason = document.getElementById('wlReason').value.trim() || '';
+    var url = API_BASE + '/api/v1/admin/moderation/whitelist?word=' + encodeURIComponent(w)
+      + '&scene=' + encodeURIComponent(scene)
+      + '&scope=' + encodeURIComponent(scope)
+      + '&ownerId=' + ownerId
+      + '&reason=' + encodeURIComponent(reason);
+    fetch(url, {
+      method: 'POST',
+      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0) {
+          document.getElementById('wlWord').value = '';
+          document.getElementById('wlReason').value = '';
+          loadWhitelist();
+        } else {
+          alert('添加失败：' + (res.message || '未知错误'));
+        }
+      })
+      .catch(function (e) { alert('添加失败：' + e.message); });
+  }
+
+  function disableWhitelist(id) { wlAction('/api/v1/admin/moderation/whitelist/disable?id=' + encodeURIComponent(id), '禁用'); }
+  function enableWhitelist(id)  { wlAction('/api/v1/admin/moderation/whitelist/enable?id=' + encodeURIComponent(id), '启用'); }
+  function deleteWhitelist(id) {
+    if (!confirm('确认删除该白名单条目？不可恢复。')) return;
+    wlAction('/api/v1/admin/moderation/whitelist/delete?id=' + encodeURIComponent(id), '删除');
+  }
+  function wlAction(url, label) {
+    fetch(API_BASE + url, {
+      method: 'POST',
+      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0) { loadWhitelist(); }
+        else { alert(label + '失败：' + (res.message || '未知错误')); }
+      })
+      .catch(function (e) { alert(label + '失败：' + e.message); });
+  }
+  function whitelistReload() {
+    fetch(API_BASE + '/api/v1/admin/moderation/whitelist/reload', {
+      method: 'POST',
+      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
+    }).then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0) {
+          loadWhitelist();
+          alert('已强制刷新白名单索引，当前加载 ' + (res.data != null ? res.data : '?') + ' 条');
+        } else {
+          alert('刷新失败：' + (res.message || '未知错误'));
+        }
+      })
+      .catch(function (e) { alert('刷新失败：' + e.message); });
+  }
+
+  // 进入页面即加载审核队列 + 敏感词词库 + 白名单
   loadReviewQueue();
   loadWords();
+  loadWhitelist();
 </script>
 
 </body>
