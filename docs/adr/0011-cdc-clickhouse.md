@@ -3,7 +3,7 @@
 - **状态**：提议（Proposed, 2026-10-31）
 - **所属改进项**：推荐后续演进 #343
 - **决策人**：dafei
-- **关联 ADR**：行为日志 P1 归档 MinIO（已落地）、[item-CF 召回](0011 待补链路)（消费 `user_interest`）、[0003 tf-counter](0003-tf-counter-service.md)
+- **关联 ADR**：行为日志 P1 归档 MinIO（已落地）、[item-CF 召回](../architecture/item-cf-recall-design.md)（消费 `user_interest`）、[0003 tf-counter](0003-tf-counter-service.md)
 
 ## 1. 背景（Context）
 
