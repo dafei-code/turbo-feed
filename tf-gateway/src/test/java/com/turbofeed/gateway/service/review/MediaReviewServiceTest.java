@@ -11,6 +11,7 @@ import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.service.review.credit.ReporterCreditService;
 import com.turbofeed.gateway.service.behavior.BehaviorLogService;
 import com.turbofeed.gateway.service.review.ModerationPolicy;
+import com.turbofeed.gateway.service.notify.NotificationGenerator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -48,12 +49,13 @@ class MediaReviewServiceTest {
     @Mock ReviewTimelineDelivery delivery;
     @Mock ViolationDispositionService disposition;
     @Mock ReviewEscalationService escalation;
+    @Mock NotificationGenerator notificationGenerator;
 
     private MediaReviewService service() {
         return new MediaReviewService(mediaRepository, redisTemplate, contentModeration, reviewProperties,
                 accountCreditService, reportRepository, appealRepository, reviewTaskRepository, outboxService,
                 penaltyService, reporterCreditService, reviewWaterLevelService, behaviorLogService, moderationPolicy,
-                delivery, disposition, escalation);
+                delivery, disposition, escalation, notificationGenerator);
     }
 
     @Test

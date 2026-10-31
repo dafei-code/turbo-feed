@@ -4,8 +4,12 @@ import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.service.counter.CounterEventPublisher;
 import com.turbofeed.gateway.service.feed.BehaviorEventPublisher;
 import com.turbofeed.gateway.service.feed.BehaviorReport;
+import com.turbofeed.gateway.service.notify.NotificationEvent;
+import com.turbofeed.gateway.service.notify.NotificationGenerator;
+import com.turbofeed.gateway.service.notify.NotificationType;
 import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
 import com.turbofeed.gateway.util.LikeCountScript;
+import com.turbofeed.gateway.util.MediaKeyUtil;
 import com.turbofeed.gateway.util.SnowflakeIdGenerator;
 import com.turbofeed.shared.redis.RedisKeys;
 import com.turbofeed.shared.result.ErrorCode;
@@ -90,12 +94,15 @@ public class MediaFavoriteService {
     private final ItemCooccurrenceService itemCooccurrenceService;
     /** 计数增量发布器（opt-in）：{@code turbofeed.counter.service.enabled=false} 时工厂不提供 Bean，恒为空。 */
     private final ObjectProvider<CounterEventPublisher> counterPublisher;
+    /** 通知生成器（ADR-0009，fail-open 单点生成）：收藏通知内容作者。 */
+    private final NotificationGenerator notificationGenerator;
 
     public MediaFavoriteService(StringRedisTemplate redisTemplate, BehaviorEventPublisher behaviorPublisher,
                                 MediaFavoriteJdbcRepository favoriteRepository, SnowflakeIdGenerator snowflakeIdGenerator,
                                 @Qualifier("interactionExecutor") Executor interactionExecutor,
                                 UploadRateLimiter rateLimiter, ItemCooccurrenceService itemCooccurrenceService,
-                                ObjectProvider<CounterEventPublisher> counterPublisher) {
+                                ObjectProvider<CounterEventPublisher> counterPublisher,
+                                NotificationGenerator notificationGenerator) {
         this.redisTemplate = redisTemplate;
         this.behaviorPublisher = behaviorPublisher;
         this.favoriteRepository = favoriteRepository;
@@ -104,6 +111,7 @@ public class MediaFavoriteService {
         this.rateLimiter = rateLimiter;
         this.itemCooccurrenceService = itemCooccurrenceService;
         this.counterPublisher = counterPublisher;
+        this.notificationGenerator = notificationGenerator;
     }
 
     /** 用户归属的槽号（与分片/计数桶同套散列，保证同一用户始终映射到同一槽）。 */
@@ -166,6 +174,8 @@ public class MediaFavoriteService {
                     // 与去重集合同步维护计数 Key（读权威）；fail-open，失败仅告警
                     bumpCount(postId, 1);
                     publish(postId, userId, "FAVORITE");
+                    // ① 通知内容作者（ADR-0009，fail-open 单点生成，绝不阻塞收藏主流程）
+                    notifyFavorite(postId, userId);
                     // ② 持久聚合底座（opt-in）：实际新增收藏才发 +1 增量
                     notifyCounter(postId, 1);
                     // ③ 维护我的收藏列表 ZSET（收藏态视图，score=收藏时刻ms）
@@ -565,6 +575,26 @@ public class MediaFavoriteService {
         } catch (Exception e) {
             log.warn("收藏计数增量通知 tf-counter 失败（fail-open，不影响主流程）: postId={}, delta={}, {}",
                     postId, delta, e.getMessage());
+        }
+    }
+
+    /**
+     * 收藏通知内容作者（ADR-0009，fail-open 单点生成）。
+     *
+     * <p>作者由 postId 零 DB 解析（{@link MediaKeyUtil#parseUserId}）；自收藏 / 解析失败跳过。</p>
+     */
+    private void notifyFavorite(String postId, long actorId) {
+        try {
+            long authorId = MediaKeyUtil.parseUserId(postId);
+            if (authorId <= 0 || authorId == actorId) {
+                return; // 解析失败或自收藏，不通知
+            }
+            String eventId = "FAVORITE:" + postId + ":" + actorId;
+            notificationGenerator.generate(new NotificationEvent(eventId, NotificationType.FAVORITE,
+                    authorId, actorId, "POST", postId, "收藏了你的作品", null, Instant.now()));
+        } catch (Exception e) {
+            log.warn("收藏通知生成失败（fail-open，不影响主流程）: postId={}, actorId={}, {}",
+                    postId, actorId, e.getMessage());
         }
     }
 

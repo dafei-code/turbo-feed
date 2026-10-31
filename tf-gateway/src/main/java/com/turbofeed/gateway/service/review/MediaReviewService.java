@@ -2,6 +2,9 @@ package com.turbofeed.gateway.service.review;
 
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
+import com.turbofeed.gateway.service.notify.NotificationEvent;
+import com.turbofeed.gateway.service.notify.NotificationGenerator;
+import com.turbofeed.gateway.service.notify.NotificationType;
 import com.turbofeed.gateway.repository.ReportRepository;
 import com.turbofeed.gateway.repository.ReviewTaskRepository;
 import com.turbofeed.gateway.repository.AppealRepository;
@@ -33,6 +36,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -93,6 +97,8 @@ public class MediaReviewService {
     private final ViolationDispositionService disposition;
     /** 晋级/举报升级子服务（#310）。 */
     private final ReviewEscalationService escalation;
+    /** 通知生成器（ADR-0009，fail-open 单点生成）：审核结果通知内容作者。 */
+    private final NotificationGenerator notificationGenerator;
 
     public MediaReviewService(MediaJdbcRepository mediaRepository,
                               StringRedisTemplate redisTemplate,
@@ -108,9 +114,10 @@ public class MediaReviewService {
                               ReviewWaterLevelService reviewWaterLevelService,
                               BehaviorLogService behaviorLogService,
                               ModerationPolicy moderationPolicy,
-                              ReviewTimelineDelivery delivery,
-                              ViolationDispositionService disposition,
-                              ReviewEscalationService escalation) {
+                                ReviewTimelineDelivery delivery,
+                                ViolationDispositionService disposition,
+                                ReviewEscalationService escalation,
+                                NotificationGenerator notificationGenerator) {
         this.mediaRepository = mediaRepository;
         this.redisTemplate = redisTemplate;
         this.contentModeration = contentModeration;
@@ -128,6 +135,7 @@ public class MediaReviewService {
         this.delivery = delivery;
         this.disposition = disposition;
         this.escalation = escalation;
+        this.notificationGenerator = notificationGenerator;
     }
 
     /**
@@ -268,16 +276,20 @@ public class MediaReviewService {
     public MediaStatus reviewByMediaId(String mediaId, boolean approved) {
         long userId = ReviewTimelineDelivery.parseUserId(mediaId);
         ReviewOutcome outcome = review(mediaId, userId, approved);
-        if (outcome.transitioned() && outcome.status() == MediaStatus.APPROVED) {
-            MediaItem post = delivery.asTimelinePost(mediaRepository.findMedia(mediaId, userId), userId);
-            if (post != null) {
-                CreditLevel level = accountCreditService.ensure(userId);
-                long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_APPEND, mediaId, userId,
-                        new TimelineAppendPayload(post, level.poolLevel()));
-                outboxService.deliverAfterCommit(eventId);
+        if (outcome.transitioned()) {
+            // 审核结论通知内容作者（ADR-0009，fail-open 单点生成，涵盖通过/驳回）
+            notifyReviewResult(mediaId, userId, outcome.status(), "INIT");
+            if (outcome.status() == MediaStatus.APPROVED) {
+                MediaItem post = delivery.asTimelinePost(mediaRepository.findMedia(mediaId, userId), userId);
+                if (post != null) {
+                    CreditLevel level = accountCreditService.ensure(userId);
+                    long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_APPEND, mediaId, userId,
+                            new TimelineAppendPayload(post, level.poolLevel()));
+                    outboxService.deliverAfterCommit(eventId);
+                }
+                // 人工通过计数：新人观察期据此解除。只统计人工路径——先发后审的自动通过不计入。
+                accountCreditService.onHumanApproved(userId, reviewProperties.getNewUserApproveThreshold());
             }
-            // 人工通过计数：新人观察期据此解除。只统计人工路径——先发后审的自动通过不计入。
-            accountCreditService.onHumanApproved(userId, reviewProperties.getNewUserApproveThreshold());
         }
         return outcome.status();
     }
@@ -461,6 +473,8 @@ public class MediaReviewService {
                 // penalty 集成缝：申诉翻案 → 解除原处罚（误封永久封可由此撤销；非封禁态 liftPenalty 幂等 no-op）。
                 penaltyService.liftPenalty(authorId, ViolationSource.APPEAL_OVERTURN, "ADMIN",
                         "申诉翻案→解除封禁恢复: " + mediaId);
+                // 申诉结论通知内容作者（ADR-0009，fail-open 单点生成）
+                notifyReviewResult(mediaId, authorId, MediaStatus.APPROVED, "APPEAL");
                 log.info("申诉翻案→整帖恢复公域: mediaId={}", mediaId);
             } else {
                 log.info("申诉翻案 CAS 落空（内容不在申诉中态，不重复恢复/加信用）: mediaId={}", mediaId);
@@ -468,9 +482,40 @@ public class MediaReviewService {
         } else {
             // 同上：APPEALING -> TAKEN_DOWN，合法流转以 MediaStatusMachine 为准
             int rows = mediaRepository.updateStatusCas(mediaId, authorId, MediaStatus.APPEALING, MediaStatus.TAKEN_DOWN);
+            if (rows > 0) {
+                // 申诉结论通知内容作者（ADR-0009，fail-open 单点生成）
+                notifyReviewResult(mediaId, authorId, MediaStatus.TAKEN_DOWN, "APPEAL");
+            }
             log.info("申诉维持原状: mediaId={}, rows={}", mediaId, rows);
         }
         appealRepository.resolve(mediaId, upheld);
+    }
+
+    /**
+     * 审核结果通知内容作者（ADR-0009，fail-open 单点生成）。
+     *
+     * <p>接收方 = 内容作者（{@code parseUserId(mediaId)}）；发起方为空（系统动作）。
+     * {@code phase} 区分人工审核结论（{@code INIT}）与申诉结论（{@code APPEAL}），
+     * 使二者 eventId 互不抑制（去重 TTL 1 天），避免「先审驳回通知」吞掉「申诉翻案通知」。</p>
+     */
+    private void notifyReviewResult(String mediaId, long authorId, MediaStatus status, String phase) {
+        try {
+            if (authorId <= 0) {
+                return;
+            }
+            String summary = switch (status) {
+                case APPROVED -> "你的内容已通过审核";
+                case REJECTED -> "你的内容未通过审核";
+                case TAKEN_DOWN -> "你的申诉未通过，内容维持下架";
+                default -> "你的内容审核状态已更新";
+            };
+            String eventId = "REVIEW:" + phase + ":" + mediaId;
+            notificationGenerator.generate(new NotificationEvent(eventId, NotificationType.REVIEW_RESULT,
+                    authorId, null, "POST", mediaId, summary, null, Instant.now()));
+        } catch (Exception e) {
+            log.warn("审核结果通知生成失败（fail-open，不影响主流程）: mediaId={}, phase={}, {}",
+                    mediaId, phase, e.getMessage());
+        }
     }
 
     private static boolean isHighRisk(String reason) {

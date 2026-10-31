@@ -5,6 +5,7 @@ import com.turbofeed.gateway.service.feed.BehaviorEventPublisher;
 import com.turbofeed.gateway.service.feed.BehaviorReport;
 import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
 import com.turbofeed.gateway.util.SnowflakeIdGenerator;
+import com.turbofeed.gateway.service.notify.NotificationGenerator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -73,6 +74,7 @@ class MediaFavoriteServiceTest {
     @Mock UploadRateLimiter rateLimiter;
     @Mock ObjectProvider<CounterEventPublisher> counterPublisher;
     @Mock CounterEventPublisher counterEventPublisher;
+    @Mock NotificationGenerator notificationGenerator;
     @Mock RedisConnection connection;
     @Mock RedisKeyCommands keyCommands;
     @Mock RedisStringCommands stringCommands;
@@ -119,7 +121,7 @@ class MediaFavoriteServiceTest {
                 .thenReturn(Set.of());
         when(zSetOps.score(anyString(), any())).thenReturn(null);
         service = new MediaFavoriteService(redisTemplate, behaviorPublisher, favoriteRepository,
-                snowflakeIdGenerator, directExecutor, rateLimiter, itemCooccurrenceService, counterPublisher);
+                snowflakeIdGenerator, directExecutor, rateLimiter, itemCooccurrenceService, counterPublisher, notificationGenerator);
     }
 
     /** 构造 N 项 × 64 槽的 SCARD 结果，使第 idx 项的 64 槽之和恰为 wantSum。 */

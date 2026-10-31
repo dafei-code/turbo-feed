@@ -160,4 +160,17 @@ public class CommentJdbcRepository {
     /** 父评论的位置（commentId + rootId），用于派生新回复的 rootId。 */
     public record ParentLocation(long commentId, long rootId) {
     }
+
+    /**
+     * 取父评论作者（回复通知接收方）。带 {@code media_id} 分片键，单分片命中，
+     * 避免 {@code WHERE comment_id = ?} 的全分片广播。
+     *
+     * @return 父评论的 {@code user_id}；不存在 / 查不到返回 {@code null}
+     */
+    public Long findAuthorByCommentId(String mediaId, long commentId) {
+        List<Long> ids = jdbcTemplate.query(
+                "SELECT user_id FROM comment WHERE comment_id = ? AND media_id = ?",
+                (rs, rn) -> rs.getLong("user_id"), commentId, mediaId);
+        return ids.isEmpty() ? null : ids.get(0);
+    }
 }

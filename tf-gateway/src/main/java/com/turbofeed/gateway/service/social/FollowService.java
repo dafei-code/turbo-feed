@@ -1,6 +1,9 @@
 package com.turbofeed.gateway.service.social;
 
 import com.turbofeed.gateway.exception.BizException;
+import com.turbofeed.gateway.service.notify.NotificationEvent;
+import com.turbofeed.gateway.service.notify.NotificationGenerator;
+import com.turbofeed.gateway.service.notify.NotificationType;
 import com.turbofeed.shared.redis.RedisKeys;
 import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
@@ -9,6 +12,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -62,12 +66,16 @@ public class FollowService {
     private final StringRedisTemplate redisTemplate;
     private final FollowRepository followRepository;
     private final Executor interactionExecutor;
+    /** 通知生成器（ADR-0009，fail-open 单点生成）：关注通知被关注者。 */
+    private final NotificationGenerator notificationGenerator;
 
     public FollowService(StringRedisTemplate redisTemplate, FollowRepository followRepository,
-                         @Qualifier("interactionExecutor") Executor interactionExecutor) {
+                         @Qualifier("interactionExecutor") Executor interactionExecutor,
+                         NotificationGenerator notificationGenerator) {
         this.redisTemplate = redisTemplate;
         this.followRepository = followRepository;
         this.interactionExecutor = interactionExecutor;
+        this.notificationGenerator = notificationGenerator;
     }
 
     /**
@@ -90,6 +98,8 @@ public class FollowService {
                 redisTemplate.opsForZSet().add(frKey, String.valueOf(userId), now);
                 redisTemplate.opsForHash().increment(STAT_PREFIX + userId, FOLLOWING_FIELD, 1);
                 redisTemplate.opsForHash().increment(STAT_PREFIX + authorId, FOLLOWERS_FIELD, 1);
+                // 通知被关注者（ADR-0009，fail-open 单点生成，绝不阻塞关注主流程）
+                notifyFollow(userId, authorId);
             }
             // 互关判定（Redis 为准）：对方是否也关注了我
             boolean mutual = redisTemplate.opsForZSet().score(FOLLOW_PREFIX + authorId,
@@ -148,6 +158,26 @@ public class FollowService {
         } catch (Exception e) {
             log.warn("取消关注失败（fail-open）: userId={}, authorId={}, {}", userId, authorId, e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * 关注通知被关注者（ADR-0009，fail-open 单点生成）。
+     *
+     * <p>接收方 = 被关注者 {@code authorId}，发起方 = 关注者 {@code actorId}；自关跳过。
+     * {@link NotificationGenerator#generate} 内部已异步 + 兜底，本方法再包一层 try 仅作双保险。</p>
+     */
+    private void notifyFollow(long actorId, long recipientId) {
+        try {
+            if (actorId == recipientId) {
+                return; // 自关，不通知
+            }
+            String eventId = "FOLLOW:" + recipientId + ":" + actorId;
+            notificationGenerator.generate(new NotificationEvent(eventId, NotificationType.FOLLOW,
+                    recipientId, actorId, "USER", String.valueOf(actorId), "关注了你", null, Instant.now()));
+        } catch (Exception e) {
+            log.warn("关注通知生成失败（fail-open，不影响主流程）: actorId={}, recipientId={}, {}",
+                    actorId, recipientId, e.getMessage());
         }
     }
 

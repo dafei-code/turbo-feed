@@ -2,8 +2,12 @@ package com.turbofeed.gateway.service.comment;
 
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.service.moderation.ContentScene;
+import com.turbofeed.gateway.service.notify.NotificationEvent;
+import com.turbofeed.gateway.service.notify.NotificationGenerator;
+import com.turbofeed.gateway.service.notify.NotificationType;
 import com.turbofeed.gateway.service.moderation.ContentSecurityService;
 import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
+import com.turbofeed.gateway.util.MediaKeyUtil;
 import com.turbofeed.gateway.util.SnowflakeIdGenerator;
 import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.repository.ReviewTaskRepository;
@@ -82,6 +86,8 @@ public class CommentService {
 
     /** 评论落库发布器（发布/订阅解耦，opt-in 削峰）：默认进程内异步落库，启用 MQ 后改经 RocketMQ 削峰。 */
     private final CommentEventPublisher commentEventPublisher;
+    /** 通知生成器（ADR-0009，fail-open 单点生成）：评论/回复通知。 */
+    private final NotificationGenerator notificationGenerator;
 
     /**
      * 发布评论（顶层或回复）。
@@ -135,6 +141,8 @@ public class CommentService {
         // 启用 MQ 后改发 RocketMQ 顺序事件、由 CommentPersistConsumer 幂等落库），主链路不阻塞 DB 写；
         // Redis 计数为权威，落库仅为灾备重建用；fail-open：落库异常只告警，不影响评论发布主流程。
         commentEventPublisher.publish(c);
+        // 评论/回复通知（ADR-0009，fail-open 单点生成，绝不阻塞评论发布主流程）
+        notifyComment(mediaId, userId, parentId, commentId);
         // 总数 +1（Redis INCR，支撑快速增长的评论实时计数）
         commentCountService.incr(mediaId);
         // 热头写入 ZSET（最新头 + 最热头初始 0），读路径热头优先不扫大表
@@ -148,6 +156,38 @@ public class CommentService {
             behaviorLogService.record(userId, mediaId, "COMMENT_ANOMALY", "rateCount=" + risk.rateCount());
         }
         return c;
+    }
+
+    /**
+     * 评论 / 回复通知（ADR-0009，fail-open 单点生成）。
+     *
+     * <p>顶层评论（{@code parentId == 0}）→ 通知内容作者（postId 零 DB 解析）；
+     * 回复（{@code parentId != 0}）→ 通知父评论作者（{@code commentRepository#findAuthorByCommentId}，
+     * 带 media_id 分片键单分片命中）。自评 / 解析失败 / 父评论不存在跳过。</p>
+     */
+    private void notifyComment(String mediaId, long commenterId, long parentId, long commentId) {
+        try {
+            if (parentId == 0L) {
+                long authorId = MediaKeyUtil.parseUserId(mediaId);
+                if (authorId <= 0 || authorId == commenterId) {
+                    return; // 解析失败或自评，不通知
+                }
+                notificationGenerator.generate(new NotificationEvent("COMMENT:" + commentId,
+                        NotificationType.COMMENT, authorId, commenterId, "POST", mediaId,
+                        "评论了你的作品", null, Instant.now()));
+            } else {
+                Long parentAuthor = commentRepository.findAuthorByCommentId(mediaId, parentId);
+                if (parentAuthor == null || parentAuthor == commenterId) {
+                    return; // 父评论不存在或自评，不通知
+                }
+                notificationGenerator.generate(new NotificationEvent("REPLY:" + commentId,
+                        NotificationType.REPLY, parentAuthor, commenterId, "COMMENT",
+                        String.valueOf(parentId), "回复了你的评论", null, Instant.now()));
+            }
+        } catch (Exception e) {
+            log.warn("评论通知生成失败（fail-open，不影响主流程）: mediaId={}, commenterId={}, parentId={}, {}",
+                    mediaId, commenterId, parentId, e.getMessage());
+        }
     }
 
     /**

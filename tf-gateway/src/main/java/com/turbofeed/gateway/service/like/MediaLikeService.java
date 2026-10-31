@@ -4,8 +4,12 @@ import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.service.counter.CounterEventPublisher;
 import com.turbofeed.gateway.service.feed.BehaviorEventPublisher;
 import com.turbofeed.gateway.service.feed.BehaviorReport;
+import com.turbofeed.gateway.service.notify.NotificationEvent;
+import com.turbofeed.gateway.service.notify.NotificationGenerator;
+import com.turbofeed.gateway.service.notify.NotificationType;
 import com.turbofeed.gateway.service.ratelimit.UploadRateLimiter;
 import com.turbofeed.gateway.util.LikeCountScript;
+import com.turbofeed.gateway.util.MediaKeyUtil;
 import com.turbofeed.gateway.util.SnowflakeIdGenerator;
 import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
@@ -123,12 +127,15 @@ public class MediaLikeService {
     private final UploadRateLimiter rateLimiter;
     /** 计数增量发布器（opt-in）：{@code turbofeed.counter.service.enabled=false} 时工厂不提供 Bean，恒为空。 */
     private final ObjectProvider<CounterEventPublisher> counterPublisher;
+    /** 通知生成器（ADR-0009，fail-open 单点生成）：点赞通知内容作者。 */
+    private final NotificationGenerator notificationGenerator;
 
     public MediaLikeService(StringRedisTemplate redisTemplate, BehaviorEventPublisher behaviorPublisher,
                             MediaLikeJdbcRepository likeRepository, SnowflakeIdGenerator snowflakeIdGenerator,
                             @Qualifier("interactionExecutor") Executor interactionExecutor,
                             UploadRateLimiter rateLimiter,
-                            ObjectProvider<CounterEventPublisher> counterPublisher) {
+                            ObjectProvider<CounterEventPublisher> counterPublisher,
+                            NotificationGenerator notificationGenerator) {
         this.redisTemplate = redisTemplate;
         this.behaviorPublisher = behaviorPublisher;
         this.likeRepository = likeRepository;
@@ -136,6 +143,7 @@ public class MediaLikeService {
         this.interactionExecutor = interactionExecutor;
         this.rateLimiter = rateLimiter;
         this.counterPublisher = counterPublisher;
+        this.notificationGenerator = notificationGenerator;
     }
 
     /** 用户归属的槽号（与分片/计数桶同套散列，保证同一用户始终映射到同一槽）。 */
@@ -200,6 +208,8 @@ public class MediaLikeService {
                     // A1：与去重集合同步维护计数 Key（读权威）；fail-open，失败仅告警
                     bumpCount(postId, 1);
                     publish(postId, userId, "LIKE");
+                    // ① 通知内容作者（ADR-0009，fail-open 单点生成，绝不阻塞点赞主流程）
+                    notifyLike(postId, userId);
                     // ② 持久聚合底座（P1-2，opt-in）：实际新增赞才发 +1 增量
                     notifyCounter(postId, 1);
                     // ③ 异步落库（灾备），主链路不阻塞 DB 写
@@ -589,6 +599,27 @@ public class MediaLikeService {
         } catch (Exception e) {
             log.warn("计数增量通知 tf-counter 失败（fail-open，不影响主流程）: postId={}, delta={}, {}",
                     postId, delta, e.getMessage());
+        }
+    }
+
+    /**
+     * 点赞通知内容作者（ADR-0009，fail-open 单点生成）。
+     *
+     * <p>作者由 postId 零 DB 解析（{@link MediaKeyUtil#parseUserId}）；自赞 / 解析失败跳过。
+     * {@link NotificationGenerator#generate} 内部已异步 + 兜底，本方法再包一层 try 仅作双保险。</p>
+     */
+    private void notifyLike(String postId, long actorId) {
+        try {
+            long authorId = MediaKeyUtil.parseUserId(postId);
+            if (authorId <= 0 || authorId == actorId) {
+                return; // 解析失败或自赞，不通知
+            }
+            String eventId = "LIKE:" + postId + ":" + actorId;
+            notificationGenerator.generate(new NotificationEvent(eventId, NotificationType.LIKE,
+                    authorId, actorId, "POST", postId, "赞了你的作品", null, Instant.now()));
+        } catch (Exception e) {
+            log.warn("点赞通知生成失败（fail-open，不影响主流程）: postId={}, actorId={}, {}",
+                    postId, actorId, e.getMessage());
         }
     }
 }
