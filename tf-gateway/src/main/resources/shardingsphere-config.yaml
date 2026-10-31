@@ -194,6 +194,18 @@ rules:
           standard:
             shardingColumn: author_id
             shardingAlgorithmName: hashMod128
+      # 逻辑表 user_notification：通知中心收件箱（抖音式，ADR-0009）。分片键 user_id，hashMod128 与 user_follow 同规模。
+      # 偶数下标落 ds_0(turbo_feed_1)、奇数 ds_1(turbo_feed_2)；写模型(OLTP)单分片命中「某用户全部通知」，
+      # 读模型 Redis 收件箱 ZSET tf:notify:{userId} + 未读计数 tf:notify:unread:{userId}（见 NotificationGenerator）。
+      user_notification:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: user_id
+            shardingAlgorithmName: hashMod128
+        keyGenerateStrategy:
+          column: id
+          keyGeneratorName: snowflake
     # 分片算法（自动分片算法，仅 autoTables 引用；sharding-count = 总物理节点数 = 库数2 × 表数2 = 4）
     shardingAlgorithms:
       hashMod:
