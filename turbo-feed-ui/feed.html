@@ -956,6 +956,7 @@
     document.getElementById('favCount').textContent = fmt(v.fav);
     document.getElementById('shareCount').textContent = fmt(v.share);
     syncLikeState(v);   // 切条时拉服务端真实点赞态，覆盖上面的本地重置
+    syncFavState(v);    // 切条时拉服务端真实收藏态（收藏按钮此前是本地 mock，现已接后端）
   }
 
   // ========== 播放控制 ==========
@@ -1107,27 +1108,71 @@
       .catch(function () { /* 失败不影响浏览，沿用本地态 */ });
   }
 
+  /** 切条时拉服务端真实收藏态，覆盖本地重置（与 syncLikeState 同构）。 */
+  function syncFavState(v) {
+    if (!v || !v.id) return;
+    const TOKEN = localStorage.getItem('turbofeed:token');
+    if (!TOKEN) return;
+    fetch(API_BASE + '/api/v1/feed/media/favorite/status?postId=' + encodeURIComponent(v.id), {
+      headers: { 'Authorization': 'Bearer ' + TOKEN }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0 && res.data) {
+          const btn = document.getElementById('btnFav');
+          btn.dataset.faved = res.data.favorited ? '1' : '0';
+          btn.classList.toggle('faved', res.data.favorited);
+          v.fav = res.data.favoriteCount;
+          document.getElementById('favCount').textContent = fmt(v.fav);
+        }
+      })
+      .catch(function () { /* 失败沿用本地态 */ });
+  }
+
   document.getElementById('btnFav').addEventListener('click', function () {
     const v = videos[currentIdx];
-    const faved = this.dataset.faved === '1';
-    if (!faved) {
-      this.classList.add('faved');
-      v.fav++;
-      this.dataset.faved = '1';
-      toast('已收藏 ⭐');
-    } else {
-      this.classList.remove('faved');
-      v.fav--;
-      this.dataset.faved = '0';
-      toast('取消收藏');
-    }
+    if (!v || !v.id) return;
+    const btn = this;
+    const next = btn.dataset.faved !== '1';
+    const TOKEN = localStorage.getItem('turbofeed:token');
+    if (!TOKEN) { toast('请先登录'); return; }
+    // 乐观更新：先改 UI，再以服务端返回校准 / 失败回滚
+    btn.classList.toggle('faved', next);
+    btn.dataset.faved = next ? '1' : '0';
+    v.fav = (v.fav || 0) + (next ? 1 : -1);
     document.getElementById('favCount').textContent = fmt(v.fav);
+    toast(next ? '已收藏 ⭐' : '取消收藏');
+    fetch(API_BASE + '/api/v1/feed/media/favorite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
+      body: JSON.stringify({ postId: v.id, favorite: next })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0 && res.data) {
+          v.fav = res.data.favoriteCount;                 // 以服务端真实计数校准
+          btn.dataset.faved = res.data.favorited ? '1' : '0';
+          btn.classList.toggle('faved', res.data.favorited);
+          document.getElementById('favCount').textContent = fmt(v.fav);
+        } else {
+          rollback();
+          toast('收藏失败：' + (res.message || '未知错误'));
+        }
+      })
+      .catch(function () { rollback(); toast('收藏请求失败，已回滚'); });
+    function rollback() {
+      btn.classList.toggle('faved', !next);
+      btn.dataset.faved = !next ? '1' : '0';
+      v.fav = (v.fav || 0) + (next ? -1 : 1);
+      document.getElementById('favCount').textContent = fmt(v.fav);
+    }
   });
 
   // ========== 评论抽屉 ==========
   // ========== 评论抽屉（真实评论链路：GET /api/v1/comments + POST /api/v1/comments） ==========
   let commentCursor = '';
   let commentHasMore = true;
+  let commentMediaId = '';   // 当前评论抽屉所属内容的 mediaId（举报用）
 
   /** 单条评论 DOM（textContent 渲染内容，天然防 XSS）。 */
   function buildComment(c) {
@@ -1154,10 +1199,33 @@
     likeBtn.textContent = (c.liked ? '❤ ' : '🤍 ') + fmt(c.likeCount || 0);
     likeBtn.addEventListener('click', function () { toggleCommentLike(c, this); });
     const report = document.createElement('span'); report.textContent = '举报';
+    report.className = 'cm-report';
+    report.addEventListener('click', function () {
+      const reason = prompt('举报原因：', '垃圾广告');
+      if (reason == null) return;
+      reportComment(commentMediaId, reason);
+    });
     actions.append(reply, likeBtn, report);
     body.append(user, text, actions);
     div.append(ava, body);
     return div;
+  }
+
+  /** 举报当前内容（接 /api/v1/media/report，原因走 prompt 简单采集）。 */
+  function reportComment(mediaId, reason) {
+    const TOKEN = localStorage.getItem('turbofeed:token');
+    if (!TOKEN) { toast('请先登录'); return; }
+    if (!mediaId) { toast('该内容无法举报'); return; }
+    fetch(API_BASE + '/api/v1/media/report?mediaId=' + encodeURIComponent(mediaId) + '&reason=' + encodeURIComponent(reason), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + TOKEN }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0) toast('举报已提交，感谢反馈');
+        else toast('举报失败：' + (res.message || '未知错误'));
+      })
+      .catch(function () { toast('举报请求失败'); });
   }
 
   /** 拉取评论（keyset 游标 + hot 排序；replace=true 重新拉首页）。 */
@@ -1199,6 +1267,7 @@
   function openComments() {
     const v = videos[currentIdx];
     if (!v) return;
+    commentMediaId = v.mediaId;
     document.getElementById('cmTitle').textContent = '评论 (' + fmt(v.comment) + ')';
     loadComments(v, true);
     document.getElementById('drawerOverlay').classList.add('show');
@@ -1274,6 +1343,28 @@
     }
   }
 
+  /** 关注 / 取消关注（接 /api/v1/social/follow POST/DELETE）。 */
+  function toggleFollow(authorId, following, btn) {
+    const TOKEN = localStorage.getItem('turbofeed:token');
+    if (!TOKEN) { toast('请先登录'); return; }
+    const method = following ? 'DELETE' : 'POST';
+    fetch(API_BASE + '/api/v1/social/follow?authorId=' + encodeURIComponent(authorId), {
+      method: method,
+      headers: { 'Authorization': 'Bearer ' + TOKEN }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0) {
+          const nowFollowing = !following;
+          btn.textContent = nowFollowing ? '取消关注' : '关注';
+          toast(nowFollowing ? '已关注' : '已取消关注');
+        } else {
+          toast('操作失败：' + (res.message || '未知错误'));
+        }
+      })
+      .catch(function () { toast('请求失败'); });
+  }
+
   // ========== 关注 / 朋友 列表抽屉（真实社交后端） ==========
   function openUserList(kind, title) {
     const TOKEN = localStorage.getItem('turbofeed:token');
@@ -1299,7 +1390,11 @@
           const body = document.createElement('div'); body.className = 'cm-body';
           const user = document.createElement('div'); user.className = 'cm-user'; user.textContent = '用户' + ('' + uid).slice(-4);
           const text = document.createElement('div'); text.className = 'cm-text'; text.textContent = kind === 'following' ? '已关注' : '推荐关注';
-          body.append(user, text); div.append(ava, body);
+          const act = document.createElement('span');
+          act.className = 'cm-follow-btn';
+          act.textContent = kind === 'following' ? '取消关注' : '关注';
+          act.addEventListener('click', function () { toggleFollow(uid, kind === 'following', act); });
+          body.append(user, text, act); div.append(ava, body);
           list.appendChild(div);
         });
       })
@@ -1340,7 +1435,22 @@
   });
 
   document.getElementById('btnMore').addEventListener('click', function () {
-    toast('举报 / 不感兴趣 / 下载（演示占位）');
+    const v = videos[currentIdx];
+    if (!v || !v.mediaId) { toast('该内容无法举报'); return; }
+    const reason = prompt('举报该内容原因：', '违规内容');
+    if (reason == null) return;
+    const TOKEN = localStorage.getItem('turbofeed:token');
+    if (!TOKEN) { toast('请先登录'); return; }
+    fetch(API_BASE + '/api/v1/media/report?mediaId=' + encodeURIComponent(v.mediaId) + '&reason=' + encodeURIComponent(reason), {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + TOKEN }
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res.code === 0) toast('举报已提交，感谢反馈');
+        else toast('举报失败：' + (res.message || '未知错误'));
+      })
+      .catch(function () { toast('举报请求失败'); });
   });
 
   // 点击视频区域暂停/播放。

@@ -65,6 +65,9 @@
 | [0006](0006-worker-id-lease.md) | 雪花 worker-id 自租约 | 已采纳 | 2026-10-27 | Redis `SET NX EX` 抢占 + 续约保活 + 失效即 fail-closed 拉闸 |
 | [0007](0007-observability.md) | 可观测性口径：指标与 traceId | 已采纳 | 2026-10-27 | 告警用失败率不用裸计数；traceId 纯逻辑共享、servlet 管道各自一份 |
 | [0008](0008-timeline-layering.md) | 公域时间线的分层边界与格式单一真值 | 已采纳 | 2026-10-27 | 桶键/反查索引只在 `TimelineSupport` 拼装解析；非法格式一律「不猜」；不为行数拆类 |
+| [0009](0009-notification-center.md) | 通知中心有界上下文 | 提议 | 2026-10-31 | 事件驱动单点生成 + `user_notification` 分片写模型 + Redis 收件箱/未读读模型；WS 实时、轮询降级、fail-open |
+| [0010](0010-share-forward.md) | 分享/转发设计 | 提议 | 2026-10-31 | 分享=引用式动作+快照不复制内容；站内转发=新帖 `ref_post_id` 引用；计数复用 tf-counter、Redis 防刷 |
+| [0011](0011-cdc-clickhouse.md) | 行为数据 CDC 出仓 ClickHouse + 画像标签 | 提议 | 2026-10-31 | Canal 订阅只读副本 binlog→Kafka→CH；与在线库隔离；画像 T+1 回写 `user_interest`/`user_tag` |
 
 ## 状态语义
 
