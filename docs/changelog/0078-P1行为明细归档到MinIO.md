@@ -1,6 +1,6 @@
 # 0078 · P1 行为明细归档到 MinIO（采集链路落地）
 
-- **状态**：已完成（编译 + 引擎 214 测试全绿，含 5 个归档单测；镜像内真启动 + MinIO 实测上传未做，本机 MinIO 9000 未监听）
+- **状态**：已完成（编译 + 引擎 214 测试全绿，含 5 个归档单测；镜像内真启动 + 真实 MinIO 实测 putObject 已于 2026-10-30 跑通，独立 mc 交叉确认 PASS）
 - **优先级**：P1（采集链路，评审文档认定的「数据只在单机卷、磁盘故障即全失」闭环项）
 - **关联**：0057（behavior-log M0 落盘）、0077（打开落盘开关）、0069（MinIO 私化）
 
@@ -73,7 +73,17 @@ P1 的目标：引擎侧每小时把已完成小时的 JSONL **压缩上传 MinI
 
 ## 未做留白（诚实边界）
 
-- **镜像内真启动 + MinIO 实测上传**：本机 MinIO 9000 未监听，未做端到端上传验证。
-  代码路径已被单测全覆盖（FakeUploader 验证 key/内容/去重/重试/保留期），但**真实 `putObject` 链路需 Docker 起 MinIO 后跑一次确认**（建议接 0077 同套 compose 起 MinIO 后开 `ARCHIVE_ENABLED=true` 真启引擎）。
+- **镜像内真启动 + 真实 MinIO 实测上传**：✅ 已于 2026-10-30 补齐。
+  方法：用户已用 Docker 起 MinIO（容器 `minio`，S3 端点 `localhost:9000`，凭据 `minioadmin/minioadmin`）；
+  起一个最小 Spring Boot 上下文装载**真实生产类** `BehaviorLogArchiver` + `MinioBehaviorLogUploader` + `BehaviorLogSink`
+ （`@ComponentScan("com.turbofeed.feedengine.logging")`），用最高优先级命令行参数驱动
+  `archive.enabled=true` + MinIO 端点/凭据/桶（`turbo-feed`）/前缀（`behavior`），
+  主动调用真实的 `archive()` → 真实 `MinioClient.putObject`。
+  证据：
+  - 归档日志：`行为明细归档成功: feed-behavior-20261030-12.jsonl -> behavior/dt=2026-10-30/hh=12/feed-behavior-20261030-12.jsonl.gz`，`本批上传=1`；
+  - SDK 回读：`getObject` 取回对象 gunzip 后与原文**逐字节一致**（313 字节）；
+  - 独立交叉确认：docker 内 `mc`（`host.docker.internal:9000`）列出对象 `dt=2026-10-30/hh=12/feed-behavior-20261030-12.jsonl.gz`（162B gzip）确实存在。
+  未改任何源码，工作区与 `4dc608b` 一致（仅临时 harness 在 `/tmp`，已清理）。
+  注意：本机 harness 里 `TURBOFEED_BEHAVIOR_LOG_ENABLED` 占位符解析出现「env=false 仍 true」的环境特殊性，验证改用命令行参数强制覆盖；生产 compose 已用同名 env 变量显式驱动，不受影响。
 - **`dropped()` 未接 Prometheus**：队列满丢弃仍是内存计数，建议补 `tf_behavior_log_dropped_total`（属可观测性增强，非阻塞）。
 - **P2 转 Parquet / P3 ClickHouse 看板**：未启动，仍是 JSONL（压缩）形态，量大时扫描效率弱于列式。
