@@ -18,7 +18,7 @@ import org.springframework.stereotype.Service;
  * <p><b>fail-open</b>：catch 后仅记日志、绝不抛异常、不阻断 feed / 互动主流程——交互事件是
  * 旁路训练数据，丢失不影响推荐正确性（召回/排序由既有规则 + Redis KV 保障）。</p>
  *
- * <p><b>异步</b>：方法经 {@code @Async("interactionExecutor")} 在独立执行器落库，调用方 fire-and-forget，
+ * <p><b>异步</b>：方法经 {@code @Async("bestEffortExecutor")} 在独立执行器落库，调用方 fire-and-forget，
  * 不增加推荐流/互动接口的 P99 延迟。开关由 {@link MediaProperties.InteractionEvent#isEnabled()}
  * 控制（默认 true）；置 false 可一键停用写入（排障用）。</p>
  */
@@ -42,7 +42,7 @@ public class InteractionEventService {
      * 记录一次曝光（服务端在推荐流组页返回时触发，最可靠、不依赖客户端）。
      *
      * <p>匿名用户（userId 为空）跳过——个性化训练样本需绑定用户。
-     * {@code @Async} 经 interactionExecutor 异步落库，fail-open：异常仅告警，绝不阻塞 feed 主流程。</p>
+     * {@code @Async} 经 bestEffortExecutor 异步落库，fail-open：异常仅告警，绝不阻塞 feed 主流程。</p>
      *
      * <p><b>P0-1a 召回归因</b>：{@code channel}/{@code pool}/{@code requestId} 由网关从引擎响应
      * （{@link com.turbofeed.gateway.client.RecommendedFeedResult#attribution()}）取出并随本次列表
@@ -57,7 +57,7 @@ public class InteractionEventService {
      * @param pool       流量池层级（仅 channel=POOL 时有值），可空
      * @param requestId  本次列表请求 ID（网关生成、前端回传），用于离线关联，可空
      */
-    @Async("interactionExecutor")
+    @Async("bestEffortExecutor")
     public void recordImpression(String userId, String itemId, int page, int position,
                                  String channel, Integer pool, String requestId) {
         if (userId == null || userId.isBlank() || itemId == null || itemId.isBlank()) {
@@ -87,7 +87,7 @@ public class InteractionEventService {
      * @param pool       流量池层级（可空）
      * @param requestId  本次列表请求 ID（可空，归组用）
      */
-    @Async("interactionExecutor")
+    @Async("bestEffortExecutor")
     public void record(String userId, String itemId, String eventType, Integer position,
                        Integer page, String channel, Integer pool, String requestId) {
         if (userId == null || userId.isBlank() || itemId == null || itemId.isBlank() || eventType == null) {

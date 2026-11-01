@@ -18,7 +18,7 @@ import java.util.concurrent.Executor;
  * <p><b>单点生成</b>：唯一写入 {@code user_notification} 表与 Redis 读模型之处。各业务方只发
  * {@link NotificationEvent}，不直接碰通知表，保证聚合 / 限流 / 已读语义统一。</p>
  *
- * <p><b>写路径（fail-open）</b>：{@link #generate(NotificationEvent)} 异步提交到 {@code interactionExecutor}，
+ * <p><b>写路径（fail-open）</b>：{@link #generate(NotificationEvent)} 异步提交到 {@code bestEffortExecutor}，
  * 由 {@link #doGenerate} 在后台完成：① 幂等去重（{@code SETNX tf:notify:event:{eventId}}）；
  * ② 落库；③ ZADD 收件箱 ZSET；④ INCR 未读计数。任一异常仅告警，绝不抛回业务方
  * （通知生成失败不能阻塞点赞等主链路）。</p>
@@ -45,15 +45,15 @@ public class NotificationGenerator {
     private final NotificationJdbcRepository repository;
     private final StringRedisTemplate redisTemplate;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
-    private final Executor interactionExecutor;
+    private final Executor bestEffortExecutor;
 
     public NotificationGenerator(NotificationJdbcRepository repository, StringRedisTemplate redisTemplate,
                                 SnowflakeIdGenerator snowflakeIdGenerator,
-                                @Qualifier("interactionExecutor") Executor interactionExecutor) {
+                                @Qualifier("bestEffortExecutor") Executor bestEffortExecutor) {
         this.repository = repository;
         this.redisTemplate = redisTemplate;
         this.snowflakeIdGenerator = snowflakeIdGenerator;
-        this.interactionExecutor = interactionExecutor;
+        this.bestEffortExecutor = bestEffortExecutor;
     }
 
     /**
@@ -62,7 +62,7 @@ public class NotificationGenerator {
      */
     public void generate(NotificationEvent event) {
         try {
-            interactionExecutor.execute(() -> doGenerate(event));
+            bestEffortExecutor.execute(() -> doGenerate(event));
         } catch (Exception e) {
             // 执行器拒绝（队列满）等：放弃本次通知生成，绝不阻塞业务方
             log.warn("通知生成任务提交失败（fail-open，丢弃）: eventId={}, type={}, recipient={}, {}",

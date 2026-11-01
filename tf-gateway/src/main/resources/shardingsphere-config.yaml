@@ -29,7 +29,7 @@ dataSources:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
     # 三要素占位符化（语法/取值来源见文件头说明），默认值仅为本机开发兜底、不含真实口令
-    jdbcUrl: $${TURBOFEED_DB_0_URL::jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    jdbcUrl: $${TURBOFEED_DB_0_URL::jdbc:mysql://127.0.0.1:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false&socketTimeout=30000}
     username: $${TURBOFEED_DB_USERNAME::root}
     password: $${TURBOFEED_DB_PASSWORD::}
     # 连接池（HikariCP）：默认 maximumPoolSize=10/库 → 2 库仅 20 连接，高并发下线程在 getConnection 排队。
@@ -42,7 +42,7 @@ dataSources:
   ds_1:
     dataSourceClassName: com.zaxxer.hikari.HikariDataSource
     driverClassName: com.mysql.cj.jdbc.Driver
-    jdbcUrl: $${TURBOFEED_DB_1_URL::jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    jdbcUrl: $${TURBOFEED_DB_1_URL::jdbc:mysql://127.0.0.1:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false&socketTimeout=30000}
     username: $${TURBOFEED_DB_USERNAME::root}
     password: $${TURBOFEED_DB_PASSWORD::}
     # 同 ds_0（见其连接池注释）

@@ -1,12 +1,18 @@
 package com.turbofeed.gateway.config;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.annotation.EnableAsync;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 异步执行器配置：审核消费端脱离上传线程，削峰 + 防审核慢链路拖垮上传响应。
@@ -23,6 +29,8 @@ import java.util.concurrent.ThreadPoolExecutor;
 @Configuration
 @EnableAsync
 public class AsyncConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(AsyncConfig.class);
 
     /** 审核异步执行器（@Async("reviewExecutor") 显式绑定，避免与框架默认执行器混用）。 */
     @Bean("reviewExecutor")
@@ -77,17 +85,87 @@ public class AsyncConfig {
      * 同步写，宁可让推荐接口变慢，也不静默丢弃样本（样本丢失 = 模型学偏）。</p>
      */
     @Bean("interactionExecutor")
-    public Executor interactionExecutor() {
+    public Executor interactionExecutor(MeterRegistry meterRegistry) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(4);
         executor.setMaxPoolSize(16);
         executor.setQueueCapacity(1024);
         executor.setThreadNamePrefix("interaction-");
         executor.setAllowCoreThreadTimeOut(true);
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setRejectedExecutionHandler(new CountingCallerRunsPolicy(meterRegistry));
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(30);
         executor.initialize();
         return executor;
+    }
+
+    /**
+     * 可丢异步执行器（{@code @Async("bestEffortExecutor")} / 直接 execute 绑定）。
+     *
+     * <p><b>适用</b>：fail-open 的旁路异步活——通知生成、交互行为样本落库。这类任务丢失不影响
+     * 主链路正确性（通知丢失只是少一条角标；样本丢失只是模型学偏一点），但<b>绝不可阻塞业务线程</b>。</p>
+     *
+     * <p><b>背压策略 DiscardWithMetricPolicy</b>：池与队列打满时<b>直接丢弃</b>任务（与 interactionExecutor 的
+     * CallerRunsPolicy 相反），并计数 {@code gateway.async.best_effort.dropped} + 采样 WARN——
+     * 把「不阻塞主链路」的承诺在高压下真正兑现，代价是极端过载时少量可丢任务被丢弃（有指标可观测，
+     * 经 /actuator/prometheus 暴露）。</p>
+     */
+    @Bean("bestEffortExecutor")
+    public Executor bestEffortExecutor(MeterRegistry meterRegistry) {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(8);
+        executor.setQueueCapacity(256);
+        executor.setThreadNamePrefix("best-effort-");
+        executor.setAllowCoreThreadTimeOut(true);
+        executor.setRejectedExecutionHandler(new DiscardWithMetricPolicy(meterRegistry, log));
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * 可丢任务拒绝策略：池与队列饱和时<b>直接丢弃</b>任务（fail-open 语义），并计数 + 采样告警。
+     * 用于通知生成 / 交互行为样本这类「丢失不影响主链路正确性」的旁路异步活。绝不阻塞调用方线程。
+     */
+    static class DiscardWithMetricPolicy implements RejectedExecutionHandler {
+        private final Counter droppedCounter;
+        private final Logger log;
+        private final AtomicLong sinceLastWarn = new AtomicLong(0);
+
+        DiscardWithMetricPolicy(MeterRegistry meterRegistry, Logger log) {
+            this.droppedCounter = meterRegistry.counter("gateway.async.best_effort.dropped");
+            this.log = log;
+        }
+
+        @Override
+        public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+            droppedCounter.increment();
+            long n = sinceLastWarn.incrementAndGet();
+            if (n % 100 == 0) {
+                log.warn("best-effort 执行器饱和，丢弃可丢异步任务(fail-open): 累计丢弃≈{}, 活跃线程={}, 队列余量={}",
+                        n, executor.getActiveCount(), executor.getQueue().remainingCapacity());
+            }
+        }
+    }
+
+    /**
+     * CallerRuns 计数包装：保留「饱和时退回调用线程同步执行、绝不丢任务」语义，
+     * 但额外计数 {@code gateway.async.interaction.saturated}，暴露持久化执行器的背压信号
+     * （一旦开始 caller-runs，说明上传 / 点赞等主链路已被异步尾巴拖慢，是容量红线告警源）。
+     */
+    static class CountingCallerRunsPolicy extends ThreadPoolExecutor.CallerRunsPolicy {
+        private final Counter saturatedCounter;
+
+        CountingCallerRunsPolicy(MeterRegistry meterRegistry) {
+            this.saturatedCounter = meterRegistry.counter("gateway.async.interaction.saturated");
+        }
+
+        @Override
+        public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+            saturatedCounter.increment();
+            super.rejectedExecution(r, executor);
+        }
     }
 }
