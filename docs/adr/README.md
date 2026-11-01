@@ -68,6 +68,7 @@
 | [0009](0009-notification-center.md) | 通知中心有界上下文 | 提议 | 2026-10-31 | 事件驱动单点生成 + `user_notification` 分片写模型 + Redis 收件箱/未读读模型；WS 实时、轮询降级、fail-open |
 | [0010](0010-share-forward.md) | 分享/转发设计 | 提议 | 2026-10-31 | 分享=引用式动作+快照不复制内容；站内转发=新帖 `ref_post_id` 引用；计数复用 tf-counter、Redis 防刷 |
 | [0011](0011-cdc-clickhouse.md) | 行为数据 CDC 出仓 ClickHouse + 画像标签 | 提议 | 2026-10-31 | Canal 订阅只读副本 binlog→Kafka→CH；与在线库隔离；画像 T+1 回写 `user_interest`/`user_tag` |
+| [0012](0012-async-executor-backpressure.md) | 异步执行器背压分层（可丢活 vs 持久化活） | 已采纳 | 2026-11-01 | 通知生成/交互样本走 bestEffort 丢弃策略（绝不阻塞主链路）；点赞/收藏/关注/评论持久化双写保留 CallerRuns 防丢 + 饱和计数；JDBC 加 socketTimeout 兜底 |
 
 ## 状态语义
 
