@@ -2,6 +2,13 @@
 spring:
   application:
     name: turbo-feed-gateway
+  # 默认 profile = local：克隆即跑 / 本地启动无需手动加 --spring.profiles.active=local。
+  # 只有当「未显式指定 profile」时才兜底为 local；生产/中间环境必须显式
+  # --spring.profiles.active=prod（并注入 TURBOFEED_INTERNAL_TOKEN），令牌缺失仍启动失败，
+  # 绝不静默裸奔。本行专门消除「把 Maven -Plocal 当成 Spring profile、本地启动被
+  # InternalTokenInterceptor fail-fast 拦下」的反复踩坑。
+  profiles:
+    default: local
   # ---- P0-5 Nacos 服务发现（ADR-002，严格 opt-in）----
   # enabled 默认 false → 克隆即跑，启动不连任何 Nacos；server-addr 缺省也不发起连接。
   # 多实例部署时置 TURBOFEED_NACOS_ENABLED=true 并给 TURBOFEED_NACOS_SERVER_ADDR，
