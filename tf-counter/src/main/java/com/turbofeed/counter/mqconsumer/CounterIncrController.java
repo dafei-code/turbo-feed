@@ -1,5 +1,6 @@
 package com.turbofeed.counter.mqconsumer;
 
+import com.turbofeed.counter.bucket.CounterBuffer;
 import com.turbofeed.counter.cache.CounterReadService;
 import com.turbofeed.counter.service.CounterIncrService;
 import com.turbofeed.shared.model.CounterIncrementEvent;
@@ -21,6 +22,7 @@ import java.util.List;
  *   <li>{@code POST /internal/counter/incr}：批量接收计数增量（网关 HTTP 兜底默认走此；
  *       MQ 启用时由 {@link CounterMqConsumer} 消费同契约事件后汇流到 {@link CounterIncrService}）。</li>
  *   <li>{@code GET /internal/counter/{postId}}：三级读缓存查询聚合计数（管理端 / 批量计数用）。</li>
+ *   <li>{@code GET /internal/counter/buckets}：缓冲待落库负载快照（管理后台「计数分桶负载」面板用）。</li>
  * </ul>
  */
 @RestController
@@ -29,10 +31,13 @@ public class CounterIncrController {
 
     private final CounterIncrService incrService;
     private final CounterReadService readService;
+    private final CounterBuffer buffer;
 
-    public CounterIncrController(CounterIncrService incrService, CounterReadService readService) {
+    public CounterIncrController(CounterIncrService incrService, CounterReadService readService,
+                                 CounterBuffer buffer) {
         this.incrService = incrService;
         this.readService = readService;
+        this.buffer = buffer;
     }
 
     @PostMapping("/incr")
@@ -48,5 +53,13 @@ public class CounterIncrController {
     @GetMapping("/{postId}")
     public Result<CounterView> get(@PathVariable String postId) {
         return Result.ok(readService.get(postId));
+    }
+
+    /**
+     * 缓冲待落库负载快照（管理后台用）。直接读缓冲抽象，不触碰 DB；fail-open 由各实现保证。
+     */
+    @GetMapping("/buckets")
+    public Result<CounterBuffer.PendingStats> buckets() {
+        return Result.ok(buffer.pendingStats());
     }
 }

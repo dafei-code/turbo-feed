@@ -22,6 +22,7 @@ import org.springframework.web.client.RestClient;
 
 import static com.turbofeed.gateway.security.InternalTokenInterceptor.HEADER;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -67,6 +68,7 @@ public class FeedEngineClient {
     private static final String PATH_INTEREST_SEARCH = "/internal/feed/interest/search";
     private static final String PATH_DLQ_LIST = "/internal/feed/timeline/dlq";
     private static final String PATH_DLQ_REPLAY = "/internal/feed/timeline/dlq/replay";
+    private static final String PATH_HOT_TOP = "/internal/feed/hot/top";
 
     private final FeedEngineProperties properties;
     private final ObjectMapper objectMapper;
@@ -416,5 +418,45 @@ public class FeedEngineClient {
             log.warn("Feed 引擎 DLQ 重放失败（功能可能未启用，按空处理）: {}", e.getMessage());
             return Optional.empty();
         }
+    }
+
+    /**
+     * 读取热点榜 Top-N（管理后台「热点榜」面板用）。fail-open：引擎不可用/失败码/异常
+     * 均返回 {@link Optional#empty()}，由调用方按"无热点"处理。
+     *
+     * @param n 返回条数上限
+     * @return {@code Optional.of(list)} = 引擎正常响应（含空列表）；{@code Optional.empty()} = 引擎不可用
+     */
+    public Optional<List<HotItem>> hotTop(int n) {
+        try {
+            String body = restClient.get()
+                    .uri(uri -> uri.path(PATH_HOT_TOP).queryParam("n", n).build())
+                    .retrieve()
+                    .body(String.class);
+            JsonNode root = objectMapper.readTree(body == null ? "{}" : body);
+            int code = root.path("code").asInt(-1);
+            if (code != 0) {
+                health.recordReadFailure("引擎返回失败码 code=" + code);
+                log.warn("Feed 引擎热点榜返回失败码，按无热点处理: code={}", code);
+                return Optional.empty();
+            }
+            JsonNode data = root.path("data");
+            if (data.isMissingNode() || data.isNull()) {
+                return Optional.of(List.of());
+            }
+            List<HotItem> items = new ArrayList<>();
+            for (JsonNode node : data) {
+                items.add(new HotItem(node.path("timelineKey").asText(), node.path("heat").asLong(0L)));
+            }
+            return Optional.of(items);
+        } catch (Exception e) {
+            health.recordReadFailure(e.toString());
+            log.warn("Feed 引擎热点榜读取失败（fail-open）: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /** 热点榜条目（网关侧 DTO）。 */
+    public record HotItem(String timelineKey, long heat) {
     }
 }

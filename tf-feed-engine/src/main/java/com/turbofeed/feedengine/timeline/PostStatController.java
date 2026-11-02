@@ -1,6 +1,7 @@
 package com.turbofeed.feedengine.timeline;
 
 import com.turbofeed.shared.result.Result;
+import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -59,6 +60,15 @@ public class PostStatController {
         PostStatService.PostStat s = postStatService.snapshot(timelineKey);
         return Result.ok(new PoolDebug(timelineKey, pool, s.impressions(), s.likes(),
                 s.comments(), s.shares(), s.playCompletes(), s.dislikes()));
+    }
+
+    /**
+     * 热点榜 Top-N（管理后台用）。返回按热度降序的 {@code (timelineKey, heat)} 列表，
+     * 数据来自 {@code tf:feed:hot:{yyyyMMdd}} 热度 ZSET。fail-open：异常时返回空列表。
+     */
+    @GetMapping("/hot/top")
+    public Result<List<PostStatService.HotEntry>> hotTop(@RequestParam(value = "n", defaultValue = "5") int n) {
+        return Result.ok(postStatService.topHot(n));
     }
 
     /** 调试快照：帖当前池 + 实时分。 */

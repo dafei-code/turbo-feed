@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 计数增量<b>共享 Redis</b>缓冲（削峰层，集群模式实现）。
@@ -120,6 +121,36 @@ public class RedisCounterBuffer implements CounterBuffer {
     @Override
     public boolean isEmpty() {
         return redisson.getSet(KEYSET_KEY).size() == 0;
+    }
+
+    /**
+     * 共享 Redis 缓冲负载：{@code SCARD tf:cb:keys} 即待落库帖子数；各维度增量合计
+     * 通过遍历 keyset（上限 5000 个，超出则近似）逐帖 {@code GET} 求和。
+     * 读异常时返回全 0 快照（fail-open，不影响管理后台其它面板）。
+     */
+    @Override
+    public PendingStats pendingStats() {
+        try {
+            long count = redisson.getSet(KEYSET_KEY).size();
+            long like = 0, comment = 0, share = 0, commentLike = 0;
+            Set<Object> keys = redisson.getSet(KEYSET_KEY).readAll();
+            int cap = Math.min(keys.size(), 5000);
+            int i = 0;
+            for (Object o : keys) {
+                if (i++ >= cap) {
+                    break;
+                }
+                String p = String.valueOf(o);
+                like += redisson.getAtomicLong("tf:cb:" + p + ":like").get();
+                comment += redisson.getAtomicLong("tf:cb:" + p + ":comment").get();
+                share += redisson.getAtomicLong("tf:cb:" + p + ":share").get();
+                commentLike += redisson.getAtomicLong("tf:cb:" + p + ":comment_like").get();
+            }
+            long total = like + comment + share + commentLike;
+            return new PendingStats(count, total, like, comment, share, commentLike);
+        } catch (Exception e) {
+            return new PendingStats(0, 0, 0, 0, 0, 0);
+        }
     }
 
     private static String suffix(CounterType type) {

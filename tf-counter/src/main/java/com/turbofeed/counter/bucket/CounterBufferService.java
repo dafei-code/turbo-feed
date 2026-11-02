@@ -54,4 +54,19 @@ public class CounterBufferService implements CounterBuffer {
     public boolean isEmpty() {
         return buffer.isEmpty();
     }
+
+    /** 进程内缓冲负载：遍历当前所有帖的增量数组求和（未落库部分）。 */
+    @Override
+    public PendingStats pendingStats() {
+        long like = 0, comment = 0, share = 0, commentLike = 0;
+        for (long[] v : buffer.values()) {
+            if (v == null) continue;
+            like += v[0];
+            comment += v[1];
+            share += v[2];
+            commentLike += v[3];
+        }
+        long total = like + comment + share + commentLike;
+        return new PendingStats(buffer.size(), total, like, comment, share, commentLike);
+    }
 }

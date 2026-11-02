@@ -5,6 +5,7 @@ import com.turbofeed.shared.redis.RedisKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -220,6 +221,42 @@ public class PostStatService {
      * @param n 返回条数上限（≤0 视为 0）
      * @return timelineKey 列表（去重、按热度降序）；无数据/异常返回空列表
      */
+    /**
+     * 取当日（不足时用昨日兜底）热度 Top-N（带热度分），按热度降序。
+     *
+     * <p>供管理后台「热点榜」面板使用——需要同时拿到 {@code timelineKey} 与<b>热度分</b>
+     * （{@code hotTimelineKeys} 只返回 key，没有分）。读取口径与 {@link #hotTimelineKeys} 一致：
+     * 先读当天、当天不足再读昨日兜底，避免凌晨跨零点出现空洞。</p>
+     *
+     * @param n 返回条数上限（≤0 视为 0）
+     * @return {@code (timelineKey, heat)} 列表（按热度降序）；无数据/异常返回空列表
+     */
+    public List<HotEntry> topHot(int n) {
+        if (n <= 0) {
+            return List.of();
+        }
+        List<HotEntry> result = new ArrayList<>();
+        try {
+            LocalDate today = LocalDate.now();
+            for (int d = 0; d < 2 && result.size() < n; d++) {
+                String key = HOT_PREFIX + today.minusDays(d).format(DateTimeFormatter.BASIC_ISO_DATE);
+                Set<ZSetOperations.TypedTuple<String>> tuples =
+                        redisTemplate.opsForZSet().reverseRangeWithScores(key, 0, n - 1L);
+                if (tuples != null) {
+                    for (ZSetOperations.TypedTuple<String> t : tuples) {
+                        if (t.getValue() != null && t.getScore() != null) {
+                            result.add(new HotEntry(t.getValue(), Math.round(t.getScore())));
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("热点榜读取失败（按无热点处理）: {}", e.getMessage());
+            return List.of();
+        }
+        return result.subList(0, Math.min(n, result.size()));
+    }
+
     public List<String> hotTimelineKeys(int n) {
         if (n <= 0) {
             return List.of();
@@ -315,5 +352,9 @@ public class PostStatService {
      */
     public record PostStat(long impressions, long playCompletes, long likes,
                            long comments, long shares, long dislikes, long favorites) {
+    }
+
+    /** 热点榜条目：内容身份 + 热度分（管理后台面板用）。 */
+    public record HotEntry(String timelineKey, long heat) {
     }
 }

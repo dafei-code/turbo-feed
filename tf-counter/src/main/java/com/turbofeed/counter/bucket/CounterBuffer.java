@@ -33,4 +33,26 @@ public interface CounterBuffer {
 
     /** 缓冲是否为空。 */
     boolean isEmpty();
+
+    /**
+     * 缓冲待落库负载快照（管理后台「计数分桶负载」面板用）。
+     *
+     * <p>返回当前仍在缓冲中（未落库）的帖子数与各维度增量合计。fail-open 语义由各实现保证：
+     * 读 Redis 异常时返回全 0 的快照，不应抛给调用方。</p>
+     */
+    PendingStats pendingStats();
+
+    /**
+     * 缓冲负载快照。
+     *
+     * @param pendingPostCount 仍有待落库增量的帖子数（Redis 缓冲即 {@code SCARD tf:cb:keys}）
+     * @param totalIncrements  各维度增量合计（可能为 0，负向增量会抵消）
+     * @param like             点赞维度待落库增量合计
+     * @param comment          评论维度待落库增量合计
+     * @param share            分享维度待落库增量合计
+     * @param commentLike      评论点赞维度待落库增量合计
+     */
+    record PendingStats(long pendingPostCount, long totalIncrements,
+                        long like, long comment, long share, long commentLike) {
+    }
 }
