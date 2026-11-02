@@ -2,6 +2,9 @@ package com.turbofeed.gateway.service.comment;
 
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.gateway.service.moderation.ContentScene;
+import com.turbofeed.gateway.service.moderation.ContentSecurityService;
+import com.turbofeed.gateway.service.moderation.ContentVerdict;
+import com.turbofeed.gateway.service.moderation.ModerationAction;
 import com.turbofeed.gateway.service.notify.NotificationEvent;
 import com.turbofeed.gateway.service.notify.NotificationGenerator;
 import com.turbofeed.gateway.service.notify.NotificationType;
@@ -111,7 +114,11 @@ public class CommentService {
             throw new BizException(ErrorCode.RATE_LIMITED, "评论过于频繁，请稍后再试");
         }
         // 长度上限 + 敏感词（含归一化抗绕过与白名单豁免）
-        contentSecurityService.requireClean(ContentScene.COMMENT, content, userId);
+        // P1：接住裁定——REVIEW/LIMIT 不再被丢弃。
+        //   REVIEW → 建人审任务（先发后审，评论可见但进 REVIEWER 队列）
+        //   LIMIT  → 评论状态 FOLDED（前端默认不展示 = 降权，与 spikeFold 同路径）
+        //   BLOCK  → requireClean 内部已抛异常，不会走到这里
+        ContentVerdict contentVerdict = contentSecurityService.requireClean(ContentScene.COMMENT, content, userId);
 
         // #133 评论区异常感知（速率/聚集）：先过风险检测再落库
         CommentRiskService.Assessment risk = commentRiskService.assess(mediaId, userId);
@@ -131,9 +138,11 @@ public class CommentService {
 
         long commentId = snowflakeIdGenerator.nextId();
         // #133：速率异常且开启折叠 → 该评论 FOLDED（前端默认不展示），否则 APPROVED
+        // P1：敏感词 LIMIT 动作也走 FOLDED（降权 = 不在公域展示但保留可申诉）
         boolean spikeFold = risk.level() == CommentRiskService.RiskLevel.CONTENT_SPIKE
                 && properties.getCommentRisk().isFoldOnSpike();
-        CommentStatus status = spikeFold ? CommentStatus.FOLDED : CommentStatus.APPROVED;
+        boolean limitFold = contentVerdict.action() == ModerationAction.LIMIT;
+        CommentStatus status = (spikeFold || limitFold) ? CommentStatus.FOLDED : CommentStatus.APPROVED;
         Comment c = new Comment(
                 commentId, mediaId, userId, rootId, parentId, content,
                 status, 0, Instant.now());
@@ -154,6 +163,17 @@ public class CommentService {
             log.info("评论区速率异常→建巡查任务(COMMENT_ANOMALY，REVIEWER 二次研判): mediaId={}, rateCount={}", mediaId, risk.rateCount());
             // 异常行为日志（P2-2）：评论异常行为归评论者，供 P2-1 信号闭环来源（fail-open，不影响主流程）
             behaviorLogService.record(userId, mediaId, "COMMENT_ANOMALY", "rateCount=" + risk.rateCount());
+        }
+        // P1：敏感词 REVIEW 裁定 → 建人审任务（先发后审，评论已发布可见但需 REVIEWER 复核）
+        if (contentVerdict.action() == ModerationAction.REVIEW) {
+            try {
+                reviewTaskRepository.insert(mediaId, userId, ReviewTask.TYPE_CONTENT_REVIEW, 0);
+                log.info("敏感词REVIEW→建人审任务(CONTENT_REVIEW): mediaId={}, commentId={}, word={}, category={}",
+                        mediaId, commentId, contentVerdict.matchedWord(), contentVerdict.category());
+            } catch (Exception e) {
+                // fail-open：建任务失败不阻断评论发布（评论已落库），人审可由定时巡检补
+                log.warn("敏感词REVIEW建任务失败(fail-open): mediaId={}, commentId={}, {}", mediaId, commentId, e.getMessage());
+            }
         }
         return c;
     }

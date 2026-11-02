@@ -134,14 +134,16 @@ public class ContentSecurityService {
         ContentSecurityProperties.Normalize n = properties.getNormalize();
         int invalid = TextNormalizer.invalidPairCount();
         int mismatch = TextNormalizer.foldMismatchCount();
-        log.info("内容安全启动自检通过: dictionarySize={}, whitelistSize={}, normalize={}(strip{} / trad{}), "
-                        + "繁简映射={}条(非法={}, 方向自检失败={}), 默认动作={}",
+        log.info("内容安全启动自检通过: dictionarySize={}, whitelistSize={}, normalize={}(strip{} / trad{} / pinyin{}), "
+                        + "繁简映射={}条(非法={}, 方向自检失败={}), 拼音映射={}条, 默认动作={}",
                 dictSize, whitelistService.currentSize(),
                 n.isEnabled() ? "on" : "off",
                 n.isStripSeparators() ? "开" : "关",
                 n.isFoldTraditional() ? "开" : "关",
+                n.isFoldPinyin() ? "开" : "关",
                 TextNormalizer.traditionalMapSize(),
                 invalid, mismatch,
+                PinyinTable.size(),
                 properties.getDefaultAction());
         if (invalid > 0) {
             log.error("繁简映射表存在 {} 条非法条目（应为 0）：这些字形不会被折叠，请修正 "
@@ -157,23 +159,35 @@ public class ContentSecurityService {
     // ==================== 写路径入口 ====================
 
     /**
-     * 写路径统一入口：长度 + 敏感词，任一不合格即抛异常。
+     * 写路径统一入口：长度 + 敏感词，BLOCK 即抛异常，REVIEW/LIMIT 放行并返回裁定。
+     *
+     * <p>P0 改造后只有 {@link ModerationAction#BLOCK} 阻断发布（抛异常）；
+     * {@link ModerationAction#REVIEW} 与 {@link ModerationAction#LIMIT} 不再阻断，
+     * 而是放行并<b>返回裁定</b>——调用方据 {@link ContentVerdict#requiresFollowUp()}
+     * 判断是否需要把内容置入人审队列（REVIEW）或标记降权（LIMIT）。</p>
      *
      * @param scene  检测场景（决定长度上限与合规尺度）
      * @param text   待检测文本；{@code null} / 空串视为通过
      * @param userId 提交者（用于用户级白名单；无用户上下文传 {@code 0}）
+     * @return 内容裁定（PASS/REVIEW/LIMIT）；BLOCK 时不返回（抛异常）
      * @throws BizException {@link ErrorCode#PARAM_ERROR} 超长；
-     *                      {@link ErrorCode#SENSITIVE_WORD_HIT} 命中且未被豁免
+     *                      {@link ErrorCode#SENSITIVE_WORD_HIT} 命中且动作为 BLOCK
      */
-    public void requireClean(ContentScene scene, String text, long userId) {
+    public ContentVerdict requireClean(ContentScene scene, String text, long userId) {
         requireWithinLimit(scene, text);
         ContentVerdict verdict = check(scene, text, userId);
         if (verdict.denies()) {
-            log.warn("内容检测未通过: scene={}, action={}, word={}, category={}, userId={}, hit=[{}, {})",
+            log.warn("内容检测未通过(拒绝发布): scene={}, action={}, word={}, category={}, userId={}, hit=[{}, {})",
                     scene, verdict.action(), verdict.matchedWord(), verdict.category(),
                     userId, verdict.hitStart(), verdict.hitEnd());
             throw new BizException(ErrorCode.SENSITIVE_WORD_HIT, denyMessage(verdict));
         }
+        if (verdict.requiresFollowUp()) {
+            // REVIEW / LIMIT：放行但需后续治理。调用方据 requiresFollowUp() 路由。
+            log.info("内容检测放行但需后续治理: scene={}, action={}, word={}, category={}, userId={}",
+                    scene, verdict.action(), verdict.matchedWord(), verdict.category(), userId);
+        }
+        return verdict;
     }
 
     /** 无用户上下文的便捷重载（系统内部调用，不参与用户级白名单）。 */
@@ -311,10 +325,12 @@ public class ContentSecurityService {
      * @param normalizeEnabled     归一化总开关
      * @param stripSeparators      是否剥离分隔符（抗穿插绕过）
      * @param foldTraditional      是否折叠繁简
+     * @param foldPinyin           是否在归一化文本末尾追加拼音序列（抗拼音绕过，P1）
      * @param traditionalMapSize   繁简映射表条目数（编码自检的旁证）
      * @param invalidPairCount     繁简映射表的非法条目数（两字相异校验不通过），正常为 0
      * @param foldMismatchCount    繁简映射表的方向自检失败数（把「繁→简」写反会让简体文本被转成繁体、
      *                             <b>所有简体词条漏放</b>），正常为 0
+     * @param pinyinMapSize        拼音映射表收录的汉字数（P1：抗拼音绕过的覆盖面旁证）
      * @param counters             累计计数快照
      */
     public record Stats(
@@ -325,9 +341,11 @@ public class ContentSecurityService {
             boolean normalizeEnabled,
             boolean stripSeparators,
             boolean foldTraditional,
+            boolean foldPinyin,
             int traditionalMapSize,
             int invalidPairCount,
             int foldMismatchCount,
+            int pinyinMapSize,
             Map<String, Long> counters) {
     }
 
@@ -342,9 +360,11 @@ public class ContentSecurityService {
                 n.isEnabled(),
                 n.isStripSeparators(),
                 n.isFoldTraditional(),
+                n.isFoldPinyin(),
                 TextNormalizer.traditionalMapSize(),
                 TextNormalizer.invalidPairCount(),
                 TextNormalizer.foldMismatchCount(),
+                PinyinTable.size(),
                 metricsSnapshot());
     }
 
@@ -360,9 +380,9 @@ public class ContentSecurityService {
     private TextNormalizer.Normalized normalize(String text) {
         ContentSecurityProperties.Normalize n = properties.getNormalize();
         if (!n.isEnabled()) {
-            return TextNormalizer.normalize(text, false, false);
+            return TextNormalizer.normalize(text, false, false, false);
         }
-        return TextNormalizer.normalize(text, n.isStripSeparators(), n.isFoldTraditional());
+        return TextNormalizer.normalize(text, n.isStripSeparators(), n.isFoldTraditional(), n.isFoldPinyin());
     }
 
     private void count(ContentScene scene, String result) {

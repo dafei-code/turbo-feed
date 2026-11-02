@@ -17,6 +17,8 @@ import com.turbofeed.gateway.service.event.outbox.TimelineRemovePayload;
 import com.turbofeed.gateway.service.idempotency.UploadIdempotency;
 import com.turbofeed.gateway.service.moderation.ContentScene;
 import com.turbofeed.gateway.service.moderation.ContentSecurityService;
+import com.turbofeed.gateway.service.moderation.ContentVerdict;
+import com.turbofeed.gateway.service.moderation.ModerationAction;
 import com.turbofeed.gateway.service.penalty.PenaltyService;
 import com.turbofeed.gateway.service.health.AccountHealth;
 import com.turbofeed.gateway.service.health.AccountHealthService;
@@ -280,10 +282,11 @@ public class MediaUploadService {
         }
 
         // 描述/标题：抖音式文案（@用户 / #话题 / [image:idx:filename]）。
-        // 长度上限 + 敏感词统一走内容安全入口（场景 CAPTION），命中即 fail-closed；
-        // 解析为 caption_mark 落库。一次上传一个 caption 共享给整帖。
+        // 长度上限 + 敏感词统一走内容安全入口（场景 CAPTION）。
+        // P1：接住裁定——BLOCK 已在 requireClean 内抛异常；REVIEW 放行但需建人审任务；
+        // LIMIT 放行（上传内容本就 PENDING 待审，LIMIT 的降权由引擎侧推荐排序处理）。
         String rawCaption = caption == null ? "" : caption;
-        contentSecurityService.requireClean(ContentScene.CAPTION, rawCaption, uid);
+        ContentVerdict captionVerdict = contentSecurityService.requireClean(ContentScene.CAPTION, rawCaption, uid);
         CaptionMarkParser.ParseResult captionMark = captionMarkParser.parse(rawCaption);
         String postId = POST_ID_PREFIX + userId + "/" + UUID.randomUUID().toString().replace("-", "");
         Instant createdAt = Instant.now();
@@ -308,6 +311,16 @@ public class MediaUploadService {
             // #8 三档风险机审：内容安全（caption）已在 requireClean 通过，再依账号信号算风险分，
             // 达 MED/HIGH 送人工复审队列（RISK_TIERED）。fail-open 不阻断上传受理。
             riskRoute(uid, mediaIds.get(0), rawCaption);
+            // P1：敏感词 REVIEW 裁定 → 建人审任务（内容已 PENDING 受理，REVIEWER 需复核描述）
+            if (captionVerdict.action() == ModerationAction.REVIEW) {
+                try {
+                    reviewTaskRepository.insert(mediaIds.get(0), uid, ReviewTask.TYPE_CONTENT_REVIEW, 0);
+                    log.info("敏感词REVIEW→建人审任务(CONTENT_REVIEW): mediaId={}, word={}, category={}",
+                            mediaIds.get(0), captionVerdict.matchedWord(), captionVerdict.category());
+                } catch (Exception e) {
+                    log.warn("敏感词REVIEW建任务失败(fail-open): mediaId={}, {}", mediaIds.get(0), e.getMessage());
+                }
+            }
         } catch (RuntimeException e) {
             // 中途失败：清掉本批已落库的残行与已上传的对象，绝不留半成品帖（见类注释）
             cleanupPartialPost(uid, postId, mediaIds);
@@ -441,7 +454,13 @@ public class MediaUploadService {
             }
 
             String rawCaption = request != null && request.caption() != null ? request.caption() : "";
-            contentSecurityService.requireClean(ContentScene.CAPTION, rawCaption, Long.parseLong(userId));
+            // P1：接住裁定——BLOCK 已抛异常；REVIEW/LIMIT 放行并记日志。
+            // presign 阶段尚无 mediaId，REVIEW 任务由 complete 阶段的 riskRoute 人审队列覆盖。
+            ContentVerdict presignVerdict = contentSecurityService.requireClean(ContentScene.CAPTION, rawCaption, Long.parseLong(userId));
+            if (presignVerdict.requiresFollowUp()) {
+                log.info("presign描述敏感词裁定需后续治理(将由complete阶段riskRoute覆盖): action={}, word={}, category={}, userId={}",
+                        presignVerdict.action(), presignVerdict.matchedWord(), presignVerdict.category(), userId);
+            }
             CaptionMarkParser.ParseResult captionMark = captionMarkParser.parse(rawCaption);
 
             long maxBytes = properties.getUpload().getMaxFileSize().toBytes();
@@ -753,9 +772,18 @@ public class MediaUploadService {
     public void updateCaption(String mediaId, String userId, String caption) {
         requireWritable(Long.parseLong(userId));
         String raw = caption == null ? "" : caption;
-        contentSecurityService.requireClean(ContentScene.CAPTION, raw, Long.parseLong(userId));
+        // P1：接住裁定——REVIEW 建人审任务（内容已修改，需复核新描述）
+        ContentVerdict verdict = contentSecurityService.requireClean(ContentScene.CAPTION, raw, Long.parseLong(userId));
         CaptionMarkParser.ParseResult pr = captionMarkParser.parse(raw);
         mediaRepository.updateCaption(mediaId, Long.parseLong(userId), raw, pr.markJson());
         log.info("媒体描述已更新（整帖）: mediaId={}, userId={}, captionLen={}", mediaId, userId, raw.length());
+        if (verdict.action() == ModerationAction.REVIEW) {
+            try {
+                reviewTaskRepository.insert(mediaId, Long.parseLong(userId), ReviewTask.TYPE_CONTENT_REVIEW, 0);
+                log.info("描述修改敏感词REVIEW→建人审任务(CONTENT_REVIEW): mediaId={}, word={}", mediaId, verdict.matchedWord());
+            } catch (Exception e) {
+                log.warn("描述修改REVIEW建任务失败(fail-open): mediaId={}, {}", mediaId, e.getMessage());
+            }
+        }
     }
 }

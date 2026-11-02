@@ -29,9 +29,20 @@ public record ContentVerdict(
         int hitStart,
         int hitEnd) {
 
-    /** 本次检测是否应阻断发布（BLOCK / REVIEW）。 */
+    /** 本次检测是否应阻断发布（仅 BLOCK）。 */
     public boolean denies() {
         return action.denies();
+    }
+
+    /**
+     * 本次检测是否需要后续治理（人审或降权）。
+     *
+     * <p>P0 改造后 REVIEW 与 LIMIT 不再阻断发布，但它们不是"放行就完了"——
+     * REVIEW 需要调用方把内容置入人审队列，LIMIT 需要调用方标记降权。
+     * 本方法让调用方一步判断「这个裁定放行后还有没有事要做」，无需逐个比对枚举。</p>
+     */
+    public boolean requiresFollowUp() {
+        return action == ModerationAction.REVIEW || action == ModerationAction.LIMIT;
     }
 
     /** 未命中的放行结果。 */

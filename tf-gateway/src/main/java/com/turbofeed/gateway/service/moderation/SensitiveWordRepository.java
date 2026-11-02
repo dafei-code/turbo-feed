@@ -105,14 +105,22 @@ public class SensitiveWordRepository {
      * <p>INSERT → count↑ 或 maxUpdatedAt↑；UPDATE → maxUpdatedAt↑（{@code ON UPDATE CURRENT_TIMESTAMP}）；
      * DELETE → count↓。任一变化即视为词库有变更，需触发 AC 重建。空表返回
      * {@code (0, 1970-01-01)}，与首启动一致。</p>
+     *
+     * <p><b>P2：单条 SQL 原子取值</b>。改造前是两条独立查询（COUNT 一条、MAX 一条），
+     * 并发写入（admin 批量导入）时两条查询可能落在不同事务快照上——COUNT 取了"导入前"、
+     * MAX 取了"导入后"——指纹看起来变了但方向不确定，重建追平逻辑（triggerReload 最多 3 轮）
+     * 可能因此多绕一轮或漏一轮。合并为单条 SQL 后两个值在同一快照取得，
+     * 指纹要么是"导入前"要么是"导入后"，不会是混合态。</p>
      */
     public CheckSum checkSum() {
-        Long cnt = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM sensitive_word", Long.class);
-        Timestamp maxTs = jdbcTemplate.queryForObject(
-                "SELECT COALESCE(MAX(updated_at), '1970-01-01 00:00:00') FROM sensitive_word",
-                Timestamp.class);
-        return new CheckSum(cnt == null ? 0L : cnt,
-                maxTs == null ? Instant.EPOCH : maxTs.toInstant());
+        // 单条 SQL 同时取 COUNT 和 MAX(updated_at)，在同一事务快照内原子完成
+        var row = jdbcTemplate.queryForMap(
+                "SELECT COUNT(*) AS cnt, COALESCE(MAX(updated_at), '1970-01-01 00:00:00') AS max_ts "
+                        + "FROM sensitive_word");
+        long cnt = ((Number) row.get("cnt")).longValue();
+        Object maxTsObj = row.get("max_ts");
+        Instant maxTs = maxTsObj instanceof Timestamp t ? t.toInstant() : Instant.EPOCH;
+        return new CheckSum(cnt, maxTs);
     }
 
     /**

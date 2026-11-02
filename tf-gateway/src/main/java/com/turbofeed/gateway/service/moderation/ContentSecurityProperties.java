@@ -102,6 +102,20 @@ public class ContentSecurityProperties {
          */
         private boolean foldTraditional = true;
 
+        /**
+         * 是否在归一化文本后追加拼音序列（抗 `shehuang` 这类拼音绕过）。
+         *
+         * <p><b>默认关闭</b>：拼音折叠有误杀面（"shi huang" 可以是"涉黄"也可以是"时光"），
+         * 且需要词库录入时同步生成拼音变体词条才有意义。开启前应先确认运营已按
+         * 「汉字词条 → 同步入库拼音形式」的流程操作。</p>
+         *
+         * <p><b>实现方式</b>：归一化时用内嵌的高频涉敏汉字→拼音映射表（约 200 字，
+         * 不引第三方依赖），把原文中的汉字逐字转成拼音、拼成一个无分隔符的拼音串，
+         * 追加在归一化文本末尾——AC 在拼接后的文本上一次扫描，命中位置可回溯到
+         * 对应汉字区间。只覆盖<b>映射表收录的汉字</b>，未收录的字原样保留。</p>
+         */
+        private boolean foldPinyin = false;
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -124,6 +138,14 @@ public class ContentSecurityProperties {
 
         public void setFoldTraditional(boolean foldTraditional) {
             this.foldTraditional = foldTraditional;
+        }
+
+        public boolean isFoldPinyin() {
+            return foldPinyin;
+        }
+
+        public void setFoldPinyin(boolean foldPinyin) {
+            this.foldPinyin = foldPinyin;
         }
     }
 

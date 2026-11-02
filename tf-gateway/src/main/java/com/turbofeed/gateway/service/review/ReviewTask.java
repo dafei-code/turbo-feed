@@ -52,4 +52,9 @@ public record ReviewTask(
 
     /** 触发类型：上传三档风险机审（#8）：依账号健康分/信用/历史违规算风险分，达 MED/HIGH 阈值即进人工复审队列。 */
     public static final String TYPE_RISK_TIERED = "RISK_TIERED";
+
+    /** 触发类型：敏感词分级决策 REVIEW 动作（P1）：内容命中 REVIEW 级敏感词但未达 BLOCK，
+     *  按「先发后审」放行，同时进 REVIEWER 人审队列。与 RISK_TIERED 的区别：
+     *  RISK_TIERED 依账号信号，本类型依内容本身（词的分类决定动作）。 */
+    public static final String TYPE_CONTENT_REVIEW = "CONTENT_REVIEW";
 }

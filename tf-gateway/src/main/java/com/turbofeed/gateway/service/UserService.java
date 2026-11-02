@@ -76,7 +76,12 @@ public class UserService {
         if (nickname != null && !nickname.isBlank()) {
             // userId 传本次新生成的 id：注册路径上用户级白名单必然为空命中
             // （该 id 刚刚生成，不可能已有豁免条目），传 0 亦可，此处传真实 id 以便日志可追溯
-            contentSecurityService.requireClean(ContentScene.NICKNAME, name, id);
+            // P1：昵称是即时公开展示位，没有「先发后审」的产品空间——REVIEW/LIMIT 也拒绝。
+            //   requireClean 只对 BLOCK 抛异常；REVIEW/LIMIT 放行并返回裁定，这里手动补拒。
+            var verdict = contentSecurityService.requireClean(ContentScene.NICKNAME, name, id);
+            if (verdict.requiresFollowUp()) {
+                throw new BizException(ErrorCode.SENSITIVE_WORD_HIT, "昵称包含不允许的内容");
+            }
         }
         // 并发闸门：路由表主键 phone 是「唯一一处真正 enforce 手机号全局唯一」的约束
         // （user 表的 uk_phone 只在本分片内唯一，跨分片重复拦不住）。
