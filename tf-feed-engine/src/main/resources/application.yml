@@ -6,7 +6,14 @@ spring:
   # 仅 dev/local 允许 internal token 缺省 fail-open（见引擎 InternalTokenInterceptor）；
   # 生产/中间环境必须显式 --spring.profiles.active=prod 并注入 TURBOFEED_INTERNAL_TOKEN，否则启动失败。
   profiles:
-    default: local
+    # 同时叠加激活 local + ss-local（用 include 而非 default：一旦设了 include，
+    # Spring Boot 会忽略 spring.profiles.default，所以 local 必须也放进 include 才稳）。
+    # - local：InternalTokenInterceptor 对空令牌 fail-open（克隆即跑，启动不拦）；
+    # - ss-local：仓库根 file:./application.yml 中 jdbc:shardingsphere: 数据源用
+    #   spring.config.activate.on-profile: ss-local 闸门隔离，避免漏给 tf-counter。
+    # include 与命令行 --spring.profiles.active=local 叠加生效；且从任意工作目录
+    # 不带 --spring.profiles.active 启动时也会同时拿到 local + ss-local，启动稳定。
+    include: local,ss-local
   # ---- P0-5 Nacos 服务发现（ADR-002，严格 opt-in）----
   # enabled 默认 false → 克隆即跑，启动不连任何 Nacos；server-addr 缺省也不发起连接。
   # 多实例部署时置 TURBOFEED_NACOS_ENABLED=true 并给 TURBOFEED_NACOS_SERVER_ADDR，
