@@ -447,6 +447,8 @@
 </style>
 </head>
   <script src="sanitize.js"></script>
+  <script src="config.js"></script>
+  <script src="api.js"></script>
 <body data-page-node-id="Ax6LENLAQutQI0qFnRZ92A">
 
 <div class="app" data-page-node-id="z1Y3tcB2nhy2DFV5aEKSaD">
@@ -488,7 +490,7 @@
         <button data-page-node-id="SipDxS3qrwHOcJDYqXrylY">搜索</button>
       </div>
       <div class="header-right" data-page-node-id="nkPsMe2hcZDF0j4jMMEI9p">
-        <div class="h-icon" data-page-node-id="tEVVjK4KAxEFKgwt8iFzFL"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="fN3cPmexdm0J5QPzf6vbdp"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" data-page-node-id="12LF0SZGXY20lgmS6yOLxN"/><path d="M13.73 21a2 2 0 0 1-3.46 0" data-page-node-id="gp5IFcoYmum0yvcwd5bUfL"/></svg>通知</div>
+        <div class="h-icon" id="btnNotify" style="position:relative;cursor:pointer" data-page-node-id="tEVVjK4KAxEFKgwt8iFzFL"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="fN3cPmexdm0J5QPzf6vbdp"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" data-page-node-id="12LF0SZGXY20lgmS6yOLxN"/><path d="M13.73 21a2 2 0 0 1-3.46 0" data-page-node-id="gp5IFcoYmum0yvcwd5bUfL"/></svg>通知<span class="badge" id="notifyBadge" style="display:none"></span></div>
         <div class="h-icon" data-page-node-id="Yjn2zIY0zdEXDAB2QH2LoJ"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="QzsgxsE3hVb2WwCXhyXAhs"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5a8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" data-page-node-id="5MP9tzgzWxh77HT27aqSif"/></svg>消息</div>
         <div class="avatar-s" data-page-node-id="36GdhR4clDsqfrID4eipNd">A</div>
       </div>
@@ -566,6 +568,16 @@
   <div class="cm-list" id="followList"><!-- JS 填充 --></div>
 </div>
 
+<!-- 通知收件箱抽屉（复用评论抽屉样式；后端 /api/v1/notify/* 已就绪） -->
+<div class="drawer-overlay" id="notifyOverlay"></div>
+<div class="comment-drawer" id="notifyDrawer">
+  <div class="cm-head">
+    <h3 id="notifyTitle">通知</h3>
+    <span class="close" id="notifyClose">✕</span>
+  </div>
+  <div class="cm-list" id="notifyList"><!-- JS 填充 --></div>
+</div>
+
 <!-- 分享弹窗 -->
 <ul class="share-pop" id="sharePop" data-page-node-id="axCZmezu3V1IeVxCHFcia2">
   <li data-to="friend" data-page-node-id="nYthS8ucUqzLDhAXWNPWyg">推荐给朋友</li>
@@ -578,7 +590,7 @@
   // 说明：P1.5 起公域推荐流与「个人中心 /api/v1/media/mine」解耦，feed 走独立接口；
   // 后端已只返回 APPROVED，前端无需再内存过滤。演示阶段推荐接口返回当前 APPROVED 内容。
   let videos = [];
-  const API_BASE = 'http://localhost:8080';   // 演示用网关地址（与后端 --server.port 对齐）
+  const API_BASE = TF_API_BASE;   // 后端网关地址统一由 config.js 提供（P1-5）
 
   /** 后端 MediaItem → 前端 video 视图（统一抽一处，loadFeed 初次拉取与无限滚动续拉共用）。 */
   function mapItem(i) {
@@ -640,7 +652,7 @@
   // ⚠️ 在此之前前端**完全没有埋点上报**——后端已有的曝光/完播计数（PostStatService）、
   // 兴趣画像（InterestService）与行为明细落盘（BehaviorLogSink）因为没有客户端上报而恒为空，
   // 也就是说流量池赛马与个性化此前是**空转**的。埋点不是装饰，它是整条推荐链的输入源。
-  var BEHAVIOR_API = 'http://localhost:8080/api/v1/feed/behavior';
+  // 上报地址已并入 TF.api('/api/v1/feed/behavior')，不再单独维护 BEHAVIOR_API 常量。
   var BEHAVIOR_FLUSH_MS = 2000;          // 批量上报间隔（攒批，别一条一请求）
   var BEHAVIOR_MAX_BUFFER = 50;          // 缓冲上限，到量即发
   var IMAGE_EXPECTED_DWELL_SEC = 8;      // 图文"期望驻留时长"：图文没有真实时长，用它当分母算完播率
@@ -678,16 +690,16 @@
 
   function flushBehavior() {
     if (!behaviorBuffer.length) return;
-    var TOKEN = localStorage.getItem('turbofeed:token');
-    if (!TOKEN) { behaviorBuffer = []; return; }
+    if (!TF.getToken()) { behaviorBuffer = []; return; }
     var batch = behaviorBuffer;
     behaviorBuffer = [];
-    // keepalive：页面关闭/跳转时最后一批也要能发出去，否则刚看的几条全丢
-    fetch(BEHAVIOR_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
-      body: JSON.stringify(batch),
-      keepalive: true
+    // keepalive：页面关闭/跳转时最后一批也要能发出去，否则刚看的几条全丢。
+    // retryOnAuth:false —— 刷新令牌请求自身不带 keepalive，卸载瞬间发不完；
+    // 且埋点是遥测，宁可丢一批也不能把用户弹去登录页。令牌新鲜度由 api.js 的
+    // scheduleRenew() 主动续期保证（它早于过期 5 分钟就换新令牌）。
+    TF.api('/api/v1/feed/behavior', {
+      method: 'POST', json: batch, keepalive: true,
+      silent: true, authRedirect: false, retryOnAuth: false
     }).catch(function (e) { console.warn('行为埋点上报失败（不影响使用）', e); });
   }
   setInterval(flushBehavior, BEHAVIOR_FLUSH_MS);
@@ -719,8 +731,7 @@
   let feedReqToken = 0;      // 请求代次：切 Tab / 重拉时自增，过期响应直接丢弃
 
   function loadFeed(append) {
-    var TOKEN = localStorage.getItem('turbofeed:token');
-    if (!TOKEN) { feedLoading = false; location.href = 'login.html'; return; }
+    if (!TF.getToken()) { feedLoading = false; location.href = 'login.html'; return; }
 
     var mine = currentTab === 'mine';
     if (!append) {
@@ -732,37 +743,27 @@
     }
     var myToken = ++feedReqToken;   // 代次快照：响应回来时若已被更新的拉取覆盖则丢弃（防竞态覆盖）
     // mine 与 recommended 均走 keyset cursor 分页（首页 cursor 为空，续拉带上一页 nextCursor）
-    var url;
-    if (mine) {
-      url = API_BASE + '/api/v1/media/mine'
+    var path = mine
+      ? '/api/v1/media/mine'
         + (feedCursor
             ? ('?cursor=' + encodeURIComponent(feedCursor) + '&size=20')
-            : '?size=20');
-    } else {
-      url = API_BASE + '/api/v1/feed/recommended'
+            : '?size=20')
+      : '/api/v1/feed/recommended'
         + (feedCursor
             ? ('?cursor=' + encodeURIComponent(feedCursor) + '&size=20')
             : ('?page=' + feedPage + '&size=20'));
-    }
 
-    fetch(url, { headers: { 'Authorization': 'Bearer ' + TOKEN } })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
+    // TF.api 成功时直接 resolve res.data（即 { items, nextCursor, hasMore }）。
+    // 失败会自动 toast，因此这里不再静默——改造前拉流失败只 console.error，
+    // 用户只看到一个空白列表，不知道是网络问题还是没内容。
+    TF.api(path)
+      .then(function (page) {
         if (myToken !== feedReqToken) return;   // 过期响应：被更新的拉取（切 Tab/重拉）覆盖，丢弃
-        var items, hasMore;
-        if (mine) {
-          // 我的内容 keyset 分页：data 为 { items, nextCursor, hasMore }（与推荐流同视图结构）
-          var mpage = res.data || {};
-          items = (mpage.items || []);
-          feedCursor = mpage.nextCursor || "";
-          hasMore = mpage.hasMore === true;
-        } else {
-          // 推荐流 keyset 分页：data 为 { items, nextCursor, hasMore }
-          var page = res.data || {};
-          items = (page.items || []);
-          feedCursor = page.nextCursor || "";
-          hasMore = page.hasMore === true;
-        }
+        // 两个 Tab 的分页视图结构相同：{ items, nextCursor, hasMore }
+        var data = page || {};
+        var items = (data.items || []);
+        feedCursor = data.nextCursor || "";
+        var hasMore = data.hasMore === true;
         if (!items.length) {
           feedHasMore = false;
           if (!append) renderFeed(mine);
@@ -1051,6 +1052,9 @@
     const v = videos[currentIdx];
     if (!v) return;
     const btn = this;
+    // 登录检查必须在乐观更新之前：改造前是「先切 UI 再判未登录」，
+    // 未登录时红心已被点亮却不回滚，界面进入与服务端不符的脏状态。
+    if (!TF.getToken()) { toast('请先登录'); return; }
     const liked = btn.dataset.liked === '1';
     const next = !liked;
     // 乐观更新：先改 UI，再以服务端返回校准 / 失败回滚
@@ -1059,26 +1063,26 @@
     v.like = next ? v.like + 1 : v.like - 1;
     document.getElementById('likeCount').textContent = fmt(v.like);
     toast(next ? '已点赞 ❤️' : '取消点赞');
-    const TOKEN = localStorage.getItem('turbofeed:token');
-    if (!TOKEN) { toast('请先登录'); return; }
-    fetch(API_BASE + '/api/v1/feed/media/like', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
-      body: JSON.stringify({ postId: v.id, like: next })
+    // silent:true —— 失败提示由下面的 rollback + 自定义文案负责，
+    // 交给 TF.api 默认 toast 会与「已回滚」重复弹两次。
+    TF.api('/api/v1/feed/media/like', {
+      method: 'POST', json: { postId: v.id, like: next }, silent: true
     })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0 && res.data) {
-          v.like = res.data.likeCount;                 // 以服务端真实计数校准
-          btn.dataset.liked = res.data.liked ? '1' : '0';
-          btn.classList.toggle('liked', res.data.liked);
+      .then(function (data) {
+        if (data) {
+          v.like = data.likeCount;                 // 以服务端真实计数校准
+          btn.dataset.liked = data.liked ? '1' : '0';
+          btn.classList.toggle('liked', data.liked);
           document.getElementById('likeCount').textContent = fmt(v.like);
         } else {
           rollback();
-          toast('点赞失败：' + (res.message || '未知错误'));
         }
       })
-      .catch(function () { rollback(); toast('点赞失败，已回滚'); });
+      .catch(function (e) {
+        rollback();
+        // 凭证失效时 TF.api 已自行跳登录页，不必再叠一句失败提示
+        if (e && e.code !== 40101) toast('点赞失败，已回滚');
+      });
     function rollback() {
       btn.classList.toggle('liked', !next);
       btn.dataset.liked = !next ? '1' : '0';
@@ -1089,19 +1093,15 @@
 
   /** 切换条目时拉取服务端点赞态，校准红心与计数（避免本地 mock 数与服务端漂移）。 */
   function syncLikeState(v) {
-    if (!v || !v.id) return;
-    const TOKEN = localStorage.getItem('turbofeed:token');
-    if (!TOKEN) return;
-    fetch(API_BASE + '/api/v1/feed/media/like/status?postId=' + encodeURIComponent(v.id), {
-      headers: { 'Authorization': 'Bearer ' + TOKEN }
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0 && res.data) {
+    if (!v || !v.id || !TF.getToken()) return;
+    // silent：切条时的静默校准，失败不该打扰用户（沿用本地态即可）
+    TF.api('/api/v1/feed/media/like/status?postId=' + encodeURIComponent(v.id), { silent: true })
+      .then(function (data) {
+        if (data) {
           const btn = document.getElementById('btnLike');
-          btn.dataset.liked = res.data.liked ? '1' : '0';
-          btn.classList.toggle('liked', res.data.liked);
-          v.like = res.data.likeCount;
+          btn.dataset.liked = data.liked ? '1' : '0';
+          btn.classList.toggle('liked', data.liked);
+          v.like = data.likeCount;
           document.getElementById('likeCount').textContent = fmt(v.like);
         }
       })
@@ -1110,19 +1110,14 @@
 
   /** 切条时拉服务端真实收藏态，覆盖本地重置（与 syncLikeState 同构）。 */
   function syncFavState(v) {
-    if (!v || !v.id) return;
-    const TOKEN = localStorage.getItem('turbofeed:token');
-    if (!TOKEN) return;
-    fetch(API_BASE + '/api/v1/feed/media/favorite/status?postId=' + encodeURIComponent(v.id), {
-      headers: { 'Authorization': 'Bearer ' + TOKEN }
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0 && res.data) {
+    if (!v || !v.id || !TF.getToken()) return;
+    TF.api('/api/v1/feed/media/favorite/status?postId=' + encodeURIComponent(v.id), { silent: true })
+      .then(function (data) {
+        if (data) {
           const btn = document.getElementById('btnFav');
-          btn.dataset.faved = res.data.favorited ? '1' : '0';
-          btn.classList.toggle('faved', res.data.favorited);
-          v.fav = res.data.favoriteCount;
+          btn.dataset.faved = data.favorited ? '1' : '0';
+          btn.classList.toggle('faved', data.favorited);
+          v.fav = data.favoriteCount;
           document.getElementById('favCount').textContent = fmt(v.fav);
         }
       })
@@ -1133,33 +1128,33 @@
     const v = videos[currentIdx];
     if (!v || !v.id) return;
     const btn = this;
+    // 与点赞按钮一致：登录检查必须在乐观更新之前，否则未登录时星星已点亮却不回滚
+    if (!TF.getToken()) { toast('请先登录'); return; }
     const next = btn.dataset.faved !== '1';
-    const TOKEN = localStorage.getItem('turbofeed:token');
-    if (!TOKEN) { toast('请先登录'); return; }
     // 乐观更新：先改 UI，再以服务端返回校准 / 失败回滚
     btn.classList.toggle('faved', next);
     btn.dataset.faved = next ? '1' : '0';
     v.fav = (v.fav || 0) + (next ? 1 : -1);
     document.getElementById('favCount').textContent = fmt(v.fav);
     toast(next ? '已收藏 ⭐' : '取消收藏');
-    fetch(API_BASE + '/api/v1/feed/media/favorite', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN },
-      body: JSON.stringify({ postId: v.id, favorite: next })
+    TF.api('/api/v1/feed/media/favorite', {
+      method: 'POST', json: { postId: v.id, favorite: next }, silent: true
     })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0 && res.data) {
-          v.fav = res.data.favoriteCount;                 // 以服务端真实计数校准
-          btn.dataset.faved = res.data.favorited ? '1' : '0';
-          btn.classList.toggle('faved', res.data.favorited);
+      .then(function (data) {
+        if (data) {
+          v.fav = data.favoriteCount;                 // 以服务端真实计数校准
+          btn.dataset.faved = data.favorited ? '1' : '0';
+          btn.classList.toggle('faved', data.favorited);
           document.getElementById('favCount').textContent = fmt(v.fav);
         } else {
           rollback();
-          toast('收藏失败：' + (res.message || '未知错误'));
         }
       })
-      .catch(function () { rollback(); toast('收藏请求失败，已回滚'); });
+      .catch(function (e) {
+        rollback();
+        // 凭证失效时 TF.api 已自行跳登录页，不再叠一句失败提示
+        if (e && e.code !== 40101) toast('收藏请求失败，已回滚');
+      });
     function rollback() {
       btn.classList.toggle('faved', !next);
       btn.dataset.faved = !next ? '1' : '0';
@@ -1213,19 +1208,13 @@
 
   /** 举报当前内容（接 /api/v1/media/report，原因走 prompt 简单采集）。 */
   function reportComment(mediaId, reason) {
-    const TOKEN = localStorage.getItem('turbofeed:token');
-    if (!TOKEN) { toast('请先登录'); return; }
+    if (!TF.getToken()) { toast('请先登录'); return; }
     if (!mediaId) { toast('该内容无法举报'); return; }
-    fetch(API_BASE + '/api/v1/media/report?mediaId=' + encodeURIComponent(mediaId) + '&reason=' + encodeURIComponent(reason), {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + TOKEN }
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0) toast('举报已提交，感谢反馈');
-        else toast('举报失败：' + (res.message || '未知错误'));
-      })
-      .catch(function () { toast('举报请求失败'); });
+    // silent:true —— 成功/失败文案都要自定义（成功要致谢），交给 TF.api 默认 toast 会重复弹
+    TF.api('/api/v1/media/report?mediaId=' + encodeURIComponent(mediaId)
+      + '&reason=' + encodeURIComponent(reason), { method: 'POST', silent: true })
+      .then(function () { toast('举报已提交，感谢反馈'); })
+      .catch(function () { /* TF.api 已 toast 具体原因，不再叠加通用文案 */ });
   }
 
   /** 拉取评论（keyset 游标 + hot 排序；replace=true 重新拉首页）。 */
@@ -1233,13 +1222,16 @@
     if (!v || !v.mediaId) { toast('该内容暂无评论接口'); return; }
     const list = document.getElementById('cmList');
     if (replace) { list.innerHTML = '<div class="cm-tip">加载中…</div>'; commentCursor = ''; commentHasMore = true; }
-    const TOKEN = localStorage.getItem('turbofeed:token');
-    const url = API_BASE + '/api/v1/comments?mediaId=' + encodeURIComponent(v.mediaId)
-      + '&rootId=0&size=20&mode=hot&cursor=' + encodeURIComponent(commentCursor);
-    fetch(url, TOKEN ? { headers: { 'Authorization': 'Bearer ' + TOKEN } } : {})
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
-        const page = res.data || {};
+    // authRedirect:false —— 评论区必须允许匿名浏览：未登录用户点开评论抽屉
+    // 不该被踢去登录页（TF.api 不注入 Authorization 即可匿名读，但 40101 会跳转）。
+    // 已登录但令牌过期时仍会自动刷新重试（retryOnAuth 默认开），刷新失败则只显示加载失败。
+    TF.api('/api/v1/comments?mediaId=' + encodeURIComponent(v.mediaId)
+      + '&rootId=0&size=20&mode=hot&cursor=' + encodeURIComponent(commentCursor),
+      { silent: true, authRedirect: false })
+      .then(function (page0) {
+        // 改造前这里完全不看 res.code，任何业务错误都会被静默当成"没有评论"，
+        // 用户看到"还没有评论，来抢沙发～"其实是请求失败了 —— 现在错误走 catch 显式提示。
+        const page = page0 || {};
         const items = page.items || [];
         commentCursor = page.nextCursor || '';
         commentHasMore = !!page.hasMore;
@@ -1287,50 +1279,46 @@
     if (!txt) return;
     const v = videos[currentIdx];
     if (!v || !v.mediaId) { toast('该内容无法评论'); return; }
-    const TOKEN = localStorage.getItem('turbofeed:token');
-    if (!TOKEN) { toast('请先登录'); return; }
+    if (!TF.getToken()) { toast('请先登录'); return; }
     const self = this;
     self.disabled = true;
-    fetch(API_BASE + '/api/v1/comments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': 'Bearer ' + TOKEN },
-      body: 'mediaId=' + encodeURIComponent(v.mediaId) + '&content=' + encodeURIComponent(txt) + '&parentId=0'
+    TF.api('/api/v1/comments', {
+      method: 'POST', silent: true,
+      form: { mediaId: v.mediaId, content: txt, parentId: 0 }
     })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
+      .then(function (data) {
         self.disabled = false;
-        if (res.code === 0 && res.data) {
-          input.value = '';
-          const list = document.getElementById('cmList');
-          const tip = list.querySelector('.cm-tip');
-          if (tip) tip.remove();
-          list.insertBefore(buildComment(res.data), list.firstChild);
-          v.comment = (v.comment || 0) + 1;
-          document.getElementById('commentCount').textContent = fmt(v.comment);
-          document.getElementById('cmTitle').textContent = '评论 (' + fmt(v.comment) + ')';
-          toast('评论已发送');
-        } else {
-          toast('评论发送失败：' + (res.message || '未知错误'));
-        }
+        if (!data) { toast('评论发送失败'); return; }
+        input.value = '';
+        const list = document.getElementById('cmList');
+        const tip = list.querySelector('.cm-tip');
+        if (tip) tip.remove();
+        list.insertBefore(buildComment(data), list.firstChild);
+        v.comment = (v.comment || 0) + 1;
+        document.getElementById('commentCount').textContent = fmt(v.comment);
+        document.getElementById('cmTitle').textContent = '评论 (' + fmt(v.comment) + ')';
+        toast('评论已发送');
       })
-      .catch(function () { self.disabled = false; toast('评论发送失败'); });
+      .catch(function (e) {
+        self.disabled = false;
+        // 凭证失效时 TF.api 已自行跳登录页，不再叠提示
+        if (!e || e.code !== 40101) toast('评论发送失败');
+      });
   });
 
   /** 评论点赞 toggle（POST /api/v1/comments/like，返回最新已赞态）。 */
   function toggleCommentLike(c, el) {
-    const TOKEN = localStorage.getItem('turbofeed:token');
-    if (!TOKEN) { toast('请先登录'); return; }
+    if (!TF.getToken()) { toast('请先登录'); return; }
     const liked = el.dataset.liked === '1';
     const next = !liked;
     el.dataset.liked = next ? '1' : '0';
     el.textContent = (next ? '❤ ' : '🤍 ') + fmt((c.likeCount || 0) + (next ? 1 : -1));
-    fetch(API_BASE + '/api/v1/comments/like?mediaId=' + encodeURIComponent(c.mediaId) + '&commentId=' + c.commentId, {
-      method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN }
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0 && res.data != null) {
-          const nowLiked = !!res.data;
+    TF.api('/api/v1/comments/like?mediaId=' + encodeURIComponent(c.mediaId)
+      + '&commentId=' + c.commentId, { method: 'POST', silent: true })
+      .then(function (data) {
+        // data 是布尔（最新已赞态），false 是合法值，只能用 != null 判空
+        if (data != null) {
+          const nowLiked = !!data;
           c.likeCount = nowLiked ? (c.likeCount || 0) + 1 : (c.likeCount || 0) - 1;
           el.dataset.liked = nowLiked ? '1' : '0';
           el.textContent = (nowLiked ? '❤ ' : '🤍 ') + fmt(c.likeCount);
@@ -1345,42 +1333,35 @@
 
   /** 关注 / 取消关注（接 /api/v1/social/follow POST/DELETE）。 */
   function toggleFollow(authorId, following, btn) {
-    const TOKEN = localStorage.getItem('turbofeed:token');
-    if (!TOKEN) { toast('请先登录'); return; }
-    const method = following ? 'DELETE' : 'POST';
-    fetch(API_BASE + '/api/v1/social/follow?authorId=' + encodeURIComponent(authorId), {
-      method: method,
-      headers: { 'Authorization': 'Bearer ' + TOKEN }
+    if (!TF.getToken()) { toast('请先登录'); return; }
+    TF.api('/api/v1/social/follow?authorId=' + encodeURIComponent(authorId), {
+      method: following ? 'DELETE' : 'POST', silent: true
     })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0) {
-          const nowFollowing = !following;
-          btn.textContent = nowFollowing ? '取消关注' : '关注';
-          toast(nowFollowing ? '已关注' : '已取消关注');
-        } else {
-          toast('操作失败：' + (res.message || '未知错误'));
-        }
+      .then(function () {
+        const nowFollowing = !following;
+        btn.textContent = nowFollowing ? '取消关注' : '关注';
+        toast(nowFollowing ? '已关注' : '已取消关注');
       })
-      .catch(function () { toast('请求失败'); });
+      .catch(function (e) {
+        if (!e || e.code !== 40101) toast('操作失败');
+      });
   }
 
   // ========== 关注 / 朋友 列表抽屉（真实社交后端） ==========
   function openUserList(kind, title) {
-    const TOKEN = localStorage.getItem('turbofeed:token');
-    if (!TOKEN) { location.href = 'login.html'; return; }
+    if (!TF.getToken()) { location.href = 'login.html'; return; }
     document.getElementById('followTitle').textContent = title;
     const list = document.getElementById('followList');
     list.innerHTML = '<div class="cm-tip">加载中…</div>';
     document.getElementById('followOverlay').classList.add('show');
     document.getElementById('followDrawer').classList.add('open');
-    const url = kind === 'following'
-      ? API_BASE + '/api/v1/social/following?limit=50'
-      : API_BASE + '/api/v1/social/recommend?limit=50';
-    fetch(url, { headers: { 'Authorization': 'Bearer ' + TOKEN } })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
-        const items = (res.data && res.data.items) ? res.data.items : (res.data || []);
+    const path = kind === 'following'
+      ? '/api/v1/social/following?limit=50'
+      : '/api/v1/social/recommend?limit=50';
+    TF.api(path, { silent: true })
+      .then(function (data) {
+        // data 可能是 { items:[...] } 或直接是数组，两种视图都兼容
+        const items = (data && data.items) ? data.items : (data || []);
         if (!items.length) { list.innerHTML = '<div class="cm-tip">还没有关注的人，去推荐流发现吧～</div>'; return; }
         list.innerHTML = '';
         items.forEach(function (uid) {
@@ -1406,6 +1387,150 @@
   }
   document.getElementById('followClose').addEventListener('click', closeUserList);
   document.getElementById('followOverlay').addEventListener('click', closeUserList);
+
+  // ========== 通知中心（后端 /api/v1/notify/* 已就绪，此前前端零调用） ==========
+  // 视图契约：NotificationListView { items: NotificationView[], nextCursor, unreadCount }
+  //           NotificationView { id, type, actorId, targetType, targetId, summary, refPayload, read, createdAtMs }
+  let notifyCursor = 0;
+  let notifyHasMore = false;
+
+  /** 类型 → 图标 + 文案前缀（与后端 NotificationType 枚举一一对应）。 */
+  var NOTIFY_ICONS = {
+    LIKE: '❤️', COMMENT: '💬', REPLY: '↩️', MENTION: '@',
+    FOLLOW: '➕', FAVORITE: '⭐', SYSTEM: '📢', REVIEW_RESULT: '🔍'
+  };
+
+  /** 相对时间（"3 分钟前"）， createdAtMs 是毫秒时间戳。 */
+  function fmtRelTime(ms) {
+    if (!ms) return '';
+    var diff = Date.now() - ms;
+    if (diff < 60000) return '刚刚';
+    if (diff < 3600000) return Math.floor(diff / 60000) + ' 分钟前';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + ' 小时前';
+    return Math.floor(diff / 86400000) + ' 天前';
+  }
+
+  /** 轮询未读角标：登录后每 30s 拉一次，页面切回前台时立即拉一次。 */
+  function pollNotifyBadge() {
+    if (!TF.getToken()) return;
+    TF.api('/api/v1/notify/unread', { silent: true, authRedirect: false })
+      .then(function (count) {
+        var badge = document.getElementById('notifyBadge');
+        if (!badge) return;
+        if (count && count > 0) {
+          badge.textContent = count > 99 ? '99+' : String(count);
+          badge.style.display = '';
+        } else {
+          badge.style.display = 'none';
+        }
+      })
+      .catch(function () { /* 角标拉取失败不影响浏览 */ });
+  }
+
+  /** 打开通知抽屉并加载首页。 */
+  function openNotify() {
+    if (!TF.getToken()) { toast('请先登录'); return; }
+    notifyCursor = 0;
+    document.getElementById('notifyTitle').textContent = '通知';
+    document.getElementById('notifyList').innerHTML = '<div class="cm-tip">加载中…</div>';
+    document.getElementById('notifyOverlay').classList.add('show');
+    document.getElementById('notifyDrawer').classList.add('open');
+    loadNotifyPage();
+  }
+
+  function closeNotify() {
+    document.getElementById('notifyOverlay').classList.remove('show');
+    document.getElementById('notifyDrawer').classList.remove('open');
+  }
+
+  function loadNotifyPage() {
+    var list = document.getElementById('notifyList');
+    TF.api('/api/v1/notify/inbox?cursor=' + notifyCursor + '&limit=20', { silent: true })
+      .then(function (page) {
+        var data = page || {};
+        var items = data.items || [];
+        notifyCursor = data.nextCursor || 0;
+        notifyHasMore = !!data.nextCursor;
+        // 首页加载完成后用真实未读数更新角标（收件箱响应里也带 unreadCount）
+        var badge = document.getElementById('notifyBadge');
+        if (data.unreadCount > 0) {
+          badge.textContent = data.unreadCount > 99 ? '99+' : String(data.unreadCount);
+          badge.style.display = '';
+        } else {
+          badge.style.display = 'none';
+        }
+        if (!items.length && list.children.length <= 1) {
+          list.innerHTML = '<div class="cm-tip">暂无通知</div>';
+          return;
+        }
+        items.forEach(function (n) { list.appendChild(buildNotifyItem(n)); });
+        if (notifyHasMore && !document.getElementById('notifyMore')) {
+          var more = document.createElement('div');
+          more.className = 'cm-tip cm-more';
+          more.id = 'notifyMore';
+          more.textContent = '加载更多';
+          more.addEventListener('click', function () { loadNotifyPage(); this.remove(); });
+          list.appendChild(more);
+        }
+      })
+      .catch(function () { list.innerHTML = '<div class="cm-tip">通知加载失败</div>'; });
+  }
+
+  /** 构造一条通知的 DOM（复用评论条目样式）。 */
+  function buildNotifyItem(n) {
+    var div = document.createElement('div');
+    div.className = 'cm-item' + (n.read ? '' : ' unread');
+    if (!n.read) div.style.background = 'rgba(61,126,255,.06)';
+    var ava = document.createElement('div'); ava.className = 'cm-avatar';
+    ava.textContent = NOTIFY_ICONS[n.type] || '🔔';
+    var body = document.createElement('div'); body.className = 'cm-body';
+    var user = document.createElement('div'); user.className = 'cm-user';
+    user.textContent = (n.actorId ? '用户' + String(n.actorId).slice(-4) : '系统') + ' · ' + fmtRelTime(n.createdAtMs);
+    var text = document.createElement('div'); text.className = 'cm-text';
+    text.textContent = n.summary || ('[' + n.type + ']');
+    // 未读项点击标记已读
+    if (!n.read) {
+      div.style.cursor = 'pointer';
+      div.addEventListener('click', function () {
+        markNotifyRead([n.id], div);
+      });
+    }
+    body.append(user, text);
+    div.append(ava, body);
+    return div;
+  }
+
+  /** 标记指定通知已读（静默），成功后移除该条的高亮与角标。 */
+  function markNotifyRead(ids, itemEl) {
+    TF.api('/api/v1/notify/read', { method: 'POST', json: { ids: ids }, silent: true })
+      .then(function (remaining) {
+        if (itemEl) {
+          itemEl.style.background = '';
+          itemEl.style.cursor = '';
+        }
+        var badge = document.getElementById('notifyBadge');
+        if (remaining && remaining > 0) {
+          badge.textContent = remaining > 99 ? '99+' : String(remaining);
+          badge.style.display = '';
+        } else {
+          badge.style.display = 'none';
+        }
+      })
+      .catch(function () { /* 标记失败不影响浏览 */ });
+  }
+
+  document.getElementById('btnNotify').addEventListener('click', openNotify);
+  document.getElementById('notifyClose').addEventListener('click', closeNotify);
+  document.getElementById('notifyOverlay').addEventListener('click', closeNotify);
+
+  // 登录后启动角标轮询（30s）；页面可见性切回前台时立即拉一次
+  if (TF.getToken()) {
+    pollNotifyBadge();
+    setInterval(pollNotifyBadge, 30000);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') pollNotifyBadge();
+    });
+  }
 
   // ========== 分享 ==========
   const sharePop = document.getElementById('sharePop');
@@ -1437,20 +1562,12 @@
   document.getElementById('btnMore').addEventListener('click', function () {
     const v = videos[currentIdx];
     if (!v || !v.mediaId) { toast('该内容无法举报'); return; }
+    if (!TF.getToken()) { toast('请先登录'); return; }
     const reason = prompt('举报该内容原因：', '违规内容');
     if (reason == null) return;
-    const TOKEN = localStorage.getItem('turbofeed:token');
-    if (!TOKEN) { toast('请先登录'); return; }
-    fetch(API_BASE + '/api/v1/media/report?mediaId=' + encodeURIComponent(v.mediaId) + '&reason=' + encodeURIComponent(reason), {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + TOKEN }
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0) toast('举报已提交，感谢反馈');
-        else toast('举报失败：' + (res.message || '未知错误'));
-      })
-      .catch(function () { toast('举报请求失败'); });
+    // 复用 reportComment：改造前这里把整段举报请求（fetch + 判错 + 提示）抄了一遍，
+    // 与 reportComment 完全重复 —— 两份代码将来必然不同步（改了一处忘另一处）。
+    reportComment(v.mediaId, reason);
   });
 
   // 点击视频区域暂停/播放。

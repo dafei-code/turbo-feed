@@ -189,6 +189,8 @@
 </style>
 </head>
   <script src="sanitize.js"></script>
+  <script src="config.js"></script>
+  <script src="api.js"></script>
 <body data-page-node-id="1niiseyhrVXLbvOAnZYOC6">
 
 <div class="bg-stream" aria-hidden="true" data-page-node-id="6521lH7rcDJWKvAX39dBSn">
@@ -258,8 +260,8 @@
 </div>
 
 <script>
-  // 后端网关地址：静态页与后端不同源（file:// 或其它端口），故写全址。
-  var API_BASE = 'http://localhost:8080';
+  // 后端网关地址：统一由 config.js 提供（P1-5），换端口/部署无需改代码。
+  var API_BASE = TF_API_BASE;
 
   function showMsg(text) {
     var el = document.getElementById('msg');
@@ -280,25 +282,33 @@
     btn.disabled = true;
     btn.textContent = '注册中...';
     try {
-      var resp = await fetch(API_BASE + '/api/v1/auth/register', {
+      // 注册接口为表单编码（后端 @RequestParam 接收）；匿名请求故 auth:false。
+      // silent:true —— 本页用自己的行内提示框（showMsg），避免与 TF.api 的 toast 重复提示。
+      var data = await TF.api('/api/v1/auth/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ phone: phone, password: password, nickname: nickname })
+        form: { phone: phone, password: password, nickname: nickname },
+        auth: false,
+        silent: true
       });
-      var result = await resp.json();
-      if (!result || result.code !== 0) {
-        return showMsg((result && result.message) || '注册失败');
-      }
       // 注册成功：展示账号信息，引导去登录换取 JWT（上传链路需令牌）。
       var ok = document.getElementById('okBox');
-      ok.innerHTML = '<b>注册成功！</b><br>账号：' + esc(result.data.phone)
-        + '<br>昵称：' + esc(result.data.nickname)
+      ok.innerHTML = '<b>注册成功！</b><br>账号：' + esc(data.phone)
+        + '<br>昵称：' + esc(data.nickname)
         + '<br><br><a href="login.html" style="color:var(--accent)">去登录 ›</a>';
       ok.classList.add('show');
       document.getElementById('msg').classList.remove('show');
       document.getElementById('regForm').style.display = 'none';
     } catch (err) {
-      showMsg('无法连接后端服务，请确认网关已启动：' + API_BASE);
+      // 区分「后端拒绝」（手机号已注册 / 密码不合规等，err.message 是后端原文）
+      // 与「连不上后端」（网络层失败）。改造前一律提示"无法连接后端服务"，
+      // 手机号重复时也这么说，用户会一直以为是服务没起。
+      if (err && err.httpStatus) {
+        showMsg('服务异常（HTTP ' + err.httpStatus + '）');
+      } else if (err && err.code !== undefined) {
+        showMsg(err.message || '注册失败');
+      } else {
+        showMsg('无法连接后端服务，请确认网关已启动：' + TF_API_BASE);
+      }
     } finally {
       btn.disabled = false;
       btn.textContent = '注 册';

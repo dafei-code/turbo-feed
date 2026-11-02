@@ -132,6 +132,8 @@
 </style>
 </head>
   <script src="sanitize.js"></script>
+  <script src="config.js"></script>
+  <script src="api.js"></script>
 <body>
   <div class="topbar">
     <div class="mark">TF</div>
@@ -177,8 +179,8 @@
   </div>
 
 <script>
-  // 后端网关地址：静态页与后端不同源，故写全址。换端口 / 部署时只改这一处。
-  var API_BASE = 'http://localhost:8080';
+  // 后端网关地址：统一由 config.js 提供（P1-5），换端口/部署无需改代码。
+  var API_BASE = TF_API_BASE;
 
   // 登录守卫：审核接口校验 Bearer 令牌，无令牌直接回登录页。
   var TOKEN = localStorage.getItem('turbofeed:token');
@@ -191,20 +193,11 @@
     window.location.href = 'user.html';
   }
 
-  // 退出：先调服务端全端登出（吊销该用户全部 AT+RT），再清本地并跳转。fail-open：吊销失败也照常登出。
+  // 退出：委托 api.js 的 TF.logout()——先调服务端全端登出（吊销该用户全部 AT+RT），
+  // 再清本地并跳转。fail-open：吊销失败也照常登出。
+  // 刷新令牌走【请求体】而非 URL 查询串（改造前拼在 ?refreshToken= 上，会进网关日志/浏览器历史）。
   function logout() {
-    var access = localStorage.getItem('turbofeed:token');
-    var refresh = localStorage.getItem('turbofeed:refresh');
-    fetch(API_BASE + '/api/v1/auth/logout?refreshToken=' + encodeURIComponent(refresh || ''), {
-      method: 'POST',
-      headers: access ? { 'Authorization': 'Bearer ' + access } : {}
-    }).catch(function () {}).finally(function () {
-      localStorage.removeItem('turbofeed:token');
-      localStorage.removeItem('turbofeed:refresh');
-      localStorage.removeItem('turbofeed:user');
-      localStorage.removeItem('turbofeed:role');
-      window.location.href = 'login.html';
-    });
+    TF.logout();
   }
 
   // 当前登录用户（login.html 登录成功后写入；未登录直接打开时回退为 reviewer）
@@ -217,19 +210,19 @@
   }
 
   // 拉取全平台待人工审核内容（跨分片广播，演示/小数据量）
+  // 走 TF.api：自动注入令牌、40101 时静默刷新并重试一次、失败自动 toast（P0-1 / P1-4）。
+  // silent:true —— 错误已在表格里可见，避免再弹一次 toast 造成重复提示。
   function loadReviewQueue() {
     var body = document.getElementById('reviewBody');
     body.innerHTML = '<tr><td colspan="5" class="empty">加载中…</td></tr>';
-    fetch(API_BASE + '/api/v1/admin/media/pending?size=50', {
-      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (!res.data || res.data.length === 0) {
+    TF.api('/api/v1/admin/media/pending?size=50', { silent: true })
+      .then(function (items) {
+        if (!items || items.length === 0) {
           body.innerHTML = '<tr><td colspan="5" class="empty">队列为空，没有待审核内容 🎉</td></tr>';
           return;
         }
         body.innerHTML = '';
-        res.data.forEach(function (it) {
+        items.forEach(function (it) {
           var tr = document.createElement('tr');
           // 帖子视图：images 为该帖按 seq 排序的全部图片（历史单图行回退 url）。
           // 人工审核的对象是「整帖」，故这里铺开首 3 张，其余折叠为 +n，避免只看首图盲审。
@@ -262,24 +255,19 @@
   }
 
   // 审核执行：通过 / 驳回（真人审核闸的翻转点）
+  // 走 TF.api：业务码非 0 会 reject（改造前需自己判 res.code），令牌失效自动刷新重试一次。
   function reviewMedia(mediaId, approve, btn) {
     // 禁用本行两个按钮，避免重复提交
     var row = btn.parentNode;
     row.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
-    fetch(API_BASE + '/api/v1/admin/media/review?mediaId=' + encodeURIComponent(mediaId) + '&approve=' + approve, {
-      method: 'POST',
-      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0) {
-          loadReviewQueue(); // 操作后刷新队列
-        } else {
-          alert('审核失败：' + (res.message || '未知错误'));
-          row.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
-        }
+    TF.api('/api/v1/admin/media/review?mediaId=' + encodeURIComponent(mediaId) + '&approve=' + approve,
+        { method: 'POST', silent: true })
+      .then(function () {
+        loadReviewQueue(); // 操作后刷新队列
       })
       .catch(function (e) {
-        alert('审核请求失败：' + e.message);
+        // 改造前用阻塞式 alert，统一改为轻提示；失败后恢复按钮以便重试
+        TF.toast('审核失败：' + (e.message || '未知错误'));
         row.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
       });
   }

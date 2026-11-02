@@ -613,6 +613,8 @@
 </style>
 </head>
   <script src="sanitize.js"></script>
+  <script src="config.js"></script>
+  <script src="api.js"></script>
 <body data-page-node-id="FlveMXe5jlI3UFXbQmGdr0">
 
 <!-- 未登录时显示 -->
@@ -768,7 +770,8 @@
 <div class="toast" id="toast" data-page-node-id="F5UmgZPkKVAHrux0SAUHxz"></div>
 
 <script>
-  var API_BASE = 'http://localhost:8080';
+  // 后端网关地址：统一由 config.js 提供（P1-5），换端口/部署无需改代码。
+  var API_BASE = TF_API_BASE;
   var TOKEN = localStorage.getItem('turbofeed:token');
   var USER = localStorage.getItem('turbofeed:user') || '用户';
   var allItems = [];
@@ -842,24 +845,21 @@
     var grid = document.getElementById('contentGrid');
     if (!manual) grid.innerHTML = '<div class="empty-state">加载中...</div>';
 
-    fetch(API_BASE + '/api/v1/media/mine', {
-      headers: { 'Authorization': 'Bearer ' + TOKEN }
-    })
-    .then(function (r) { return r.json(); })
-    .then(function (res) {
-      if (res.code !== 0) {
-        grid.innerHTML = '<div class="empty-state">加载失败：' + esc(res.message || '未知错误') + '</div>';
-        showToast('加载失败：' + (res.message || '未知错误'), 'error');
-        return;
-      }
-      allItems = res.data || [];
+    // 走 TF.api：自动注入令牌、令牌失效时静默刷新并重试一次（P0-1）。
+    // silent:true —— 本页有自己的 showToast(msg, type) 带成功/失败配色，保留它而非用通用 toast。
+    TF.api('/api/v1/media/mine', { silent: true })
+    .then(function (items) {
+      allItems = items || [];
       updateStats();
       renderGrid();
       if (manual) showToast('已刷新', 'ok');
     })
     .catch(function (err) {
-      grid.innerHTML = '<div class="empty-state">无法连接后端服务，请确认网关已启动</div>';
-      showToast('无法连接后端服务', 'error');
+      var msg = (err && err.message) || '未知错误';
+      // 改造前把所有异常都归为"无法连接后端服务"，业务失败（如令牌失效）也被这么提示，
+      // 用户无法判断到底是服务没起还是自己的问题。这里改为透出后端原文。
+      grid.innerHTML = '<div class="empty-state">加载失败：' + esc(msg) + '</div>';
+      showToast('加载失败：' + msg, 'error');
     });
   }
 
@@ -1051,23 +1051,16 @@
       : '确定删除这条内容吗？删除后将从「我的内容」与公域发现流移除。';
     if (!confirm(tip)) return;
 
-    fetch(API_BASE + '/api/v1/media?mediaId=' + encodeURIComponent(mediaId), {
-      method: 'DELETE',
-      headers: { 'Authorization': 'Bearer ' + TOKEN }
-    })
-    .then(function (r) { return r.json(); })
-    .then(function (res) {
-      if (res.code !== 0) {
-        showToast('删除失败：' + (res.message || '未知错误'), 'error');
-        return;
-      }
+    // 走 TF.api：业务码非 0 会 reject，令牌失效时静默刷新并重试一次。
+    TF.api('/api/v1/media?mediaId=' + encodeURIComponent(mediaId), { method: 'DELETE', silent: true })
+    .then(function () {
       allItems = allItems.filter(function (it) { return postKeyOf(it) !== postKey; });
       updateStats();
       renderGrid();
       showToast(n > 1 ? '整帖已删除' : '已删除', 'ok');
     })
     .catch(function (err) {
-      showToast('删除失败：' + (err.message || '网络错误'), 'error');
+      showToast('删除失败：' + ((err && err.message) || '网络错误'), 'error');
     });
   }
 
@@ -1156,9 +1149,9 @@
     bar.style.width = '5%';
     btn.disabled = true;
 
-    // 幂等键：同一次提交（含重试）复用同一个 requestId，服务端窗口内去重，避免重复建帖
+    // 幂等键：同一次提交（含重试）复用同一个 requestId，服务端窗口内去重，避免重复建帖。
+    // 令牌不再在此手工拼装 —— 由 api.js 的 TF.api 统一注入（并在失效时自动刷新重试）。
     var requestId = 'ui-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
-    var authHeaders = { 'Authorization': 'Bearer ' + TOKEN, 'X-Request-Id': requestId };
     var uploadCount = selectedFiles.length;
 
     // ① 申请预签名凭证（只传元数据，不含字节）
@@ -1166,19 +1159,20 @@
       return { fileName: f.name, size: f.size, contentType: f.type || '' };
     });
 
-    fetch(API_BASE + '/api/v1/media/presign', {
+    // 幂等键随自定义头透传：TF.api 会自动注入 Authorization，这里只追加 X-Request-Id。
+    var idemHeaders = { 'X-Request-Id': requestId };
+
+    TF.api('/api/v1/media/presign', {
       method: 'POST',
-      headers: { 'Authorization': authHeaders.Authorization, 'X-Request-Id': requestId,
-                 'Content-Type': 'application/json' },
-      body: JSON.stringify({ files: metas, caption: '' })
-    })
-    .then(function (r) { return r.json(); })
-    .then(function (res) {
-      if (res.code !== 0) { throw new Error(res.message || '获取上传凭证失败'); }
-      return res.data;
+      json: { files: metas, caption: '' },
+      headers: idemHeaders,
+      silent: true   // 本页用 showToast(msg,type) 带配色，统一交由末尾 catch 提示
     })
     .then(function (data) {
       // ② 逐张直传对象存储（可并发）
+      // ⚠ 刻意【不用】TF.api：目标是 MinIO 预签名 URL（外部域），TF.api 会注入
+      //   Authorization 头，而预签名请求多一个未签名的头就会被对象存储判为签名不符而 403。
+      //   此处也不需要 JWT —— 凭证已在 URL 签名里。
       var done = 0, total = data.items.length;
       return Promise.all(data.items.map(function (item) {
         var file = selectedFiles[item.seq];
@@ -1197,16 +1191,11 @@
     .then(function (data) {
       // ③ 通知完成：服务端复核后异步落库送审（返回 202 受理）
       bar.style.width = '95%';
-      return fetch(API_BASE + '/api/v1/media/complete', {
+      return TF.api('/api/v1/media/complete', {
         method: 'POST',
-        headers: { 'Authorization': authHeaders.Authorization, 'X-Request-Id': requestId,
-                   'Content-Type': 'application/json' },
-        body: JSON.stringify({ postId: data.postId })
-      })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code !== 0) { throw new Error(res.message || '完成通知失败'); }
-        return res.data;
+        json: { postId: data.postId },
+        headers: idemHeaders,
+        silent: true
       });
     })
     .then(function () {
@@ -1250,21 +1239,11 @@
     renderGrid();
   });
 
-  // 退出：先调服务端吊销（访问令牌黑名单 + 刷新令牌吊销），再清本地，
+  // 退出：委托 api.js 的 TF.logout()——先调服务端吊销（访问令牌黑名单 + 刷新令牌吊销），再清本地，
   // 保证 7 天刷新令牌不会被「只清本地」遗留为可用状态。fail-open：吊销失败也照常登出。
+  // 刷新令牌走【请求体】而非 URL 查询串（改造前拼在 ?refreshToken= 上，会进网关日志/浏览器历史）。
   function logout() {
-    var access = localStorage.getItem('turbofeed:token');
-    var refresh = localStorage.getItem('turbofeed:refresh');
-    fetch(API_BASE + '/api/v1/auth/logout?refreshToken=' + encodeURIComponent(refresh || ''), {
-      method: 'POST',
-      headers: access ? { 'Authorization': 'Bearer ' + access } : {}
-    }).catch(function () {}).finally(function () {
-      localStorage.removeItem('turbofeed:token');
-      localStorage.removeItem('turbofeed:refresh');
-      localStorage.removeItem('turbofeed:user');
-      localStorage.removeItem('turbofeed:role');
-      window.location.href = 'login.html';
-    });
+    TF.logout();
   }
 
   // 初始化

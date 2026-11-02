@@ -261,10 +261,12 @@
   TurboFeed Open Source · <span data-page-node-id="WoqdcKD9thGUCYrDmt8SjQ">Java 17 + Spring Boot 3.4.3</span> · Apache-2.0 License
 </div>
 
+<script src="config.js"></script>
+<script src="api.js"></script>
 <script>
-  // 后端网关地址：静态页与后端不同源（file:// 或其它端口），故写全址。
-  // 换端口 / 部署到他处时，三个页面各改这一处即可。
-  var API_BASE = 'http://localhost:8080';
+  // 后端网关地址：统一由 config.js 提供（P1-5）。改造前 6 个页面各写死一份，
+  // 换端口/部署他处要手改 6~7 处。
+  var API_BASE = TF_API_BASE;
 
   function showMsg(text) {
     var el = document.getElementById('msg');
@@ -303,23 +305,20 @@
     btn.textContent = '登录中...';
     try {
       // 登录接口为表单编码（后端 @RequestParam 接收）；JwtAuthenticationFilter
-      // 对未携带令牌的匿名请求放行，故此处无需 Authorization 头。
-      var resp = await fetch(API_BASE + '/api/v1/auth/login', {
+      // 对未携带令牌的匿名请求放行，故 auth:false 不注入 Authorization 头。
+      // silent:true —— 本页用自己的行内提示框（showMsg），避免与 TF.api 的 toast 重复提示。
+      var data = await TF.api('/api/v1/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ phone: phone, password: password })
+        form: { phone: phone, password: password },
+        auth: false,
+        silent: true
       });
-      var result = await resp.json();
-      if (!result || result.code !== 0) {
-        return showMsg((result && result.message) || '登录失败');
-      }
       // step 3：登录返回 {accessToken, refreshToken}（双令牌）。
       // turbofeed:token 仍存访问令牌（其他页面读它当 Bearer，契约不变）；
-      // 刷新令牌单独存 turbofeed:refresh，供静默刷新 / 登出吊销使用。
-      var access = result.data.accessToken;
-      var refresh = result.data.refreshToken;
-      localStorage.setItem('turbofeed:token', access);
-      localStorage.setItem('turbofeed:refresh', refresh);
+      // 刷新令牌单独存 turbofeed:refresh，供 api.js 主动续期 / 40101 静默刷新 / 登出吊销使用。
+      var access = data.accessToken;
+      var refresh = data.refreshToken;
+      TF.setTokens(access, refresh);
       localStorage.setItem('turbofeed:user', phone);
       // 按令牌中的角色路由：管理员进系统后台 admin.html，审核员进审核工作台 review.html，
       // 普通用户进 user.html。后端 /api/v1/admin/** 仍按 JWT 中的权限二次校验，页面层仅做快捷拦截。
@@ -333,7 +332,16 @@
         window.location.href = 'user.html';
       }
     } catch (err) {
-      showMsg('无法连接后端服务，请确认网关已启动：' + API_BASE);
+      // 区分「后端拒绝」（密码错误 / 账号封禁等，err.message 是后端原文）
+      // 与「连不上后端」（无 httpStatus，网络层失败）——改造前一律提示"无法连接后端服务"，
+      // 密码输错时也这么说，用户会一直怀疑是服务没起。
+      if (err && err.httpStatus) {
+        showMsg('服务异常（HTTP ' + err.httpStatus + '）');
+      } else if (err && err.code !== undefined) {
+        showMsg(err.message || '登录失败');
+      } else {
+        showMsg('无法连接后端服务，请确认网关已启动：' + TF_API_BASE);
+      }
     } finally {
       btn.disabled = false;
       btn.textContent = '登 录';

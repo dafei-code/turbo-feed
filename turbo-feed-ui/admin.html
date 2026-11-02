@@ -216,6 +216,15 @@
     margin-bottom: 14px;
   }
   .panel .p-head .title { font-size: 14px; font-weight: 600; }
+  /* 示例数据标注：管理后台有 4 个面板尚未接后端（Feed 趋势 / 热点榜 / 分桶负载 / 组件状态），
+     数据是写死的。标注出来是为了不误导——看起来像真数据的假数据比"未实现"更糟。 */
+  .demo-badge {
+    display: inline-block; margin-left: 8px; padding: 1px 7px;
+    font-size: 11px; font-weight: 500; line-height: 17px;
+    color: #b26a00; background: rgba(255, 166, 0, .13);
+    border: 1px solid rgba(255, 166, 0, .35); border-radius: 9px;
+    vertical-align: middle; white-space: nowrap;
+  }
   .tabs { display: flex; gap: 4px; }
   .tabs span {
     font-size: 12px;
@@ -456,6 +465,8 @@
 </style>
 </head>
   <script src="sanitize.js"></script>
+  <script src="config.js"></script>
+  <script src="api.js"></script>
 <body data-page-node-id="VSv5fZOdIo7OcvAYu6fDqb">
 
 <!-- ================= 侧边栏 ================= -->
@@ -572,7 +583,7 @@
     <div class="chart-row" data-page-node-id="6EikZNnGMBs2r1gq2W6AuA">
       <div class="panel" data-page-node-id="hHZPrmVGrOoYd3HkgjZrxf">
         <div class="p-head" data-page-node-id="3HfdLGtoV3U5XNIAtQcKLU">
-          <div class="title" data-page-node-id="nvpulf79g2uVfWtLL04yeS">Feed 流量趋势（近 60 分钟）</div>
+          <div class="title" data-page-node-id="nvpulf79g2uVfWtLL04yeS">Feed 流量趋势（近 60 分钟）<span class="demo-badge" title="曲线为静态示例，尚未接后端指标（Micrometer / PostStatService）">示例数据</span></div>
           <div class="legend" data-page-node-id="zpxxxb6ieu2UOAwACGmdGs">
             <span data-page-node-id="0KRIPkiu6UDz4mDkVoEmKf"><i style="background:#3d7eff" data-page-node-id="dvL2AcLW2IMknU5XmgB46N"></i>读 QPS</span>
             <span data-page-node-id="q5Cb6voF2bjq36o2XRMZqn"><i style="background:#ff4d5e" data-page-node-id="Wdexi4T3s4RPpFRwR87e5m"></i>写 QPS</span>
@@ -607,7 +618,7 @@
 
       <div class="panel" data-page-node-id="sC2GE4mU2Ky9Ebwjv5YpQ0">
         <div class="p-head" data-page-node-id="goCLx0pkPJoE25m4uzZzEG">
-          <div class="title" data-page-node-id="LMDpAuq3Z24ECydkun1Dhw">热点榜 TOP5（滑动窗口）</div>
+          <div class="title" data-page-node-id="LMDpAuq3Z24ECydkun1Dhw">热点榜 TOP5（滑动窗口）<span class="demo-badge" title="榜单条目写死在前端，后端暂无热点榜查询端点（引擎 PostStatService 有热度数据但未暴露管理接口）">示例数据</span></div>
           <div class="tabs" data-page-node-id="u8AjcO47TQSXEKg315HXTI"><span class="on" data-page-node-id="5ZaNFxcfMYF0FYoyj7X1H4">实时</span><span data-page-node-id="RPhyCelUKOA0Gp2VhoVj12">小时</span><span data-page-node-id="GYKpbevXXLyJPBMjCZaeQQ">日</span></div>
         </div>
         <table class="table" data-page-node-id="0NIg3BbWntD43gptkHjNIc">
@@ -627,7 +638,7 @@
     <div class="two-col" data-page-node-id="mznJKvfAiQChEyGr34UKMu">
       <div class="panel" data-page-node-id="DaSybNExBQd4SoWoK1f748">
         <div class="p-head" data-page-node-id="oQ6yoanv69FSG7Hirh0w7J">
-          <div class="title" data-page-node-id="qgx8X8llhFlvqiB4H3onzh">计数分桶负载（64 桶）</div>
+          <div class="title" data-page-node-id="qgx8X8llhFlvqiB4H3onzh">计数分桶负载（64 桶）<span class="demo-badge" title="柱状图为静态示例，未接 tf-counter 的真实分桶负载">示例数据</span></div>
           <div class="legend" data-page-node-id="t1noqcigCC0j9f0XOblxWr"><span data-page-node-id="zOMUBxl4GEXXGGwkReryvJ"><i style="background:#3d7eff" data-page-node-id="LKGkjpoSMHjSbK7NN8ACkh"></i>当前桶内积压计数事件</span></div>
         </div>
         <div class="bucket-row" data-page-node-id="Y00aPqCkx0rI9Mxas3sAYx"><span class="k" data-page-node-id="d9eRgYhdtRhwAIqkp2MNjl">#07</span><div class="bar-bg" data-page-node-id="aC4ugLhb27ZPAI15zbpZ1S"><div class="bar" style="width:92%" data-page-node-id="Xjjqi7nzi1nPlcJMhxQ2zM"></div></div><span class="val" data-page-node-id="4Yhlf1XBi8LHC0siznfKvd">9,142</span></div>
@@ -641,7 +652,7 @@
 
       <div class="panel" data-page-node-id="5a3DAwf8uPQr1xP4vYuUAD">
         <div class="p-head" data-page-node-id="Sx6xZ35cd9eeoJZ25DdUuw">
-          <div class="title" data-page-node-id="tosaCxOCk9wAgVZAPPA4mg">核心组件状态</div>
+          <div class="title" data-page-node-id="tosaCxOCk9wAgVZAPPA4mg">核心组件状态<span class="demo-badge" title="状态灯为静态示例，未接 actuator/health 真实探活">示例数据</span></div>
           <div class="tabs" data-page-node-id="Qe6pl5xvqASHB0R9IN7cC3"><span class="on" data-page-node-id="bRx484xuKdH7pkiIKJwiT9">健康</span><span data-page-node-id="M3qxQjKdhQ9UM22epbWsm1">全部</span></div>
         </div>
         <ul class="sys-status" data-page-node-id="idENVeRJZS14eXSWQso1Zv">
@@ -787,8 +798,10 @@
 </div>
 
 <script>
-  // 后端网关地址：静态页与后端不同源，故写全址。换端口 / 部署时只改这一处。
-  var API_BASE = 'http://localhost:8080';
+  // 后端网关地址：统一由 config.js 提供（P1-5）。改造前 6 个页面各写死一份，
+  // 换端口/部署他处要手改 6~7 处且漏改后表现为"页面能开但所有请求静默失败"。
+  // 需要临时指向别的环境：控制台 localStorage.setItem('turbofeed:apiBase','http://x:8080') 后刷新。
+  var API_BASE = TF_API_BASE;
 
   // 登录守卫：/api/v1/admin/** 后端按 JWT 权限二次校验，页面层先做快捷拦截。
   // 仅 ADMIN（系统管理员）可进入本管理后台；REVIEWER 仅能进审核工作台 review.html；USER 回退普通用户页。
@@ -803,20 +816,11 @@
     window.location.href = 'user.html';
   }
 
-  // 退出：先调服务端全端登出（吊销该用户全部 AT+RT），再清本地并跳转。fail-open：吊销失败也照常登出。
+  // 退出：委托 api.js 的 TF.logout()——先调服务端全端登出（吊销该用户全部 AT+RT），
+  // 再清本地并跳转。fail-open：吊销失败也照常登出。
+  // 刷新令牌走【请求体】而非 URL 查询串（改造前拼在 ?refreshToken= 上，会进网关日志/浏览器历史）。
   function logout() {
-    var access = localStorage.getItem('turbofeed:token');
-    var refresh = localStorage.getItem('turbofeed:refresh');
-    fetch(API_BASE + '/api/v1/auth/logout?refreshToken=' + encodeURIComponent(refresh || ''), {
-      method: 'POST',
-      headers: access ? { 'Authorization': 'Bearer ' + access } : {}
-    }).catch(function () {}).finally(function () {
-      localStorage.removeItem('turbofeed:token');
-      localStorage.removeItem('turbofeed:refresh');
-      localStorage.removeItem('turbofeed:user');
-      localStorage.removeItem('turbofeed:role');
-      window.location.href = 'login.html';
-    });
+    TF.logout();
   }
 
   // 静态演示版：仅侧边栏选中态交互，无后端逻辑（带 data-target 的菜单平滑滚动到对应面板）
@@ -849,17 +853,17 @@
 
   // 拉取全平台待审核内容（跨分片广播，演示/小数据量）
   function loadReviewQueue() {
-    fetch(API_BASE + '/api/v1/admin/media/pending?size=50', {
-      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
+    // 走 TF.api：自动注入令牌、40101 时静默刷新并重试一次（P0-1）。
+    // silent:true —— 错误已在表格内可见，避免再弹一次 toast 重复提示。
+    TF.api('/api/v1/admin/media/pending?size=50', { silent: true })
+      .then(function (items) {
         var body = document.getElementById('reviewBody');
-        if (!res.data || res.data.length === 0) {
+        if (!items || items.length === 0) {
           body.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim)">队列为空，没有待审核内容</td></tr>';
           return;
         }
         body.innerHTML = '';
-        res.data.forEach(function (it) {
+        items.forEach(function (it) {
           var tr = document.createElement('tr');
           // 帖子视图：整帖一审，审核员需看到帖内全部图片（首 3 张铺开，其余折叠为 +n），
           // 否则同一帖的后续图片就成了审核盲区。历史单图行（无 images）回退 url。
@@ -893,19 +897,14 @@
   }
 
   // 审核执行：通过 / 驳回（真审核闸的翻转点）
+  // 走 TF.api：业务码非 0 会 reject，令牌失效时静默刷新重试；alert 阻塞弹窗改为轻提示。
   function reviewMedia(mediaId, approve) {
-    fetch(API_BASE + '/api/v1/admin/media/review?mediaId=' + encodeURIComponent(mediaId) + '&approve=' + approve, {
-      method: 'POST',
-      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0) {
-          loadReviewQueue(); // 操作后刷新队列
-        } else {
-          alert('审核失败：' + (res.message || '未知错误'));
-        }
+    TF.api('/api/v1/admin/media/review?mediaId=' + encodeURIComponent(mediaId) + '&approve=' + approve,
+        { method: 'POST', silent: true })
+      .then(function () {
+        loadReviewQueue(); // 操作后刷新队列
       })
-      .catch(function (e) { alert('审核请求失败：' + e.message); });
+      .catch(function (e) { TF.toast('审核失败：' + ((e && e.message) || '未知错误')); });
   }
 
   // ================= 敏感词管理（动态词库，热更新） =================
@@ -916,16 +915,14 @@
     var q = 'page=0&size=200'
       + (kw ? '&keyword=' + encodeURIComponent(kw) : '')
       + (cat ? '&category=' + encodeURIComponent(cat) : '');
-    fetch(API_BASE + '/api/v1/admin/moderation/words?' + q, {
-      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
+    TF.api('/api/v1/admin/moderation/words?' + q, { silent: true })
+      .then(function (data) {
         var body = document.getElementById('wordBody');
-        if (!res.data || !res.data.items || res.data.items.length === 0) {
+        if (!data || !data.items || data.items.length === 0) {
           body.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim)">词库为空，添加第一个敏感词吧</td></tr>';
         } else {
           body.innerHTML = '';
-          res.data.items.forEach(function (it) {
+          data.items.forEach(function (it) {
             var tr = document.createElement('tr');
             var status = it.enabled
               ? '<span class="hot-tag tag-cold">启用</span>'
@@ -943,9 +940,9 @@
           });
         }
         var stat = document.getElementById('wordStat');
-        if (res.data) {
-          stat.textContent = 'DB 总条数 ' + (res.data.dbCount != null ? res.data.dbCount : '-')
-            + ' · AC 已加载 ' + (res.data.acLoadedSize != null ? res.data.acLoadedSize : '-');
+        if (data) {
+          stat.textContent = 'DB 总条数 ' + (data.dbCount != null ? data.dbCount : '-')
+            + ' · AC 已加载 ' + (data.acLoadedSize != null ? data.acLoadedSize : '-');
         }
       })
       .catch(function (e) {
@@ -957,46 +954,31 @@
   function addWord() {
     var w = document.getElementById('wordInput').value.trim();
     var c = document.getElementById('catInput').value.trim() || 'DEFAULT';
-    if (!w) { alert('请输入词条'); return; }
-    var url = API_BASE + '/api/v1/admin/moderation/words?word=' + encodeURIComponent(w)
-      + '&category=' + encodeURIComponent(c);
-    fetch(url, {
-      method: 'POST',
-      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0) {
-          document.getElementById('wordInput').value = '';
-          loadWords();
-        } else {
-          alert('添加失败：' + (res.message || '未知错误'));
-        }
+    if (!w) { TF.toast('请输入词条'); return; }
+    TF.api('/api/v1/admin/moderation/words?word=' + encodeURIComponent(w)
+        + '&category=' + encodeURIComponent(c), { method: 'POST', silent: true })
+      .then(function () {
+        document.getElementById('wordInput').value = '';
+        loadWords();
       })
-      .catch(function (e) { alert('添加失败：' + e.message); });
+      .catch(function (e) { TF.toast('添加失败：' + ((e && e.message) || '未知错误')); });
   }
 
   function batchAdd() {
     var raw = document.getElementById('batchInput').value;
     var words = raw.split('\n').map(function (s) { return s.trim(); })
       .filter(function (s) { return s.length > 0; });
-    if (words.length === 0) { alert('请粘贴要导入的词（每行一个）'); return; }
+    if (words.length === 0) { TF.toast('请粘贴要导入的词（每行一个）'); return; }
     var c = document.getElementById('batchCatInput').value.trim() || 'DEFAULT';
-    var url = API_BASE + '/api/v1/admin/moderation/words/batch?category=' + encodeURIComponent(c);
-    var h = TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {};
-    h['Content-Type'] = 'application/json';
-    fetch(url, { method: 'POST', headers: h, body: JSON.stringify(words) })
-      .then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0) {
-          document.getElementById('batchInput').value = '';
-          var added = (res.data && res.data.added != null) ? res.data.added : words.length;
-          loadWords();
-          alert('已提交批量导入：' + added + ' 条（后台异步重建，毫秒级生效）');
-        } else {
-          alert('批量导入失败：' + (res.message || '未知错误'));
-        }
+    TF.api('/api/v1/admin/moderation/words/batch?category=' + encodeURIComponent(c),
+        { method: 'POST', json: words, silent: true })
+      .then(function (data) {
+        document.getElementById('batchInput').value = '';
+        var added = (data && data.added != null) ? data.added : words.length;
+        loadWords();
+        TF.toast('已提交批量导入：' + added + ' 条（后台异步重建，毫秒级生效）');
       })
-      .catch(function (e) { alert('批量导入失败：' + e.message); });
+      .catch(function (e) { TF.toast('批量导入失败：' + ((e && e.message) || '未知错误')); });
   }
 
   function disableWord(id) { wordAction('/api/v1/admin/moderation/words/disable?id=' + encodeURIComponent(id), '禁用'); }
@@ -1006,46 +988,31 @@
     wordAction('/api/v1/admin/moderation/words/delete?id=' + encodeURIComponent(id), '删除');
   }
   function wordAction(url, label) {
-    fetch(API_BASE + url, {
-      method: 'POST',
-      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0) { loadWords(); }
-        else { alert(label + '失败：' + (res.message || '未知错误')); }
-      })
-      .catch(function (e) { alert(label + '失败：' + e.message); });
+    TF.api(url, { method: 'POST', silent: true })
+      .then(function () { loadWords(); })
+      .catch(function (e) { TF.toast(label + '失败：' + ((e && e.message) || '未知错误')); });
   }
 
   function forceReload() {
-    fetch(API_BASE + '/api/v1/admin/moderation/words/reload', {
-      method: 'POST',
-      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0) {
-          loadWords();
-          alert('已强制刷新 AC，当前加载 ' + (res.data != null ? res.data : '?') + ' 条');
-        } else {
-          alert('刷新失败：' + (res.message || '未知错误'));
-        }
+    TF.api('/api/v1/admin/moderation/words/reload', { method: 'POST', silent: true })
+      .then(function (data) {
+        loadWords();
+        TF.toast('已强制刷新 AC，当前加载 ' + (data != null ? data : '?') + ' 条');
       })
-      .catch(function (e) { alert('刷新失败：' + e.message); });
+      .catch(function (e) { TF.toast('刷新失败：' + ((e && e.message) || '未知错误')); });
   }
 
   // ================= 白名单管理（误杀豁免出口，热更新） =================
   // 列表：data = { items:[{id,word,scene,scope,ownerId,reason,enabled,revision}], dbCount, loadedSize }
   function loadWhitelist() {
-    fetch(API_BASE + '/api/v1/admin/moderation/whitelist?page=0&size=200', {
-      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
+    TF.api('/api/v1/admin/moderation/whitelist?page=0&size=200', { silent: true })
+      .then(function (data) {
         var body = document.getElementById('wlBody');
-        if (!res.data || !res.data.items || res.data.items.length === 0) {
+        if (!data || !data.items || data.items.length === 0) {
           body.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim)">白名单为空（初始即正常，无需配置）</td></tr>';
         } else {
           body.innerHTML = '';
-          res.data.items.forEach(function (it) {
+          data.items.forEach(function (it) {
             var tr = document.createElement('tr');
             var status = it.enabled
               ? '<span class="hot-tag tag-cold">启用</span>'
@@ -1066,9 +1033,9 @@
           });
         }
         var stat = document.getElementById('wlStat');
-        if (res.data) {
-          stat.textContent = 'DB 总条数 ' + (res.data.dbCount != null ? res.data.dbCount : '-')
-            + ' · 内存已加载 ' + (res.data.loadedSize != null ? res.data.loadedSize : '-');
+        if (data) {
+          stat.textContent = 'DB 总条数 ' + (data.dbCount != null ? data.dbCount : '-')
+            + ' · 内存已加载 ' + (data.loadedSize != null ? data.loadedSize : '-');
         }
       })
       .catch(function (e) {
@@ -1079,30 +1046,23 @@
 
   function addWhitelist() {
     var w = document.getElementById('wlWord').value.trim();
-    if (!w) { alert('请输入被豁免的词'); return; }
+    if (!w) { TF.toast('请输入被豁免的词'); return; }
     var scene = document.getElementById('wlScene').value;
     var scope = document.getElementById('wlScope').value;
     var ownerId = parseInt(document.getElementById('wlOwner').value, 10) || 0;
     var reason = document.getElementById('wlReason').value.trim() || '';
-    var url = API_BASE + '/api/v1/admin/moderation/whitelist?word=' + encodeURIComponent(w)
-      + '&scene=' + encodeURIComponent(scene)
-      + '&scope=' + encodeURIComponent(scope)
-      + '&ownerId=' + ownerId
-      + '&reason=' + encodeURIComponent(reason);
-    fetch(url, {
-      method: 'POST',
-      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0) {
-          document.getElementById('wlWord').value = '';
-          document.getElementById('wlReason').value = '';
-          loadWhitelist();
-        } else {
-          alert('添加失败：' + (res.message || '未知错误'));
-        }
+    TF.api('/api/v1/admin/moderation/whitelist?word=' + encodeURIComponent(w)
+        + '&scene=' + encodeURIComponent(scene)
+        + '&scope=' + encodeURIComponent(scope)
+        + '&ownerId=' + ownerId
+        + '&reason=' + encodeURIComponent(reason),
+        { method: 'POST', silent: true })
+      .then(function () {
+        document.getElementById('wlWord').value = '';
+        document.getElementById('wlReason').value = '';
+        loadWhitelist();
       })
-      .catch(function (e) { alert('添加失败：' + e.message); });
+      .catch(function (e) { TF.toast('添加失败：' + ((e && e.message) || '未知错误')); });
   }
 
   function disableWhitelist(id) { wlAction('/api/v1/admin/moderation/whitelist/disable?id=' + encodeURIComponent(id), '禁用'); }
@@ -1112,30 +1072,17 @@
     wlAction('/api/v1/admin/moderation/whitelist/delete?id=' + encodeURIComponent(id), '删除');
   }
   function wlAction(url, label) {
-    fetch(API_BASE + url, {
-      method: 'POST',
-      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0) { loadWhitelist(); }
-        else { alert(label + '失败：' + (res.message || '未知错误')); }
-      })
-      .catch(function (e) { alert(label + '失败：' + e.message); });
+    TF.api(url, { method: 'POST', silent: true })
+      .then(function () { loadWhitelist(); })
+      .catch(function (e) { TF.toast(label + '失败：' + ((e && e.message) || '未知错误')); });
   }
   function whitelistReload() {
-    fetch(API_BASE + '/api/v1/admin/moderation/whitelist/reload', {
-      method: 'POST',
-      headers: TOKEN ? { 'Authorization': 'Bearer ' + TOKEN } : {}
-    }).then(function (r) { return r.json(); })
-      .then(function (res) {
-        if (res.code === 0) {
-          loadWhitelist();
-          alert('已强制刷新白名单索引，当前加载 ' + (res.data != null ? res.data : '?') + ' 条');
-        } else {
-          alert('刷新失败：' + (res.message || '未知错误'));
-        }
+    TF.api('/api/v1/admin/moderation/whitelist/reload', { method: 'POST', silent: true })
+      .then(function (data) {
+        loadWhitelist();
+        TF.toast('已强制刷新白名单索引，当前加载 ' + (data != null ? data : '?') + ' 条');
       })
-      .catch(function (e) { alert('刷新失败：' + e.message); });
+      .catch(function (e) { TF.toast('刷新失败：' + ((e && e.message) || '未知错误')); });
   }
 
   // 进入页面即加载审核队列 + 敏感词词库 + 白名单
