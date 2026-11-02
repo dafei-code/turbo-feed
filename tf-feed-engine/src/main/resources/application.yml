@@ -2,6 +2,11 @@
 spring:
   application:
     name: tf-feed-engine
+  # 默认 profile = local：克隆即跑 / 本地启动无需手动加 --spring.profiles.active=local。
+  # 仅 dev/local 允许 internal token 缺省 fail-open（见引擎 InternalTokenInterceptor）；
+  # 生产/中间环境必须显式 --spring.profiles.active=prod 并注入 TURBOFEED_INTERNAL_TOKEN，否则启动失败。
+  profiles:
+    default: local
   # ---- P0-5 Nacos 服务发现（ADR-002，严格 opt-in）----
   # enabled 默认 false → 克隆即跑，启动不连任何 Nacos；server-addr 缺省也不发起连接。
   # 多实例部署时置 TURBOFEED_NACOS_ENABLED=true 并给 TURBOFEED_NACOS_SERVER_ADDR，
@@ -21,8 +26,11 @@ spring:
   # DOWN，故下方 management.health.redis.enabled=false 保证整体健康状态不被拉低（克隆即跑）。
   data:
     redis:
-      host: localhost
-      port: 6379
+      # single 模式默认直连本地 tf-redis8-single(127.0.0.1:7599，无口令)，与仓库根 gitignored
+      # application.yml 本地覆盖一致；从任意工作目录启动都能连上，不依赖 file:./ 覆盖。
+      # 改集群请置 TURBOFEED_REDIS_MODE=cluster + TURBOFEED_REDIS_CLUSTER_NODES（CI 即此模式）。
+      host: 127.0.0.1
+      port: 7599
       # 密码外部化：默认空串 = 无密码（受网络隔离保护的 Redis 的常见形态）。
       # 启用带密码的 Redis 时用环境变量注入，绝不把真实密码写进提交到仓库的默认配置。
       # 未注入而 Redis 实际要求鉴权时，命令会直接返回 NOAUTH Authentication required
