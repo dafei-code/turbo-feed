@@ -43,11 +43,15 @@ spring:
     baseline-on-migrate: true
     table: flyway_schema_history_tf
   # Redis（Lettuce，懒连接）：上传用户级限流等轻量 KV；本地未启动 Redis 不影响应用启动，
-  # 但 /actuator/health 中 redis 组件会显示 DOWN（整体状态默认不受其拉低，management 如需忽略可排除）
+  # 但 /actuator/health 中 redis 组件会显示 DOWN（整体状态默认不受其拉低，management 如需忽略可排除）。
+  # ⚠️ single 模式（turbofeed.redis.mode 缺省/显式 single）默认直连本地 tf-redis8-single(127.0.0.1:7599，无口令)，
+  # 与根目录 gitignored application.yml 的本地覆盖保持一致——这样从任意工作目录启动都能连上本地单节点，
+  # 不再依赖 file:./ 的覆盖文件（否则回退到 6379 这种没在跑的端口，RedisMessageListenerContainer 启动订阅即炸）。
+  # 改集群请置 TURBOFEED_REDIS_MODE=cluster + TURBOFEED_REDIS_CLUSTER_NODES（CI 即此模式，不读下面的 host/port）。
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: 127.0.0.1
+      port: 7599
       # 密码外部化：默认空串 = 无密码。启用带密码的 Redis 时用 TURBOFEED_REDIS_PASSWORD 注入，
       # 不把真实密码写进默认配置；未注入而 Redis 要求鉴权时会直接 NOAUTH（不静默降级）。
       password: ${TURBOFEED_REDIS_PASSWORD:}
