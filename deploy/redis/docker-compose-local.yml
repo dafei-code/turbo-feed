@@ -1,0 +1,44 @@
+# =============================================================================
+# 本地永逸 Redis Cluster（方案 B）：单容器 6 进程，announce-ip 全 127.0.0.1
+# -----------------------------------------------------------------------------
+# 为什么能永逸：Mac Docker Desktop 下，多容器集群必须把 cluster-announce-ip 填
+#   宿主机 LAN IP（容器间和宿主→容器才能双向通），而 LAN IP 随 WiFi 漂移必复发。
+#   本方案把 6 个 redis 进程放进【同一个容器】，它们共享该容器的 loopback，
+#   gossip 走容器内 127.0.0.1:170xx（bus 端口无需发布）；客户端端口 7000-7005
+#   发布到宿主 127.0.0.1，网关 cluster-nodes=127.0.0.1:7000-7002 即可。
+#   127.0.0.1 永远不变 → 换 WiFi / 出差零改动，且保留 3 主 3 从集群拓扑。
+#
+# 用法：
+#   export REDIS_PASSWORD=123456     # 与 TURBOFEED_REDIS_PASSWORD 一致（缺省 123456）
+#   docker compose -f deploy/redis/docker-compose-local.yml up -d
+# 校验：
+#   redis-cli -h 127.0.0.1 -p 7000 -a "$REDIS_PASSWORD" cluster info
+#     （期望 cluster_state:ok、cluster_slots_assigned:16384）
+# 拆除：
+#   docker compose -f deploy/redis/docker-compose-local.yml down -v
+#
+# 说明：入口脚本 deploy/redis/redis-local-entrypoint.sh 负责起 6 进程 + 幂等建集群；
+#   数据卷 redis-local-data 持久化 nodes-*.conf，重启自动复用已建集群。
+# =============================================================================
+
+services:
+  redis-local-cluster:
+    image: redis:latest
+    container_name: redis-local-cluster
+    command: ["bash", "/redis-local-entrypoint.sh"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-123456}
+    ports:
+      - "127.0.0.1:7000:7000"
+      - "127.0.0.1:7001:7001"
+      - "127.0.0.1:7002:7002"
+      - "127.0.0.1:7003:7003"
+      - "127.0.0.1:7004:7004"
+      - "127.0.0.1:7005:7005"
+    volumes:
+      - /Volumes/D/workbuddy/turbo-feed/deploy/redis/redis-local-entrypoint.sh:/redis-local-entrypoint.sh:ro
+      - redis-local-data:/data
+    restart: unless-stopped
+
+volumes:
+  redis-local-data:
