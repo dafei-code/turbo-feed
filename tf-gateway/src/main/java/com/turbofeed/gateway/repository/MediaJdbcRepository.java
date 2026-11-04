@@ -1,6 +1,7 @@
 package com.turbofeed.gateway.repository;
 
 import com.turbofeed.gateway.service.query.MediaItem;
+import com.turbofeed.gateway.service.query.MediaUrlResolver;
 import com.turbofeed.gateway.service.review.MediaStatus;
 import com.turbofeed.shared.caption.CaptionTagParser;
 import lombok.RequiredArgsConstructor;
@@ -61,6 +62,8 @@ import java.util.Set;
 public class MediaJdbcRepository {
 
     private final JdbcTemplate jdbcTemplate;
+    /** 展示侧 URL 解析（minio→现签预签名 / 否则→公网基址），避免把库中过期的预签名 URL 直发出去。 */
+    private final MediaUrlResolver urlResolver;
 
     /** 帖代表行的判定条件：帖内序号为 0 的行（历史单图行取默认值 0，同样命中）。 */
     private static final String REPRESENTATIVE_CONDITION = "seq = 0";
@@ -92,9 +95,10 @@ public class MediaJdbcRepository {
             return postId == null || postId.isBlank() ? mediaId : postId;
         }
 
-        MediaItem toItem() {
-            // 行级视图：images 仅含自身（真正的帖内图片由聚合阶段补齐）
-            return new MediaItem(postId, mediaId, url, List.of(url), seq, status, createdAt, caption, captionMark,
+        MediaItem toItem(String displayUrl) {
+            // 行级视图：images 仅含自身（真正的帖内图片由聚合阶段补齐）。
+            // displayUrl 由展示侧解析器现签（minio 私有桶→预签名），不直出库里可能已过期的 url。
+            return new MediaItem(postId, mediaId, displayUrl, List.of(displayUrl), seq, status, createdAt, caption, captionMark,
                     CaptionTagParser.parse(caption), 0L, 0L, false);
         }
     }
@@ -391,7 +395,7 @@ public class MediaJdbcRepository {
         List<MediaRow> rows = jdbcTemplate.query(
                 "SELECT " + ROW_COLUMNS + " FROM media WHERE media_id = ? AND user_id = ?",
                 ROW_MAPPER, mediaId, userId);
-        return rows.isEmpty() ? null : rows.get(0).toItem();
+        return rows.isEmpty() ? null : rows.get(0).toItem(urlResolver.resolve(rows.get(0).mediaId()));
     }
 
     /**
@@ -410,7 +414,7 @@ public class MediaJdbcRepository {
                 ROW_MAPPER, userId, postId);
         List<MediaItem> items = new ArrayList<>(rows.size());
         for (MediaRow r : rows) {
-            items.add(r.toItem());
+            items.add(r.toItem(urlResolver.resolve(r.mediaId())));
         }
         return items;
     }
@@ -452,7 +456,8 @@ public class MediaJdbcRepository {
                         rs.getString("media_id"),
                         rs.getLong("user_id"),
                         toStatus(rs.getInt("status")),
-                        rs.getString("url")),
+                        // 现签（minio 私有桶→预签名），避免给 AI 机审/复审下发过期 URL 拉不到图
+                        urlResolver.resolve(rs.getString("media_id"))),
                 postId);
         return rows.isEmpty() ? null : rows.get(0);
     }
@@ -537,17 +542,24 @@ public class MediaJdbcRepository {
             return List.of();
         }
         List<String> postIds = collectPostIds(representatives, userId);
-        Map<String, List<String>> imagesByPost = postIds.isEmpty()
+        Map<String, List<String>> mediaIdsByPost = postIds.isEmpty()
                 ? Map.of()
-                : fetchImages(postIds, userId);
+                : fetchMediaIds(postIds, userId);
 
         List<MediaItem> posts = new ArrayList<>(representatives.size());
         for (MediaRow r : representatives) {
-            List<String> images = imagesByPost.get(r.key());
-            if (images == null || images.isEmpty()) {
-                images = r.url() == null ? List.of() : List.of(r.url());
+            List<String> ids = mediaIdsByPost.get(r.key());
+            // 封面与每张图都由展示侧解析器现签（minio 私有桶→预签名），不直出库里可能已过期的 url
+            String cover = urlResolver.resolve(r.mediaId());
+            List<String> images;
+            if (ids == null || ids.isEmpty()) {
+                // 历史单图行（无 post_id）：回退为自身封面
+                images = cover == null ? List.of() : List.of(cover);
+            } else {
+                // 帖内图片按 seq 升序，逐张现签
+                images = ids.stream().map(urlResolver::resolve).toList();
             }
-            posts.add(new MediaItem(r.postId(), r.mediaId(), r.url(), images, r.seq(),
+            posts.add(new MediaItem(r.postId(), r.mediaId(), cover, images, r.seq(),
                     r.status(), r.createdAt(), r.caption(), r.captionMark(),
                     CaptionTagParser.parse(r.caption()), 0L, 0L, false));
         }
@@ -579,8 +591,8 @@ public class MediaJdbcRepository {
         return limited.size() > 200 ? limited.subList(0, 200) : limited;
     }
 
-    /** 按 post_id 集合取回帖内全部图片 URL（按 seq 升序），结果为 postKey → images。 */
-    private Map<String, List<String>> fetchImages(List<String> postIds, Long userId) {
+    /** 按 post_id 集合取回帖内全部媒体对象名（按 seq 升序），结果为 postKey → mediaIds。 */
+    private Map<String, List<String>> fetchMediaIds(List<String> postIds, Long userId) {
         StringBuilder in = new StringBuilder();
         for (int i = 0; i < postIds.size(); i++) {
             in.append(i == 0 ? "?" : ", ?");
@@ -588,11 +600,11 @@ public class MediaJdbcRepository {
         List<Object> args = new ArrayList<>();
         String sql;
         if (userId != null) {
-            sql = "SELECT post_id, url FROM media WHERE user_id = ? AND post_id IN (" + in + ") "
+            sql = "SELECT post_id, media_id FROM media WHERE user_id = ? AND post_id IN (" + in + ") "
                     + "ORDER BY post_id, seq ASC";
             args.add(userId);
         } else {
-            sql = "SELECT post_id, url FROM media WHERE post_id IN (" + in + ") "
+            sql = "SELECT post_id, media_id FROM media WHERE post_id IN (" + in + ") "
                     + "ORDER BY post_id, seq ASC";
         }
         args.addAll(postIds);
@@ -600,9 +612,9 @@ public class MediaJdbcRepository {
         Map<String, List<String>> result = new LinkedHashMap<>();
         jdbcTemplate.query(sql, rs -> {
             String postId = rs.getString("post_id");
-            String url = rs.getString("url");
-            if (postId != null && !postId.isBlank() && url != null) {
-                result.computeIfAbsent(postId, k -> new ArrayList<>()).add(url);
+            String mediaId = rs.getString("media_id");
+            if (postId != null && !postId.isBlank() && mediaId != null) {
+                result.computeIfAbsent(postId, k -> new ArrayList<>()).add(mediaId);
             }
         }, args.toArray());
         return result;

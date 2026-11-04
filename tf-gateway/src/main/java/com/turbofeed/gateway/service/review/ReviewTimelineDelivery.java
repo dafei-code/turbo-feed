@@ -9,6 +9,7 @@ import com.turbofeed.gateway.service.event.outbox.OutboxService;
 import com.turbofeed.gateway.service.event.outbox.TimelineAppendPayload;
 import com.turbofeed.gateway.service.event.outbox.TimelineRemovePayload;
 import com.turbofeed.gateway.service.query.MediaItem;
+import com.turbofeed.gateway.service.query.MediaUrlResolver;
 import com.turbofeed.shared.caption.CaptionTagParser;
 import com.turbofeed.shared.redis.RedisKeys;
 import com.turbofeed.shared.result.ErrorCode;
@@ -42,15 +43,19 @@ public class ReviewTimelineDelivery {
     private final MediaTagJdbcRepository mediaTagRepository;
     private final StringRedisTemplate redisTemplate;
     private final OutboxService outboxService;
+    /** 展示侧 URL 解析（minio→现签预签名），用于把帖物化进公域时间线时签发新鲜可访问地址。 */
+    private final MediaUrlResolver urlResolver;
 
     public ReviewTimelineDelivery(MediaJdbcRepository mediaRepository,
                                   MediaTagJdbcRepository mediaTagRepository,
                                   StringRedisTemplate redisTemplate,
-                                  OutboxService outboxService) {
+                                  OutboxService outboxService,
+                                  MediaUrlResolver urlResolver) {
         this.mediaRepository = mediaRepository;
         this.mediaTagRepository = mediaTagRepository;
         this.redisTemplate = redisTemplate;
         this.outboxService = outboxService;
+        this.urlResolver = urlResolver;
     }
 
     /**
@@ -59,10 +64,13 @@ public class ReviewTimelineDelivery {
      * <p>描述与图片列表随事件透传而非回查 DB：审核发布是热路径，避免为拿 caption 与 images
      * 多两轮分片查询；事件与首落库携带同一份数据，物化结果与库中一致，Feed 直接可展示。</p>
      */
-    static MediaItem toTimelinePost(MediaUploadedEvent event) {
+    MediaItem toTimelinePost(MediaUploadedEvent event) {
         String representativeId = event.representativeMediaId();
-        String cover = event.urls().isEmpty() ? null : event.urls().get(0);
-        return new MediaItem(event.postId(), representativeId, cover, event.urls(), 0,
+        List<String> mediaIds = event.mediaIds() == null ? List.of() : event.mediaIds();
+        // 现签：按 mediaId 重新生成预签名 GET，避免把上传时刻的过期预签名写进公域时间线
+        List<String> images = mediaIds.stream().map(urlResolver::resolve).toList();
+        String cover = images.isEmpty() ? null : images.get(0);
+        return new MediaItem(event.postId(), representativeId, cover, images, 0,
                 MediaStatus.APPROVED, event.occurredAt(), event.caption(), event.captionMark(),
                 CaptionTagParser.parse(event.caption()), 0L, 0L, false);
     }
