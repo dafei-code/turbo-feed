@@ -6,6 +6,7 @@ import com.turbofeed.gateway.service.event.outbox.OutboxEventType;
 import com.turbofeed.gateway.service.event.outbox.OutboxService;
 import com.turbofeed.gateway.service.event.outbox.TimelineAppendPayload;
 import com.turbofeed.gateway.service.query.MediaItem;
+import com.turbofeed.gateway.service.query.MediaUrlResolver;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -34,10 +35,11 @@ class ReviewTimelineDeliveryTest {
     @Mock MediaTagJdbcRepository mediaTagRepository;
     @Mock StringRedisTemplate redisTemplate;
     @Mock OutboxService outboxService;
+    @Mock MediaUrlResolver urlResolver;
     @Captor ArgumentCaptor<Set<String>> keysCaptor;
 
     private ReviewTimelineDelivery delivery() {
-        return new ReviewTimelineDelivery(mediaRepository, mediaTagRepository, redisTemplate, outboxService);
+        return new ReviewTimelineDelivery(mediaRepository, mediaTagRepository, redisTemplate, outboxService, urlResolver);
     }
 
     @Test
