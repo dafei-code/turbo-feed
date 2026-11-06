@@ -3,6 +3,8 @@ package com.turbofeed.gateway.service.moderation;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import com.turbofeed.gateway.service.penalty.ViolationSeverity;
+
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -57,6 +59,28 @@ public class ContentSecurityProperties {
 
     /** 未在 {@link #categoryActions} 中列出的分类的处置动作。 */
     private ModerationAction defaultAction = ModerationAction.BLOCK;
+
+    /**
+     * REVIEW 裁定是否向引擎发降权信号（{@code tf:mod:media=MONITOR}）。
+     *
+     * <p>默认开：先发后审期间内容限公域，避免审核窗口内被全量推荐。
+     * 关闭即回退到「只建人审任务、不接引擎」，零行为回归。</p>
+     */
+    private boolean reviewPublishSignal = true;
+
+    /**
+     * LIMIT 裁定是否向引擎发降权信号（{@code tf:mod:media=MONITOR}）。
+     *
+     * <p>默认开：边界敏感描述/评论（LIMIT 级）被降权或限公域，而非全量推荐。
+     * 关闭即回退到「LIMIT 无任何下游动作」（旧行为），用于灰度或紧急止血。</p>
+     */
+    private boolean limitPublishSignal = true;
+
+    /** LIMIT 裁定映射的违规严重度（默认 {@link ViolationSeverity#LOW}：软降权、不扣分）。 */
+    private ViolationSeverity defaultLimitSeverity = ViolationSeverity.LOW;
+
+    /** REVIEW 裁定映射的违规严重度（默认 {@link ViolationSeverity#MID}：待人审的边界内容，比 LIMIT 重一档）。 */
+    private ViolationSeverity defaultReviewSeverity = ViolationSeverity.MID;
 
     private static Map<ContentScene, Integer> defaultSceneMaxLength() {
         Map<ContentScene, Integer> m = new EnumMap<>(ContentScene.class);
@@ -211,5 +235,37 @@ public class ContentSecurityProperties {
 
     public void setDefaultAction(ModerationAction defaultAction) {
         this.defaultAction = defaultAction;
+    }
+
+    public boolean isReviewPublishSignal() {
+        return reviewPublishSignal;
+    }
+
+    public void setReviewPublishSignal(boolean reviewPublishSignal) {
+        this.reviewPublishSignal = reviewPublishSignal;
+    }
+
+    public boolean isLimitPublishSignal() {
+        return limitPublishSignal;
+    }
+
+    public void setLimitPublishSignal(boolean limitPublishSignal) {
+        this.limitPublishSignal = limitPublishSignal;
+    }
+
+    public ViolationSeverity getDefaultLimitSeverity() {
+        return defaultLimitSeverity;
+    }
+
+    public void setDefaultLimitSeverity(ViolationSeverity defaultLimitSeverity) {
+        this.defaultLimitSeverity = defaultLimitSeverity;
+    }
+
+    public ViolationSeverity getDefaultReviewSeverity() {
+        return defaultReviewSeverity;
+    }
+
+    public void setDefaultReviewSeverity(ViolationSeverity defaultReviewSeverity) {
+        this.defaultReviewSeverity = defaultReviewSeverity;
     }
 }

@@ -19,6 +19,7 @@ import com.turbofeed.gateway.service.moderation.ContentScene;
 import com.turbofeed.gateway.service.moderation.ContentSecurityService;
 import com.turbofeed.gateway.service.moderation.ContentVerdict;
 import com.turbofeed.gateway.service.moderation.ModerationAction;
+import com.turbofeed.gateway.service.signal.ModerationDownstreamRouter;
 import com.turbofeed.gateway.service.penalty.PenaltyService;
 import com.turbofeed.gateway.service.health.AccountHealth;
 import com.turbofeed.gateway.service.health.AccountHealthService;
@@ -127,6 +128,8 @@ public class MediaUploadService {
     private final AccountCreditService accountCreditService;
     /** 复审任务仓储（#8 落 RISK_TIERED 任务）。 */
     private final ReviewTaskRepository reviewTaskRepository;
+    /** 内容级 REVIEW/LIMIT → 引擎降权信号路由（P1 接通下游：先发后审限公域 + LIMIT 降权）。 */
+    private final ModerationDownstreamRouter moderationDownstreamRouter;
     /** 审核域配置（{@code turbofeed.media.review}）：与上传/存储配置分离，见 {@link ReviewProperties}。 */
     private final ReviewProperties reviewProperties;
 
@@ -159,6 +162,7 @@ public class MediaUploadService {
                               RiskScorer riskScorer,
                               AccountCreditService accountCreditService,
                               ReviewTaskRepository reviewTaskRepository,
+                              ModerationDownstreamRouter moderationDownstreamRouter,
                               ReviewProperties reviewProperties) {
         this.properties = properties;
         this.storageClient = storageClient;
@@ -181,6 +185,7 @@ public class MediaUploadService {
         this.riskScorer = riskScorer;
         this.accountCreditService = accountCreditService;
         this.reviewTaskRepository = reviewTaskRepository;
+        this.moderationDownstreamRouter = moderationDownstreamRouter;
         this.reviewProperties = reviewProperties;
     }
 
@@ -321,6 +326,9 @@ public class MediaUploadService {
                     log.warn("敏感词REVIEW建任务失败(fail-open): mediaId={}, {}", mediaIds.get(0), e.getMessage());
                 }
             }
+            // P1：接通下游——内容级 REVIEW/LIMIT 向引擎发降权信号（MONITOR，限公域/降权）。
+            // REVIEW 已建人审任务（上面）；LIMIT 无任务、仅降权。信号 fail-open，不影响受理。
+            moderationDownstreamRouter.routeContentVerdict(postId, captionVerdict);
         } catch (RuntimeException e) {
             // 中途失败：清掉本批已落库的残行与已上传的对象，绝不留半成品帖（见类注释）
             cleanupPartialPost(uid, postId, mediaIds);
@@ -785,5 +793,9 @@ public class MediaUploadService {
                 log.warn("描述修改REVIEW建任务失败(fail-open): mediaId={}, {}", mediaId, e.getMessage());
             }
         }
+        // P1：接通下游——改描述 REVIEW/LIMIT 向引擎发降权信号（MONITOR）。
+        // 描述按帖级，信号 key 用 postId；mediaId 反查不到 postId 时跳过（fail-open）。
+        moderationDownstreamRouter.routeContentVerdict(
+                mediaRepository.findPostId(mediaId, Long.parseLong(userId)), verdict);
     }
 }
