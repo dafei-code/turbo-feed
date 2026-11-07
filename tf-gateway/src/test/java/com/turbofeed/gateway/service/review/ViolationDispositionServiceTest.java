@@ -89,4 +89,48 @@ class ViolationDispositionServiceTest {
         verify(accountCreditService, never()).onViolationConfirmed(anyLong());
         verify(penaltyService, never()).recordViolation(anyLong(), any(), any(), any(), any(), any(), any());
     }
+
+    // ---- ADR-0014：DEMOTE 防御分支与解除闭环 ----
+
+    @Test
+    void applyDisposition_demote_onlyWritesSignal_neverPenalizes() {
+        String mediaId = "media/42/abc.jpg";
+        long authorId = 42L;
+        when(mediaRepository.findPostId(mediaId, authorId)).thenReturn("post/42");
+        when(dispositionPolicy.resolve(ViolationSource.HUMAN_REPORT, ViolationSeverity.LOW))
+                .thenReturn(Disposition.DEMOTE);
+
+        int rows = service().applyDisposition(mediaId, authorId, ViolationSource.HUMAN_REPORT, "SYSTEM",
+                "配置矩阵显式配 DEMOTE", ViolationSeverity.LOW);
+
+        assertEquals(1, rows);
+        verify(moderationSignalService).publishMediaDisposition(eq("post/42"), eq(Disposition.DEMOTE),
+                eq(ViolationSeverity.LOW), eq(ViolationSource.HUMAN_REPORT));
+        // 内容级轻降权不是「确认违规」：若漏了这个分支就会误走 takeDownAndPenalize 直接下架
+        verify(accountHealthService, never()).recordViolation(anyLong(), any());
+        verify(moderationSignalService, never()).publishAccountHealth(anyLong(), anyInt(), anyString());
+        verify(delivery, never()).removeFromTimeline(anyString(), anyLong());
+        verify(mediaRepository, never()).updateStatusCas(anyString(), anyLong(), any(), any());
+        verify(accountCreditService, never()).onViolationConfirmed(anyLong());
+        verify(penaltyService, never()).recordViolation(anyLong(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void clearContentSignal_resolvesPostIdAndClears() {
+        when(mediaRepository.findPostId("media/42/abc.jpg", 42L)).thenReturn("post/42");
+
+        service().clearContentSignal("media/42/abc.jpg", 42L);
+
+        verify(moderationSignalService).clearMediaDisposition("post/42");
+    }
+
+    @Test
+    void clearContentSignal_blankPostId_doesNotClear() {
+        // 历史单图帖 post_id='' 无法形成稳定信号键，宁可不解除也不误删前缀键
+        when(mediaRepository.findPostId("media/42/abc.jpg", 42L)).thenReturn("");
+
+        service().clearContentSignal("media/42/abc.jpg", 42L);
+
+        verify(moderationSignalService, never()).clearMediaDisposition(any());
+    }
 }

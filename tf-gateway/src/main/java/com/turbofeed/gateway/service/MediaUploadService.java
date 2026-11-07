@@ -128,7 +128,7 @@ public class MediaUploadService {
     private final AccountCreditService accountCreditService;
     /** 复审任务仓储（#8 落 RISK_TIERED 任务）。 */
     private final ReviewTaskRepository reviewTaskRepository;
-    /** 内容级 REVIEW/LIMIT → 引擎降权信号路由（P1 接通下游：先发后审限公域 + LIMIT 降权）。 */
+    /** 内容级裁定 → 引擎信号路由（ADR-0014：REVIEW=MONITOR 公域隔离 / LIMIT=DEMOTE 轻降权）。 */
     private final ModerationDownstreamRouter moderationDownstreamRouter;
     /** 审核域配置（{@code turbofeed.media.review}）：与上传/存储配置分离，见 {@link ReviewProperties}。 */
     private final ReviewProperties reviewProperties;
@@ -288,8 +288,9 @@ public class MediaUploadService {
 
         // 描述/标题：抖音式文案（@用户 / #话题 / [image:idx:filename]）。
         // 长度上限 + 敏感词统一走内容安全入口（场景 CAPTION）。
-        // P1：接住裁定——BLOCK 已在 requireClean 内抛异常；REVIEW 放行但需建人审任务；
-        // LIMIT 放行（上传内容本就 PENDING 待审，LIMIT 的降权由引擎侧推荐排序处理）。
+        // 接住裁定（ADR-0014）：BLOCK 已在 requireClean 内抛异常；
+        // REVIEW 放行但建人审任务 + 发 MONITOR 公域隔离（人审判无违规时解除）；
+        // LIMIT 放行且发 DEMOTE 轻降权——内容仍可进公域/被搜索/播放，仅精排降权。
         String rawCaption = caption == null ? "" : caption;
         ContentVerdict captionVerdict = contentSecurityService.requireClean(ContentScene.CAPTION, rawCaption, uid);
         CaptionMarkParser.ParseResult captionMark = captionMarkParser.parse(rawCaption);
@@ -326,8 +327,9 @@ public class MediaUploadService {
                     log.warn("敏感词REVIEW建任务失败(fail-open): mediaId={}, {}", mediaIds.get(0), e.getMessage());
                 }
             }
-            // P1：接通下游——内容级 REVIEW/LIMIT 向引擎发降权信号（MONITOR，限公域/降权）。
-            // REVIEW 已建人审任务（上面）；LIMIT 无任务、仅降权。信号 fail-open，不影响受理。
+            // 接通下游（ADR-0014）：REVIEW=MONITOR 公域隔离 / LIMIT=DEMOTE 轻降权。
+            // REVIEW 已建人审任务（上面），判无违规时由 MediaReviewService 解除 MONITOR；
+            // LIMIT 无任务，改描述裁定 PASS 时解除 DEMOTE。信号 fail-open，不影响受理。
             moderationDownstreamRouter.routeContentVerdict(postId, captionVerdict);
         } catch (RuntimeException e) {
             // 中途失败：清掉本批已落库的残行与已上传的对象，绝不留半成品帖（见类注释）
@@ -462,8 +464,9 @@ public class MediaUploadService {
             }
 
             String rawCaption = request != null && request.caption() != null ? request.caption() : "";
-            // P1：接住裁定——BLOCK 已抛异常；REVIEW/LIMIT 放行并记日志。
-            // presign 阶段尚无 mediaId，REVIEW 任务由 complete 阶段的 riskRoute 人审队列覆盖。
+            // 接住裁定——BLOCK 已抛异常；REVIEW/LIMIT 放行并记日志。
+            // presign 阶段尚无 mediaId，此处只作「门禁」；REVIEW/LIMIT 的引擎信号在 complete
+            // 阶段（postId 已生成且 claim 幂等）统一发出，见 ADR-0014。
             ContentVerdict presignVerdict = contentSecurityService.requireClean(ContentScene.CAPTION, rawCaption, Long.parseLong(userId));
             if (presignVerdict.requiresFollowUp()) {
                 log.info("presign描述敏感词裁定需后续治理(将由complete阶段riskRoute覆盖): action={}, word={}, category={}, userId={}",
@@ -576,6 +579,19 @@ public class MediaUploadService {
 
             // 直传任务收尾：释放 presign 阶段持有的并发占位锁（key 由 userId 决定、幂等删除，TTL 仍兜底）。
             concurrentUploadValidator.releaseInflight(userId);
+            // ADR-0014：presign 阶段只做了「拦不拦」的门禁（requireClean），并没有把 REVIEW/LIMIT
+            // 裁定接到引擎信号；而前端主路径正是预签名直传，漏这一处等于 DEMOTE/MONITOR 只在旧的
+            // upload 路径生效。complete 时 postId 已确定、claim 已保证幂等，这里用纯检测重算一次裁定并路由。
+            // 刻意用 check（不抛异常）而非 requireClean：BLOCK 已在 presign 被拒；即便词库在两次调用间
+            // 变更导致这里判 BLOCK，router 也不发信号，保持 fail-open，不影响受理。
+            try {
+                ContentVerdict captionVerdict = contentSecurityService.check(
+                        ContentScene.CAPTION, reservation.caption(), Long.parseLong(userId));
+                moderationDownstreamRouter.routeContentVerdict(postId, captionVerdict);
+            } catch (Exception e) {
+                // fail-open：安全门禁已在 presign 完成，此处失败最多漏发一条加速副本信号
+                log.warn("直传描述裁定复算失败(fail-open，不影响受理): postId={}, {}", postId, e.getMessage());
+            }
             uploadFinalizer.finalizeAsync(reservation);
         } catch (RuntimeException e) {
             // 复核失败（大小/格式不符）已 discard 对象；占位锁仍须释放，避免同用户被「进行中」误拒。
@@ -780,7 +796,7 @@ public class MediaUploadService {
     public void updateCaption(String mediaId, String userId, String caption) {
         requireWritable(Long.parseLong(userId));
         String raw = caption == null ? "" : caption;
-        // P1：接住裁定——REVIEW 建人审任务（内容已修改，需复核新描述）
+        // 接住裁定——REVIEW 建人审任务（内容已修改，需复核新描述）
         ContentVerdict verdict = contentSecurityService.requireClean(ContentScene.CAPTION, raw, Long.parseLong(userId));
         CaptionMarkParser.ParseResult pr = captionMarkParser.parse(raw);
         mediaRepository.updateCaption(mediaId, Long.parseLong(userId), raw, pr.markJson());
@@ -793,9 +809,11 @@ public class MediaUploadService {
                 log.warn("描述修改REVIEW建任务失败(fail-open): mediaId={}, {}", mediaId, e.getMessage());
             }
         }
-        // P1：接通下游——改描述 REVIEW/LIMIT 向引擎发降权信号（MONITOR）。
-        // 描述按帖级，信号 key 用 postId；mediaId 反查不到 postId 时跳过（fail-open）。
-        moderationDownstreamRouter.routeContentVerdict(
-                mediaRepository.findPostId(mediaId, Long.parseLong(userId)), verdict);
+        // 接通下游（ADR-0014）：描述按帖级，信号 key 用 postId；mediaId 反查不到 postId 时跳过（fail-open）。
+        // 改描述必须走 routeCaptionUpdate（只升级不降级），不能复用上传路径的 routeContentVerdict：
+        // 帖上可能已有人审隔离(MONITOR)/下架(INTERCEPT)，直接覆盖会让作者改一次文案就绕过处置。
+        // PASS 时该入口只条件解除 DEMOTE 轻降权，MONITOR/INTERCEPT 留给对应流程解除。
+        String postId = mediaRepository.findPostId(mediaId, Long.parseLong(userId));
+        moderationDownstreamRouter.routeCaptionUpdate(postId, verdict);
     }
 }

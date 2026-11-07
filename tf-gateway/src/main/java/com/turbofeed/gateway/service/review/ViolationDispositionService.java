@@ -78,27 +78,69 @@ public class ViolationDispositionService {
      * 仅有 LOW 命中或运维在 {@code disposition-matrix} 显式配置的来源:严重度会被降级为
      * {@link Disposition#MONITOR}（限公域/仅自己可见，不下架不扣分）。</p>
      *
+     * <p><b>ADR-0014</b>：矩阵若被显式配成 {@link Disposition#DEMOTE}，走「只写内容信号」的
+     * 轻降权分支——不扣健康分、不摘时间线、不落处罚；否则会被误当成 INTERCEPT 下架。
+     * DEMOTE 不是默认矩阵的产物，因此不影响任何既有违规路径。</p>
+     *
      * @return 受影响行数（MONITOR 软处置恒返回 1；INTERCEPT 的语义见 {@link #takeDownAndPenalize}）
      */
     int applyDisposition(String mediaId, long authorId, ViolationSource source,
                          String operator, String reason, ViolationSeverity severity) {
+        Disposition d = dispositionPolicy.resolve(source, severity);
+        // P2-1：把「内容处置」写成外供 KV（INTERCEPT/MONITOR/DEMOTE 都写）。
+        String postId = mediaRepository.findPostId(mediaId, authorId);
+        moderationSignalService.publishMediaDisposition(postId, d, severity, source);
+        // 异常行为日志（P2-2）：处置行为归内容作者，供 P2-1 信号闭环来源（fail-open，不影响主流程）
+        behaviorLogService.record(authorId, mediaId, "DISPOSITION", "severity=" + severity + ",source=" + source + ",action=" + d);
+
+        // ADR-0014 防御分支：DEMOTE 是「内容级轻降权」，不是「确认违规」。
+        // 默认处置矩阵不产出 DEMOTE，但运维可在 disposition-matrix 里显式配置；若不在此拦截，
+        // 会落进下面的 takeDownAndPenalize → 把一条只需降权的内容直接下架+扣分+落处罚。
+        // 这里只保留上面已写的内容信号：不扣健康分/信用、不摘时间线、不落处罚。
+        if (d == Disposition.DEMOTE) {
+            log.info("梯度处置 DEMOTE（内容级轻降权，不扣分不下架）: mediaId={}, source={}, reason={}",
+                    mediaId, source, reason);
+            return 1;
+        }
+
         // P0-b：确认违规 → 扣健康分（MONITOR/INTERCEPT 都走这里，二者都是已确认违规）。
         // 与信用扣分、落处罚同触发点；三通道解耦，互不影响。
         int newScore = accountHealthService.recordViolation(authorId, severity);
         // P2-1：把「账号健康分」写成外供 KV（刷新式，上游推荐据此降权/过滤）。
         moderationSignalService.publishAccountHealth(authorId, newScore, healthTier(newScore));
-
-        Disposition d = dispositionPolicy.resolve(source, severity);
-        // P2-1：把「内容处置」写成外供 KV（MONITOR/INTERCEPT 都写，二者都是已确认违规）。
-        String postId = mediaRepository.findPostId(mediaId, authorId);
-        moderationSignalService.publishMediaDisposition(postId, d, severity, source);
-        // 异常行为日志（P2-2）：处置行为归内容作者，供 P2-1 信号闭环来源（fail-open，不影响主流程）
-        behaviorLogService.record(authorId, mediaId, "DISPOSITION", "severity=" + severity + ",source=" + source + ",action=" + d);
         if (d == Disposition.MONITOR) {
             return softLimit(mediaId, authorId, source, reason);
         }
         // INTERCEPT（默认）：原有「下架+扣信用+落处罚」，行为不变。
         return takeDownAndPenalize(mediaId, authorId, source, operator, reason, severity);
+    }
+
+    /**
+     * 解除该帖的内容级处置信号（ADR-0014 解除闭环）。
+     *
+     * <p>由 {@code MediaReviewService#decideReviewTask} 在 {@code CONTENT_REVIEW} 人审
+     * <b>判无违规</b>时调用。REVIEW 上传时写的 MONITOR 若不清，会在 KV 默认 30 天 TTL 内
+     * 一直被引擎召回层和搜索层硬剔除——表现为「人审通过了，内容却依然搜不到、进不了推荐」。</p>
+     *
+     * <p><b>为什么放在本服务而不是门面直接调信号服务</b>：门面
+     * {@code MediaReviewService} 已被多个单测手动 {@code new}（19 参构造），再加一个依赖
+     * 会让所有测试构造器编译断裂。本服务原本就持有 {@link ModerationSignalService} 与
+     * {@code mediaRepository}，复用它们即可做到<b>零构造器变更</b>。</p>
+     *
+     * <p>fail-open：反查或删除异常只记日志不抛，不影响人审结论落库；
+     * postId 为空（历史单图帖 {@code post_id=''}）直接跳过，避免误删同名前缀键。</p>
+     */
+    public void clearContentSignal(String mediaId, long authorId) {
+        try {
+            String postId = mediaRepository.findPostId(mediaId, authorId);
+            if (postId == null || postId.isBlank()) {
+                return;
+            }
+            moderationSignalService.clearMediaDisposition(postId);
+            log.info("人审判无违规→解除内容处置信号: mediaId={}, postId={}", mediaId, postId);
+        } catch (Exception e) {
+            log.warn("解除内容处置信号失败（fail-open，不影响人审结论）: mediaId={}, {}", mediaId, e.getMessage());
+        }
     }
 
     /** P2-1 健康分梯级（与 P0-b 阶梯一致，给上游推荐直接判定用）：NORMAL 正常 / DEMOTE 降权 / RESTRICT_SUBMIT 限投稿 / RESTRICT_MONETIZE 限变现 / BANNED 封禁。 */

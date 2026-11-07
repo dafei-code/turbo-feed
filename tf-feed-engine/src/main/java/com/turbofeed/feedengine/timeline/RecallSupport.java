@@ -208,6 +208,21 @@ public class RecallSupport {
                 healthScale = cached;
             }
         }
+        // ADR-0014 内容级轻降权：与作者级完全对称，按 timelineKey 懒读 tf:mod:media 并按本页缓存。
+        // DEMOTE 不进召回过滤集（那是 INTERCEPT/MONITOR 的事），只在精排乘 contentDemoteScale；
+        // 懒读而非批量预取，保证召回通道内部排序与池内切片排序都吃到同一系数。
+        double contentScale = 1.0d;
+        if (moderationProperties.isEnableContentDemotion()) {
+            String tk = s.item().timelineKey();
+            if (tk != null) {
+                Double cachedContent = ctx.contentDemotionCache.get(tk);
+                if (cachedContent == null) {
+                    cachedContent = reviewSignalClient.contentDemotionScaleOf(tk);
+                    ctx.contentDemotionCache.put(tk, cachedContent);
+                }
+                contentScale = cachedContent;
+            }
+        }
         // 实时特征匹配（抖音式「实时特征流」）。
         double realtimeMatch = 0d;
         if (ctx.realtimeProfile != null && !ctx.realtimeProfile.isEmpty()) {
@@ -230,7 +245,8 @@ public class RecallSupport {
                 shortTermScore,
                 sessionMatch,
                 matchesNegative(s.item(), ctx.negative),
-                healthScale,
+                // 审核综合降权系数 = 作者级 × 内容级；二者各自 fail-open（无信号时恒 1.0）
+                healthScale * contentScale,
                 realtimeMatch));
     }
 

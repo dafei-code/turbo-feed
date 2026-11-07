@@ -374,6 +374,9 @@ public class MediaReviewService {
      *
      * <p>违规→整帖 TAKEN_DOWN + 扣信用 + 落处罚（与高危举报同处置力度）；无违规→维持发布。
      * 无论哪种，都一并清理该 media 的全部待处理举报与待复审任务。</p>
+     *
+     * <p><b>ADR-0014</b>：无违规且任务类型为 {@code CONTENT_REVIEW} 时，额外解除该帖的
+     * 内容级处置信号（上传 REVIEW 时写的 MONITOR 公域隔离），否则信号会留到 TTL 到期。</p>
      */
     @Transactional(rollbackFor = Exception.class)
     public void decideReviewTask(long taskId, boolean takedown, String resolver) {
@@ -401,7 +404,16 @@ public class MediaReviewService {
         } else {
             reviewTaskRepository.resolveAllForMedia(mediaId, ReviewTask.STATUS_RESOLVED, resolver);
             reportRepository.resolve(mediaId, false);
-            log.info("复审任务判定无违规，维持发布: taskId={}, mediaId={}, resolver={}", taskId, mediaId, resolver);
+            // ADR-0014 解除闭环：CONTENT_REVIEW 是敏感词 REVIEW 上传时建的人审任务，当时同步写了
+            // tf:mod:media=MONITOR（公域隔离）。判无违规必须解除该信号，否则默认 30 天 TTL 内
+            // 内容一直被引擎召回层与搜索层硬剔除——表现为「人审通过了却依然搜不到、进不了推荐」。
+            // 其它任务类型（举报累计/热度/晋级复扫/风险分档）不在此清：它们对应举报处置链路，
+            // 贸然删除会误清 INTERCEPT 下架信号。自动审核 APPROVED 也不清（先发后审仍需隔离）。
+            if (ReviewTask.TYPE_CONTENT_REVIEW.equals(task.taskType())) {
+                disposition.clearContentSignal(mediaId, authorId);
+            }
+            log.info("复审任务判定无违规，维持发布: taskId={}, mediaId={}, taskType={}, resolver={}",
+                    taskId, mediaId, task.taskType(), resolver);
         }
         // P1 #131：复审处置后回写举报人信用（成立加分 / 驳回扣分）
         for (long uid : reporters) {

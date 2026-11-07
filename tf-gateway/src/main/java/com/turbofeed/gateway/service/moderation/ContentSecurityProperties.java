@@ -61,22 +61,29 @@ public class ContentSecurityProperties {
     private ModerationAction defaultAction = ModerationAction.BLOCK;
 
     /**
-     * REVIEW 裁定是否向引擎发降权信号（{@code tf:mod:media=MONITOR}）。
+     * REVIEW 裁定是否向引擎发隔离信号（{@code tf:mod:media.action=MONITOR}）。
      *
-     * <p>默认开：先发后审期间内容限公域，避免审核窗口内被全量推荐。
-     * 关闭即回退到「只建人审任务、不接引擎」，零行为回归。</p>
+     * <p><b>注意这不是「降权」而是「公域隔离」</b>：引擎召回层与搜索层都会把 MONITOR 内容
+     * <b>硬剔除</b>。默认开是为了先发后审期间不让待复核内容进公域发现流。
+     * 该信号必须由 {@code CONTENT_REVIEW} 人审判无违规（或改描述后裁定 PASS）显式解除，
+     * 否则会随 KV 默认 30 天 TTL 一直挡着——见 ADR-0014 的信号解除闭环。</p>
+     *
+     * <p>关闭即回退到「只建人审任务、不接引擎」，用于灰度与紧急止血。</p>
      */
     private boolean reviewPublishSignal = true;
 
     /**
-     * LIMIT 裁定是否向引擎发降权信号（{@code tf:mod:media=MONITOR}）。
+     * LIMIT 裁定是否向引擎发轻降权信号（{@code tf:mod:media.action=DEMOTE}）。
      *
-     * <p>默认开：边界敏感描述/评论（LIMIT 级）被降权或限公域，而非全量推荐。
-     * 关闭即回退到「LIMIT 无任何下游动作」（旧行为），用于灰度或紧急止血。</p>
+     * <p>默认开：边界敏感描述（LIMIT 级）在精排乘 {@code contentDemoteScale}，
+     * <b>内容仍留在公域发现流、仍可被搜索、仍可播放</b>。这是 LIMIT 与 REVIEW 的处置力度差异：
+     * LIMIT 是最轻的非 PASS 档，不应等同 REVIEW 的整帖公域隔离。</p>
+     *
+     * <p>关闭即回退到「LIMIT 无任何下游动作」（ADR-0013 之前的旧行为），用于灰度或紧急止血。</p>
      */
     private boolean limitPublishSignal = true;
 
-    /** LIMIT 裁定映射的违规严重度（默认 {@link ViolationSeverity#LOW}：软降权、不扣分）。 */
+    /** LIMIT 裁定映射的违规严重度（默认 {@link ViolationSeverity#LOW}：轻降权、不扣分不处罚）。 */
     private ViolationSeverity defaultLimitSeverity = ViolationSeverity.LOW;
 
     /** REVIEW 裁定映射的违规严重度（默认 {@link ViolationSeverity#MID}：待人审的边界内容，比 LIMIT 重一档）。 */

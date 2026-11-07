@@ -110,7 +110,7 @@ public class RecommendationPipeline {
     /**
      * 审核信号读取客户端（抖音式「审核与推荐解耦」：推荐侧直读 {@code tf:mod:} KV）。
      * 召回层用它过滤 INTERCEPT/MONITOR 内容与低健康分作者；排序层经 {@link RecallSupport#scoreOf}
-     * 懒读作者健康分降权。
+     * 懒读作者健康分降权，并按 ADR-0014 懒读内容级 DEMOTE 轻降权系数（DEMOTE 不参与召回过滤）。
      */
     private final ReviewSignalClient reviewSignalClient;
     /** 推荐侧消费审核信号的开关与阈值（namespace / 召回过滤 / 降权系数 / 剔除阈值）。 */

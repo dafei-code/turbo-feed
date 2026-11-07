@@ -44,6 +44,10 @@ import java.util.Set;
  * 的内容直接剔除，作者被封禁或健康分 &lt; 60 也剔除；<b>信号读异常时按「不安全」处理直接跳过该条</b>
  * （宁可不返回，不可放行）。</p>
  *
+ * <p><b>ADR-0014</b>：内容级 {@code DEMOTE}（轻降权）<b>不剔除</b>——降权只在推荐精排生效，
+ * 搜索是「用户主动检索且词面命中」的场景，把轻降权内容藏起来既无必要也会让搜索结果与
+ * 公域可见性不一致。只有 INTERCEPT（下架）/ MONITOR（公域隔离）才属于搜索不可见。</p>
+ *
  * <h3>已知边界（S1）</h3>
  * <ul>
  *   <li>只覆盖 Redis 索引的 7 天窗口（与时间线分桶 TTL 对齐），老内容需等 S3 冷补；</li>
@@ -280,7 +284,13 @@ public class SearchService {
     // 过滤
     // ------------------------------------------------------------------
 
-    /** 内容维处置：INTERCEPT（下架）/ MONITOR（限公域）一律不进搜索结果。 */
+    /**
+     * 内容维处置：INTERCEPT（下架）/ MONITOR（限公域）一律不进搜索结果。
+     *
+     * <p><b>零改动确认（ADR-0014）</b>：本判定只拒这两个动作，新增的 DEMOTE 天然落到
+     * {@code return true}——轻降权内容仍可被搜索，与「仅在推荐精排降权」的契约一致。
+     * 此处<b>刻意不加</b> DEMOTE 分支，避免后来者误以为搜索也要跟着降权（搜索结果无精排序）。</p>
+     */
     private boolean visibleByContent(String key,
                                      Map<String, ModerationSignalView.DispositionView> dispositions) {
         ModerationSignalView.DispositionView d = dispositions.get(key);

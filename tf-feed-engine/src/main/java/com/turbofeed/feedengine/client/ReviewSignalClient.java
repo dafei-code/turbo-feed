@@ -23,16 +23,23 @@ import java.util.Set;
  * 后者是<b>生产者</b>，本类是<b>消费者</b>；二者共享同一 Redis 集群、同一 namespace，
  * 但<b>不跨模块依赖</b>（namespace 在本模块独立配置，默认 {@code tf:mod:} 与网关对齐）。</p>
  *
- * <p><b>三个能力</b>：
+ * <p><b>四个能力</b>：
  * <ol>
  *   <li>{@link #blockedContentKeys}：召回过滤——内容处置为 INTERCEPT/MONITOR 的 postId 集合
- *       （MONITOR 在网关<b>不下架</b>只写 KV，故引擎这层是其公域拦截的<b>唯一手段</b>）；</li>
+ *       （MONITOR 在网关<b>不下架</b>只写 KV，故引擎这层是其公域拦截的<b>唯一手段</b>）；
+ *       <b>不含 DEMOTE</b>（ADR-0014：轻降权内容仍留在公域发现流）；</li>
  *   <li>{@link #blockedAuthorIds}：召回过滤——作者健康分低于阈值或已封禁的 userId 集合
  *       （与 P0-b「限投稿/封禁」语义对齐，不在公域出现）；</li>
- *   <li>{@link #healthScales}：排序降权——DEMOTE 档（健康分 [60,80)）作者系数 = {@code demoteScale}
- *       （默认 0.5，与 P0-b「推荐降权 0.5」逐字对齐），其余档系数 1.0。</li>
+ *   <li>{@link #healthScaleOf}：作者级排序降权——{@code tf:mod:account.tier=DEMOTE}
+ *       （健康分 [60,80)）系数 = {@code demoteScale}（默认 0.5，与 P0-b 逐字对齐）；</li>
+ *   <li>{@link #contentDemotionScaleOf}：内容级排序降权（ADR-0014）——
+ *       {@code tf:mod:media.action=DEMOTE} 系数 = {@code contentDemoteScale}（默认 0.7）。</li>
  * </ol>
  * </p>
+ *
+ * <p><b>两处 DEMOTE 不是一回事</b>：作者级读 {@code tf:mod:account} 的 {@code tier}，
+ * 内容级读 {@code tf:mod:media} 的 {@code action}；二者各自独立开关与系数，最终在
+ * {@code RecallSupport#scoreOf} 相乘后作用于精排分。任何一处读失败都 fail-open 返回 1.0。</p>
  *
  * <p><b>fail-open（与生产者对称）</b>：KV 是给推荐主流程的<b>加速副本</b>，读失败 / 缺失一律按
  * 「无信号」处理（不拦截、不降权），<b>绝不抛异常、绝不阻断浏览</b>。上游 miss 时本应回源 MySQL，
@@ -53,11 +60,11 @@ public class ReviewSignalClient {
 
     // fail-open 可观测性（P1）：tf:mod KV 是推荐主流程的「加速副本」，读失败/缺失一律 fail-open
     // （不拦截、不降权）。这些指标让「fail-open 是否在被悄悄触发」「信号是否真的在生效」可被观测。
-    //   · lookups   —— 按 op 统计 KV 读取次数（blockedContent / blockedAuthor / healthScale）
+    //   · lookups   —— 按 op 统计 KV 读取次数（blockedContent / blockedAuthor / healthScale / contentDemotion）
     //   · failures  —— 按 op 统计读异常（fail-open 真正兜底的次数，应为 0，非 0 即 Redis 故障）
     //   · miss      —— 按 op 统计「查了但无信号」的 key 数（缺失/未回源；高 miss 率提示信号未铺满）
     //   · blocked   —— 实际拦截的内容/作者数（验证信号确实在生效）
-    //   · demotions —— healthScale<1.0 的降权次数（与 P0-b 降权语义对齐的「降级数」）
+    //   · demotions —— 实际降权次数（作者级 healthScale<1.0 与内容级 contentScale<1.0 都计入）
     private final Map<String, Counter> lookups = new HashMap<>();
     private final Map<String, Counter> failures = new HashMap<>();
     private final Map<String, Counter> miss = new HashMap<>();
@@ -68,7 +75,7 @@ public class ReviewSignalClient {
     public ReviewSignalClient(StringRedisTemplate redisTemplate, FeedModerationProperties props, MeterRegistry registry) {
         this.redisTemplate = redisTemplate;
         this.props = props;
-        for (String op : new String[]{"blockedContent", "blockedAuthor", "healthScale"}) {
+        for (String op : new String[]{"blockedContent", "blockedAuthor", "healthScale", "contentDemotion"}) {
             this.lookups.put(op, Counter.builder("tf_feed_moderation_kv_lookups_total")
                     .tag("op", op).description("tf:mod KV 读取次数（按操作）").register(registry));
             this.failures.put(op, Counter.builder("tf_feed_moderation_kv_failures_total")
@@ -94,6 +101,10 @@ public class ReviewSignalClient {
 
     /**
      * 召回过滤：返回需从公域发现流剔除的 postId 集合（内容处置 = INTERCEPT 或 MONITOR）。
+     *
+     * <p><b>刻意不含 DEMOTE（ADR-0014）</b>：内容级轻降权不是「不可见」，它只在精排乘一个系数，
+     * 由 {@link #contentDemotionScaleOf} 承接；在这里剔除会退化成与 MONITOR 等同的硬隔离，
+     * 正是 ADR-0013 把 LIMIT 处置过重的问题。</p>
      *
      * <p>fail-open：任一异常返回<b>空集</b>——宁可漏拦也不误杀（内容安全靠网关物理下架 + 本层兜底）。</p>
      */
@@ -259,6 +270,47 @@ public class ReviewSignalClient {
         } catch (Exception e) {
             failures.get("healthScale").increment();
             log.warn("读账号健康分信号失败（fail-open，不降权）: authorId={}, {}", authorId, e.getMessage());
+            return 1.0d;
+        }
+    }
+
+    /**
+     * 内容级轻降权（ADR-0014）：单帖 postId 的排序系数。
+     *
+     * <p>仅当 {@code tf:mod:media:{postId}.action == DEMOTE} 时返回
+     * {@code contentDemoteScale}（默认 0.7），其余动作（含 INTERCEPT/MONITOR/PASS）、
+     * 缺失、读失败、开关关闭一律返回 {@code 1.0}。<b>DEMOTE 不参与召回过滤</b>——
+     * INTERCEPT/MONITOR 已在 {@link #blockedContentKeys} 前置剔除，走到这里的内容都是可展示的，
+     * 本方法只决定它在精排里排多靠后。</p>
+     *
+     * <p><b>为什么是「单帖懒读」而不是「批量预取 demotedPosts 塞进上下文」</b>：
+     * {@code RecallSupport#scoreOf} 不只在 {@code RecommendationPipeline} 的池内切片排序里被调用，
+     * 各召回通道内部的 {@code sortByScore} 也会调用，而那些调用发生在
+     * {@code FeedFilterContext} 构造<b>之前</b>。批量预取必然漏掉通道内排序这一层，
+     * 导致轻降权只对部分召回位生效。懒读 + 本页缓存（{@code RecallContext#contentDemotionCache}）
+     * 与作者级 {@link #healthScaleOf} 完全对称，覆盖全部打分点，且无需改动编排顺序。</p>
+     *
+     * <p>fail-open：异常/缺失/开关关闭返回 1.0（不降权，绝不阻断浏览）。</p>
+     */
+    public double contentDemotionScaleOf(String postId) {
+        if (postId == null || postId.isBlank() || !props.isEnableContentDemotion()) {
+            return 1.0d;
+        }
+        try {
+            lookups.get("contentDemotion").increment();
+            Object action = redisTemplate.opsForHash().get(mediaKey(postId), "action");
+            if (action == null) {
+                miss.get("contentDemotion").increment();
+                return 1.0d;
+            }
+            if ("DEMOTE".equals(action.toString())) {
+                demotions.increment();
+                return props.getContentDemoteScale();
+            }
+            return 1.0d;
+        } catch (Exception e) {
+            failures.get("contentDemotion").increment();
+            log.warn("读内容级降权信号失败（fail-open，不降权）: postId={}, {}", postId, e.getMessage());
             return 1.0d;
         }
     }

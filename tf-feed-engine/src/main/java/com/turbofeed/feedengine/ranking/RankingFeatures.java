@@ -33,10 +33,18 @@ package com.turbofeed.feedengine.ranking;
  * @param realtimeMatch  实时特征匹配分（抖音式「实时特征流」接入点）：由 {@code RealtimeFeatureService}
  *                        聚合 session 级最近互动 + 短期兴趣 burst 成的页面级实时画像，与本内容标签的亲和度之和。
  *                        缺失 / 冷启动 / 读失败 = 0.0（fail-open 不增强也不打压）。
- * @param authorHealthScale 作者健康分排序系数（抖音式「审核与推荐解耦」接入点）：DEMOTE 档(健康分[60,80))
- *                       由 {@code ReviewSignalClient} 赋 {@code demoteScale}(默认 0.5，与 P0-b「推荐降权 0.5」对齐)，
- *                       其余档 / 缺失 / 读失败均 = 1.0（fail-open 不降权）。BANNED 与 &lt;60 作者已被召回层剔除，
- *                       不会流入此处。模型末尾以 {@code result * authorHealthScale} 施加——系数越小越靠后。
+ * @param authorHealthScale <b>审核综合降权系数</b>（字段名沿用历史，语义见下）：
+ *                       <ul>
+ *                         <li>作者级：{@code tf:mod:account.tier=DEMOTE}（健康分 [60,80)）→
+ *                             {@code demoteScale}（默认 0.5，与 P0-b「推荐降权 0.5」对齐）；</li>
+ *                         <li>内容级（ADR-0014）：{@code tf:mod:media.action=DEMOTE} →
+ *                             {@code contentDemoteScale}（默认 0.7，机审 LIMIT 的轻降权）；</li>
+ *                         <li>二者<b>相乘</b>传入；任一无信号 / 读失败 / 开关关闭 = 1.0（fail-open 不降权）。</li>
+ *                       </ul>
+ *                       BANNED 与 &lt;60 作者、INTERCEPT/MONITOR 内容已在召回层剔除，不会流入此处。
+ *                       模型末尾以 {@code result * authorHealthScale} 施加——系数越小越靠后。
+ *                       字段名保留 {@code authorHealthScale} 是为了不改动精排模型契约与所有既有测试；
+ *                       它是「审核降权」这一个乘性通道，不是只属于作者的量。
  */
 public record RankingFeatures(double recencyMillis,
                               long impressions,

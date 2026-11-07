@@ -16,10 +16,11 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -27,7 +28,10 @@ import static org.mockito.Mockito.when;
  *
  * <p>纯 Mockito 单元，不依赖 Redis：mock {@link StringRedisTemplate#opsForHash()} 的 {@link HashOperations}，
  * 断言召回过滤（内容 INTERCEPT/MONITOR、作者 BANNED/低健康分）、播放前复校（仅 INTERCEPT / 原因细分）、
- * 排序降权（DEMOTE 档 = demoteScale，其余 = 1.0），以及 fail-open（读异常 / 缺失 / blank 不拦截不降权）。</p>
+ * 排序降权（作者级 DEMOTE 档 = demoteScale，内容级 action=DEMOTE = contentDemoteScale），
+ * 以及 fail-open（读异常 / 缺失 / blank 不拦截不降权）。</p>
+ *
+ * <p><b>ADR-0014 回归锁</b>：内容级 DEMOTE 绝不进召回拦截集、绝不打断播放，只在精排降权。</p>
  */
 @ExtendWith(MockitoExtension.class)
 class ReviewSignalClientTest {
@@ -43,6 +47,8 @@ class ReviewSignalClientTest {
         p.setNamespace("tf:mod:");
         p.setDropBelowScore(60);
         p.setDemoteScale(0.5d);
+        p.setEnableContentDemotion(true);
+        p.setContentDemoteScale(0.7d);
         return p;
     }
 
@@ -60,9 +66,11 @@ class ReviewSignalClientTest {
         when(hash.get("tf:mod:media:p2", "action")).thenReturn("MONITOR");
         when(hash.get("tf:mod:media:p3", "action")).thenReturn("PASS");
         when(hash.get("tf:mod:media:p4", "action")).thenReturn(null);
+        when(hash.get("tf:mod:media:p5", "action")).thenReturn("DEMOTE");
         ReviewSignalClient c = client();
 
-        Set<String> blocked = c.blockedContentKeys(Set.of("p1", "p2", "p3", "p4"));
+        Set<String> blocked = c.blockedContentKeys(Set.of("p1", "p2", "p3", "p4", "p5"));
+        // DEMOTE 是轻降权，不是公域隔离——不得被召回层硬剔除
         assertEquals(Set.of("p1", "p2"), blocked);
     }
 
@@ -111,14 +119,15 @@ class ReviewSignalClientTest {
     // ---- 播放前复校：仅 INTERCEPT ----
 
     @Test
-    void interceptedContentKeys_onlyIntercept_notMonitor() {
+    void interceptedContentKeys_onlyIntercept_notMonitorOrDemote() {
         when(redis.<Object, Object>opsForHash()).thenReturn(hash);
         when(hash.get("tf:mod:media:p1", "action")).thenReturn("INTERCEPT");
         when(hash.get("tf:mod:media:p2", "action")).thenReturn("MONITOR");
         when(hash.get("tf:mod:media:p3", "action")).thenReturn("PASS");
+        when(hash.get("tf:mod:media:p4", "action")).thenReturn("DEMOTE");
         ReviewSignalClient c = client();
 
-        Set<String> intercepted = c.interceptedContentKeys(Set.of("p1", "p2", "p3"));
+        Set<String> intercepted = c.interceptedContentKeys(Set.of("p1", "p2", "p3", "p4"));
         assertEquals(Set.of("p1"), intercepted);
     }
 
@@ -146,7 +155,7 @@ class ReviewSignalClientTest {
         assertNull(c.authorBlockReason("  "));
     }
 
-    // ---- 排序降权 ----
+    // ---- 排序降权：作者级 ----
 
     @Test
     void healthScaleOf_demoteTier_returnsDemoteScale_othersReturnOne() {
@@ -175,5 +184,47 @@ class ReviewSignalClientTest {
         ReviewSignalClient c = client();
 
         assertEquals(1.0d, c.healthScaleOf("x"), 1e-9);
+    }
+
+    // ---- 排序降权：内容级（ADR-0014） ----
+
+    @Test
+    void contentDemotionScaleOf_demoteAction_returnsContentScale_othersReturnOne() {
+        when(redis.<Object, Object>opsForHash()).thenReturn(hash);
+        when(hash.get("tf:mod:media:d1", "action")).thenReturn("DEMOTE");
+        when(hash.get("tf:mod:media:m1", "action")).thenReturn("MONITOR");
+        when(hash.get("tf:mod:media:i1", "action")).thenReturn("INTERCEPT");
+        when(hash.get("tf:mod:media:p1", "action")).thenReturn("PASS");
+        when(hash.get("tf:mod:media:n1", "action")).thenReturn(null); // 无信号
+        ReviewSignalClient c = client();
+
+        assertEquals(0.7d, c.contentDemotionScaleOf("d1"), 1e-9);
+        assertEquals(1.0d, c.contentDemotionScaleOf("m1"), 1e-9);
+        assertEquals(1.0d, c.contentDemotionScaleOf("i1"), 1e-9);
+        assertEquals(1.0d, c.contentDemotionScaleOf("p1"), 1e-9);
+        assertEquals(1.0d, c.contentDemotionScaleOf("n1"), 1e-9);
+    }
+
+    @Test
+    void contentDemotionScaleOf_blankOrSwitchOff_returnsOne_withoutRedisRead() {
+        ReviewSignalClient c = client();
+        assertEquals(1.0d, c.contentDemotionScaleOf(null), 1e-9);
+        assertEquals(1.0d, c.contentDemotionScaleOf("  "), 1e-9);
+
+        FeedModerationProperties off = props();
+        off.setEnableContentDemotion(false);
+        ReviewSignalClient disabled = new ReviewSignalClient(redis, off, new SimpleMeterRegistry());
+        assertEquals(1.0d, disabled.contentDemotionScaleOf("any"), 1e-9);
+
+        // 开关关闭时不应打 Redis（灰度回滚口径）
+        verify(redis, never()).opsForHash();
+    }
+
+    @Test
+    void contentDemotionScaleOf_whenRedisThrows_returnsOne_failOpen() {
+        when(redis.<Object, Object>opsForHash()).thenThrow(new RuntimeException("redis down"));
+        ReviewSignalClient c = client();
+
+        assertEquals(1.0d, c.contentDemotionScaleOf("x"), 1e-9);
     }
 }

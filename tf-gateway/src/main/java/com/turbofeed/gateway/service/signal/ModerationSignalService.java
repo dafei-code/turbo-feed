@@ -21,14 +21,19 @@ import java.util.Map;
  *
  * <p><b>生产者</b>：turbo-feed 在每处「状态确认」后把审核信号写成 Redis Hash，
  * 命名空间 {@code tf:mod:}（可被 {@link MediaProperties.Signal#getNamespace()} 覆盖）。
- * <b>消费者</b>：上游推荐系统直读这些 KV 做召回过滤（INTERCEPT/MONITOR）与排序降权（低健康分），
- * 不直连审核 MySQL。</p>
+ * <b>消费者</b>：上游推荐系统直读这些 KV 做召回过滤（INTERCEPT/MONITOR）、精排降权
+ * （内容级 DEMOTE + 作者级低健康分），不直连审核 MySQL。</p>
  *
- * <p><b>fail-open</b>：所有写操作 catch 后仅记日志、绝不抛异常、不阻断审核主流程——
+ * <p><b>fail-open</b>：所有写/删操作 catch 后仅记日志、绝不抛异常、不阻断审核主流程——
  * 审核结果已落 MySQL，KV 只是给上游的加速副本，丢失不影响审核正确性（上游 miss 回源 MySQL）。</p>
  *
  * <p><b>TTL</b>：内容处置信号随内容生命周期（默认 30d 可刷新）；账号健康分/举报人信用为刷新式
  * （每次写覆盖、不设备过期），由 {@link MediaProperties.Signal} 控制（0=不过期）。</p>
+ *
+ * <p><b>解除闭环（ADR-0014）</b>：内容级信号不能只写不删——REVIEW 产生的 MONITOR 若在人审
+ * 判无违规后留着，内容会在默认 30 天 TTL 内一直被召回层/搜索层剔除，表现为「审核通过了却搜不到」。
+ * 因此本类同时提供 {@link #clearMediaDisposition(String)}，由人审判无违规与改描述 PASS 路径调用。
+ * 注意 <b>自动审核 APPROVED 不清信号</b>：先发后审正靠 MONITOR 做审核窗口隔离。</p>
  */
 @Service
 public class ModerationSignalService {
@@ -58,7 +63,7 @@ public class ModerationSignalService {
         return mediaProperties.getSignal().getNamespace() + "reporter:" + userId;
     }
 
-    /** 写内容处置信号（MONITOR/INTERCEPT 都写，二者都是已确认违规）。 */
+    /** 写内容处置信号（INTERCEPT/MONITOR/DEMOTE 都写；后者是内容级轻降权，非确认违规）。 */
     public void publishMediaDisposition(String postId, Disposition action, ViolationSeverity severity, ViolationSource source) {
         if (postId == null || postId.isBlank()) {
             return;
@@ -77,6 +82,59 @@ public class ModerationSignalService {
             }
         } catch (Exception e) {
             log.warn("写内容处置信号失败（fail-open，不影响主流程）: postId={}, action={}, {}", postId, action, e.getMessage());
+        }
+    }
+
+    /**
+     * 解除内容处置信号（ADR-0014）：整键删除 {@code tf:mod:media:{postId}}，让引擎召回层、
+     * 搜索层与精排降权同时恢复「无信号」状态。
+     *
+     * <p><b>调用时机（必须严格限定）</b>：{@code CONTENT_REVIEW} 人审判无违规、改描述后裁定 PASS。
+     * <b>不要在自动审核 APPROVED 时调用</b>——先发后审靠 MONITOR 做审核窗口隔离，提前清掉等于
+     * 让待复核内容直接进公域。</p>
+     *
+     * <p><b>fail-open</b>：删除失败只记日志不抛——KV 是加速副本，最坏是信号残留到 TTL 到期，
+     * 不影响审核结论本身（DB 状态才是真值）。blank postId 直接跳过，避免误删同名前缀键。</p>
+     */
+    public void clearMediaDisposition(String postId) {
+        if (postId == null || postId.isBlank()) {
+            return;
+        }
+        try {
+            redisTemplate.delete(mediaKey(postId));
+            log.info("解除内容处置信号: postId={}", postId);
+        } catch (Exception e) {
+            log.warn("解除内容处置信号失败（fail-open，信号将随 TTL 自动到期）: postId={}, {}",
+                    postId, e.getMessage());
+        }
+    }
+
+    /**
+     * 条件解除：仅当当前信号是 {@link Disposition#DEMOTE}（内容级轻降权）时删除整键。
+     *
+     * <p><b>用途：改描述后裁定 PASS。</b>此时文本已重新合规，DEMOTE 该解除；但
+     * MONITOR（先发后审的人审隔离）与 INTERCEPT（举报/复审确认违规的下架）都不是
+     * 「文本质量」的产物，只能由各自的业务流程解除，绝不能因为改了描述就抹掉——
+     * 否则作者改一次文案即可绕过人审隔离甚至下架。</p>
+     *
+     * <p>读 + 删非原子，极端并发下（读到 DEMOTE 后另一线程升级为 MONITOR）可能误删一次；
+     * 该窗口的后果仅是「少一次公域隔离」，且下一跳审核/举报会重写信号，属可接受边界。
+     * fail-open：读/删异常只记日志不抛。</p>
+     */
+    public void clearDemotionIfPresent(String postId) {
+        if (postId == null || postId.isBlank()) {
+            return;
+        }
+        try {
+            String key = mediaKey(postId);
+            Object action = redisTemplate.opsForHash().get(key, "action");
+            if (action != null && Disposition.DEMOTE.name().equals(action.toString())) {
+                redisTemplate.delete(key);
+                log.info("内容重新合规→解除 DEMOTE 轻降权信号: postId={}", postId);
+            }
+        } catch (Exception e) {
+            log.warn("条件解除 DEMOTE 信号失败（fail-open，信号将随 TTL 自动到期）: postId={}, {}",
+                    postId, e.getMessage());
         }
     }
 

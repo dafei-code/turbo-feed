@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -238,6 +239,75 @@ class ModerationSignalServiceTest {
         assertEquals(10, v.score());
         assertTrue(v.banned());
         assertEquals(5L, v.ts());
+    }
+
+    // ---- 解除闭环（ADR-0014） ----
+
+    @Test
+    void clearMediaDisposition_deletesWholeKey() {
+        ModerationSignalService svc = service(2592000L, 0L, 0L);
+
+        svc.clearMediaDisposition("p1");
+
+        verify(redis).delete("tf:mod:media:p1");
+    }
+
+    @Test
+    void clearMediaDisposition_blankPostId_doesNotDelete() {
+        ModerationSignalService svc = service(2592000L, 0L, 0L);
+
+        svc.clearMediaDisposition("   ");
+        svc.clearMediaDisposition(null);
+
+        verify(redis, never()).delete(anyString());
+    }
+
+    @Test
+    void clearMediaDisposition_whenRedisThrows_doesNotPropagate() {
+        when(redis.delete(anyString())).thenThrow(new RuntimeException("redis down"));
+        ModerationSignalService svc = service(2592000L, 0L, 0L);
+
+        // fail-open：信号残留到 TTL 到期即可，不影响人审结论落库
+        svc.clearMediaDisposition("p9");
+    }
+
+    @Test
+    void clearDemotionIfPresent_onlyDeletesWhenActionIsDemote() {
+        when(redis.<String, String>opsForHash()).thenReturn(hash);
+        when(hash.get("tf:mod:media:d1", "action")).thenReturn("DEMOTE");
+        when(hash.get("tf:mod:media:m1", "action")).thenReturn("MONITOR");
+        when(hash.get("tf:mod:media:i1", "action")).thenReturn("INTERCEPT");
+        when(hash.get("tf:mod:media:n1", "action")).thenReturn(null);
+        ModerationSignalService svc = service(2592000L, 0L, 0L);
+
+        svc.clearDemotionIfPresent("d1");
+        svc.clearDemotionIfPresent("m1");
+        svc.clearDemotionIfPresent("i1");
+        svc.clearDemotionIfPresent("n1");
+
+        // 改描述 PASS 只能解除轻降权；人审隔离/下架信号必须由对应流程解除，否则可被改文案绕过
+        verify(redis, times(1)).delete("tf:mod:media:d1");
+        verify(redis, never()).delete("tf:mod:media:m1");
+        verify(redis, never()).delete("tf:mod:media:i1");
+        verify(redis, never()).delete("tf:mod:media:n1");
+    }
+
+    @Test
+    void clearDemotionIfPresent_blankPostId_doesNotTouchRedis() {
+        ModerationSignalService svc = service(2592000L, 0L, 0L);
+
+        svc.clearDemotionIfPresent("");
+        svc.clearDemotionIfPresent(null);
+
+        verify(redis, never()).delete(anyString());
+    }
+
+    @Test
+    void clearDemotionIfPresent_whenRedisThrows_doesNotPropagate() {
+        when(redis.<String, String>opsForHash()).thenThrow(new RuntimeException("redis down"));
+        ModerationSignalService svc = service(2592000L, 0L, 0L);
+
+        svc.clearDemotionIfPresent("d9");
     }
 
     // ---- fail-open ----

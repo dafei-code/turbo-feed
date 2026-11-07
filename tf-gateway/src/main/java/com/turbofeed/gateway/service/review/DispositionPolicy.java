@@ -20,6 +20,11 @@ import java.util.Map;
  * {@code turbofeed.media.review.disposition-matrix} 支持按 {@code "来源:严重度"} → 处置名覆盖默认
  * （如 {@code POOL_PROMOTED:HIGH=MONITOR} 把流量池晋级复扫命中改为软处置）。无需改码即可灰度调整
  * 某类违规的处置力度，对齐抖音「按风险分级处置」。
+ *
+ * <p><b>ADR-0014</b>：配置值也可写 {@link Disposition#DEMOTE}（内容级轻降权）。默认矩阵<b>不会</b>
+ * 产出 DEMOTE，因此既有违规路径零行为回归；一旦显式配置，{@code ViolationDispositionService}
+ * 会走「只写内容信号、不扣分不下架」的专用分支，不会误落到下架逻辑。
+ * DEMOTE 的主要内容生产者其实是内容安全的 LIMIT 裁定（不经本矩阵）。</p>
  */
 @Service
 public class DispositionPolicy {

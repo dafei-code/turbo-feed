@@ -1,9 +1,14 @@
 # ADR-0013：内容级 REVIEW/LIMIT 接通下游（引擎降权信号）
 
-- **状态**：已采纳（Accepted，2026-11-06）
+- **状态**：已采纳（Accepted，2026-11-06）→ **被 [ADR-0014](0014-content-demote-and-signal-lifecycle.md) 取代**（2026-11-07）
 - **所属改进项**：内容安全子系统（关联 0028 内容安全地基 / 0079 P0 全部命中 + 严重度决策 / 0080 不停机动态添加）
 - **决策人**：dafei
 - **关联 ADR**：[0008](0008-timeline-layering.md)（公域时间线边界，MONITOR 信号最终作用于此处）
+
+> ⚠️ **本 ADR 的结论已被 ADR-0014 修正，请照新 ADR 实现**：① `MONITOR` 是召回层/搜索层的
+> **硬剔除**而非「降权」；② `LIMIT` 应发新增的 `DEMOTE` 档（轻降权）而非 `MONITOR`；
+> ③ 信号必须补解除闭环。按 `docs/adr/README.md` 修改规则，**本文件历史结论不改**，
+> 勘误与偏差以 §5 追加记录与 ADR-0014 为准。
 
 ## 1. 背景（Context）
 
@@ -81,3 +86,18 @@ P0 敏感词改造后，写路径统一经 `ContentSecurityService#requireClean`
   - **引擎侧 `MONITOR` 降权消费联调**：需 `feed-engine` 仓配合验证"召回该帖应被降权、不进公域高热"；网关侧已发信号且 fail-open，引擎未就绪也不影响主流程。
   - **severity 运营校准**：`MID`/`LOW` 为默认估计，待效果数据回调。
   - **LIMIT 摘公域时间线**：本期未做，若联调发现引擎漏读 MONITOR 再补（低成本）。
+
+## 6. 后续核对发现（2026-11-07，增量事实；结论见 ADR-0014）
+
+对同仓模块做只读核对后，确认本 ADR 的若干判断与事实有偏差，逐条记录以便追溯（**不改写上文结论**）：
+
+| 上文位置 | 偏差 |
+| --- | --- |
+| §3 负面 / §5 未做 | `tf-feed-engine` **不是另仓**，是同一 `turbo-feed` Maven 仓库的模块，本仓即可编译与单测验证；「需跨仓联调」的前提不成立 |
+| §1 / §2.2 / §2.3 | `MONITOR` 在 `ReviewSignalClient.blockedContentKeys` 与 `SearchService.visibleByContent` 中是**硬剔除**；真正的排序降权是 `healthScaleOf` 按 `tf:mod:account.tier=DEMOTE` 的作者级系数。因此「LIMIT 也发 MONITOR」把最轻档处置成了与 REVIEW 等同的整帖隔离 |
+| §2.1 / §3 | `MediaUploadService` 改造前构造器为 22 参、加依赖后 23 参，上文写成「构造器 23 参」是改造后的口径，用来论证「为何抽类」时写反了 |
+| §2.4 接线范围 | 只接了旧 `upload` 与 `updateCaption`；前端主路径 `presign → complete → MediaUploadFinalizer` 未接，REVIEW/LIMIT 信号在直传链路完全没产生 |
+| 全局 | `tf:mod:media` **只有写入没有清除**，人审判无违规后信号随 30 天 TTL 继续硬剔除内容，属静默失效 |
+
+以上 5 项由 [ADR-0014](0014-content-demote-and-signal-lifecycle.md) 修正：新增内容级 `DEMOTE` 档、
+补齐解除闭环、接通直传主路径，并在引擎侧实现内容级轻降权。本文作为历史决策快照保留。

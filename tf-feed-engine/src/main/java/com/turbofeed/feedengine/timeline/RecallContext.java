@@ -41,8 +41,15 @@ public class RecallContext {
     public final Set<String> cfKeys = new LinkedHashSet<>();
     public final Set<String> vectorKeys = new LinkedHashSet<>();
     public final Set<String> followKeys = new LinkedHashSet<>();
-    /** 评分阶段懒加载的作者健康分缓存（本页共享）。 */
+    /** 评分阶段懒加载的作者健康分系数缓存（本页共享，key=authorId）。 */
     public final Map<String, Double> authorHealthCache = new LinkedHashMap<>();
+    /**
+     * 评分阶段懒加载的<b>内容级降权系数</b>缓存（本页共享，key=timelineKey/postId，ADR-0014）。
+     *
+     * <p>与 {@link #authorHealthCache} 对称：{@code RecallSupport#scoreOf} 会被召回通道内部排序
+     * 与池内切片排序多次调用，按帖缓存可保证一页内每个 postId 只打一次 Redis。</p>
+     */
+    public final Map<String, Double> contentDemotionCache = new LinkedHashMap<>();
 
     // ===== 池解析后写入：审核过滤上下文 =====
     public boolean filterChainEnabled;
