@@ -178,8 +178,33 @@ return 0
 
 验证后清理：两条测试时间线经 `/internal/feed/timeline/remove` 摘除，残留 `*e2e*` Redis 键与 MinIO 临时对象全部删除并复核为空；两个 Java 进程已停止，Redis / MinIO 容器保留运行。
 
-**明确未做（诚实边界，更新后）**
+### G1 / G2 Java 调用路径真链路验证（2026-11-08 二次补做）
 
-- **G1 / G2 的 Java 调用路径未在真实链路跑**：`restoreAfterNoViolation` 重投时间线、`handleAppeal(upheld=true)` 清 INTERCEPT 需要 DB 中的真实 media 记录 + 审核/申诉流程与登录态，本轮只做了单测与真 Spring 装配验证；`clearDemotionIfPresent` 的 Java 封装同理（Lua 语义已在真实 Redis 上按同一脚本验证）。
+再次真启动网关(8080) + 引擎(8083)，造 `user_id=128` 的真实 `media_0` 行（postId 符合 `post/{userId}/{uuid}` 契约）、`review_task` 行与登录态，通过**真实 HTTP 业务接口**走完整链路。默认处置矩阵下四个违规入口全是 MID/HIGH → INTERCEPT，`softLimit` 不可达，故仅在启动参数注入 `--turbofeed.media.review.disposition-matrix[HUMAN_REPORT:MID]=MONITOR`，**未改任何文件**。
+
+| 用例 | 真实动作 | 实测结果 |
+| --- | --- | --- |
+| G1 软处置 | `POST /api/v1/admin/media/report-review?confirmed=true` | `tf:media:disposition`=MONITOR、`tf:mod:media.action`=MONITOR、DB 仍 APPROVED、`TIMELINE_REMOVE/SENT` |
+| **G1 判无违规恢复** | `POST /api/v1/admin/media/review-task/decide?taskId=…&takedown=false`（`REPORT_ACCUMULATED`） | 标记与信号均消失、`tf:feed:idx:{postId}` 出现、`TIMELINE_APPEND/SENT`；日志打出「解除 MONITOR 软处置并重投公域时间线」 |
+| **G2 申诉翻案** | 预置 INTERCEPT → `POST /api/v1/media/appeal`（4→5）→ `POST /api/v1/admin/media/appeal-review?upheld=true` | 信号清除、status→APPROVED、`TIMELINE_APPEND/SENT` |
+| **G3 条件解除 Java 封装** | 预置 DEMOTE / MONITOR 各一次 → `POST /api/v1/media/caption`（PASS） | DEMOTE 键删除；MONITOR 键保留（Lua 分支在真实调用下成立） |
+| 负向·状态闸门 | TAKEN_DOWN 判无违规 | status 仍 4、INTERCEPT 与标记均保留、0 条 APPEND |
+| 负向·任务类型闸门 | 非 CONTENT_REVIEW 且无标记 | INTERCEPT 保留、无时间线成员、0 条 APPEND |
+| HTTP 可见性 | `GET /api/v1/feed/recommended?size=43` | `code=0`，两条恢复帖真实可见 |
+
+重投落到 `tf:feed:tl:1:20261108`，反查索引中的 URL 为**投递时刻现签**的预签名地址，说明 G4 读取侧修复在恢复路径同样生效。
+
+**联调发现的三处事实（均未改代码）**
+
+1. **postId 契约**：测试数据必须形如 `post/{userId}/{uuid}`。首轮用无斜杠的 `post-e2e-g1-001`，`TimelineSupport.authorIdFromKey` 返回 null，`RecommendationPipeline:258` 对不可变 `Set.of()` 调 `contains(null)` 抛 NPE → 引擎 500 → 网关 `degradedMode=EMPTY` 返回空列表，容易被误判成「恢复了但发现流仍缺」。换合规 postId 后全绿。**这同时暴露健壮性隐患**：历史无斜杠 postId 会打挂推荐流，建议给 `contains` 加 null 保护。
+2. **接口返回语义偏差**：`AdminMediaController.reportReview` 返回值硬编码 `confirmed ? TAKEN_DOWN : APPROVED`，MONITOR 软处置下与 DB 实际 APPROVED 不符。
+3. **Redis 集群认证**：命令行需带 `-a`；无认证返回 `NOAUTH`，容易误判成「信号没写进去」。
+
+二次验证后清理：5 条 media、3 条 review_task、4 条 outbox、2 条 behavior_log 及 appeal / user_notification / account_credit / account_health 测试行全清，Redis 8 个残留键与 `tf:feed:tl:1:20261108`（ZCARD=0）全清，8080 / 8083 释放。
+
+**明确未做（诚实边界，二次更新后）**
+
+- ✅ **G1 / G2 / G3 的 Java 调用路径已在真实链路跑通**（见上节，含两个负向闸门与 HTTP 可见性），不再列为未做。
 - **运营校准未执行**：`0.7 / LOW / MID` 仍是工程默认值；§2.5 只给了口径与流程，真实数值需运营数据。
 - **未新增指标埋点**：URL 反推失败目前仅静默回退，无可观测计数；建议后续补 `media.url.resign_fallback` 计数器。
+- **三处联调发现仅登记、未修代码**：推荐流 `contains(null)` 健壮性、`reportReview` 返回语义、以及上述运营/指标缺口，均需独立授权后再改。
