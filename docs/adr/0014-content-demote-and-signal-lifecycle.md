@@ -186,4 +186,5 @@ ADR-0013 落地后对**同仓模块**做只读核对，发现 4 个实质问题�
 - ✅ 申诉翻案清 INTERCEPT（G2）：`handleAppeal(upheld=true)` 在 CAS 成功分支、重投之前清信号。
 - ✅ 读删竞态（G3）：`clearDemotionIfPresent` 改为单键 Lua `EVAL`（HGET + 条件 DEL），判定权移到 Redis 侧。
 - ✅ 另补一处前序遗留（G4）：公域推荐流读取侧按 URL 反推对象名现签。此前 403 修复只覆盖了 DB 查询出口与投递出口，引擎下发的物化 URL 路径漏接。
-- ⏳ 仍未做：真启动端到端联调（本机 Redis / MinIO / Docker 未运行）、MinIO 测试 PNG 孤儿对象清理、运营数值校准；`0.7 / LOW / MID` 仍为工程默认值，ADR-0015 §2.5 只补了口径与发布 checklist。
+- ✅ 真启动端到端联调与 MinIO 孤儿对象清理已于 2026-11-08 补做（见 ADR-0015 §5）：真实 Redis 上 Lua 四分支、预签名 URL 重签并实测 `HTTP 200`、DEMOTE 精排降权、MONITOR/INTERCEPT 硬剔除、信号解除恢复全部通过。
+- ⏳ 仍未做：运营数值校准（`0.7 / LOW / MID` 仍为工程默认值，ADR-0015 §2.5 只补了口径与发布 checklist）、G1/G2 的 Java 调用路径真链路验证。

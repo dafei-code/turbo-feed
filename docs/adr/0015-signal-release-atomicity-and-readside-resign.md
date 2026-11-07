@@ -160,9 +160,26 @@ return 0
 - 发布顺序：网关先、引擎后；本轮引擎零改动，契约与 `460ed15` 一致，无数据迁移；详见 §2.5 checklist。
 - 回滚：读取侧重签出问题可先把 `storage` 切回非 minio 原样透传路径，或直接回滚网关；Lua 脚本回滚为两步读删虽恢复竞态但功能等价，属可接受降级。
 
-**明确未做（诚实边界）**
+**真启动验证（2026-11-08 补做，环境已获授权拉起）**
 
-- **未真启动端到端联调**：本机仅 MySQL `3306` 在线，Redis 集群 `7000-7005`、MinIO `9000`、Docker daemon 均未运行。以下运行时验证仍待环境就绪后补：Lua 脚本在真实 Redis 上「非 DEMOTE 不删」、判无违规后时间线真实回补、申诉翻案后搜索/召回恢复、推荐流预签名 URL 实际可访问。
-- **MinIO 测试 PNG 孤儿对象未清理**：依赖 MinIO 容器，环境未就绪；需先只读盘点再小批量删除。
+拉起 Docker Desktop 后恢复 `redis-local-cluster`（3M3S，`cluster_state:ok` / 16384 slots）与 `minio`（health `HTTP 200`），MySQL 3306 原生进程在线；以 classpath 方式真启动 `FeedEngineApplication`(8083) 与 `GatewayApplication`(8080)，分别 `Started ... in 8.07s / 10.45s`，`/actuator/health` 双 `UP`。**这一步同时验证了 `FeedEngineClient` 新增构造参数与 `MediaUrlResolver` 注入在真实 Spring 上下文里装配正常**（本轮改动最容易被真启动暴露的风险）。
+
+| 验证项 | 结果 |
+| --- | --- |
+| 真实 Redis 执行条件解除 Lua | `DEMOTE` → 返回 1 且整键删除；`MONITOR` / `INTERCEPT` / 键缺失 → 返回 0 且键保留（测试键已清理） |
+| 推荐流读取侧重签 | 投递时刻故意写过期签名 `X-Amz-Date=20200101...&Signature=STALE`，经网关 `/api/v1/feed/recommended` 返回时被重签为当前时间的新签名，封面与 `images` 均重写；该 URL 实测 **`HTTP 200`** |
+| 跨服务调用 | 网关 → 引擎 `/internal/feed/recommended` 返回 `code:0`，无「Feed 引擎读取失败」告警 |
+| DEMOTE 不剔除 + 精排降权 | 两条候选下 `contentDemotion` 读取计数 = 2、`tf_feed_ranking_demotions_total` = 1，排序为 normal 在前、demote 在后 |
+| MONITOR / INTERCEPT 硬剔除 | 引擎直连与网关均 0 条，`tf_feed_moderation_kv_blocked_total{kind=content}` 累计 2 |
+| 清除信号恢复 | 删除 `tf:mod:media` 后推荐流恢复 1 条 |
+| MinIO 孤儿对象 | 只读盘点 2 个 70B 测试 PNG，跨 128 张 `media_*` 物理表核对 DB 引用数 = 0，删除后桶为空 |
+
+> **缓存观察（联调必读）**：信号写入后立刻连续请求会命中推荐流缓存，剔除/恢复要等缓存失效或换分页参数才显现；这不是信号失效，断言必须避开缓存窗口。
+
+验证后清理：两条测试时间线经 `/internal/feed/timeline/remove` 摘除，残留 `*e2e*` Redis 键与 MinIO 临时对象全部删除并复核为空；两个 Java 进程已停止，Redis / MinIO 容器保留运行。
+
+**明确未做（诚实边界，更新后）**
+
+- **G1 / G2 的 Java 调用路径未在真实链路跑**：`restoreAfterNoViolation` 重投时间线、`handleAppeal(upheld=true)` 清 INTERCEPT 需要 DB 中的真实 media 记录 + 审核/申诉流程与登录态，本轮只做了单测与真 Spring 装配验证；`clearDemotionIfPresent` 的 Java 封装同理（Lua 语义已在真实 Redis 上按同一脚本验证）。
 - **运营校准未执行**：`0.7 / LOW / MID` 仍是工程默认值；§2.5 只给了口径与流程，真实数值需运营数据。
 - **未新增指标埋点**：URL 反推失败目前仅静默回退，无可观测计数；建议后续补 `media.url.resign_fallback` 计数器。
