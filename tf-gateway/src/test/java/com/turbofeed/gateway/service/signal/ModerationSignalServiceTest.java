@@ -11,6 +11,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.RedisScript;
 
 import java.time.Duration;
 import java.util.List;
@@ -21,10 +22,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -272,24 +274,37 @@ class ModerationSignalServiceTest {
     }
 
     @Test
-    void clearDemotionIfPresent_onlyDeletesWhenActionIsDemote() {
-        when(redis.<String, String>opsForHash()).thenReturn(hash);
-        when(hash.get("tf:mod:media:d1", "action")).thenReturn("DEMOTE");
-        when(hash.get("tf:mod:media:m1", "action")).thenReturn("MONITOR");
-        when(hash.get("tf:mod:media:i1", "action")).thenReturn("INTERCEPT");
-        when(hash.get("tf:mod:media:n1", "action")).thenReturn(null);
+    @SuppressWarnings({"unchecked", "rawtypes"}) // RedisTemplate#execute 的 RedisScript<T> 泛型 + List 捕获器
+    void clearDemotionIfPresent_executesSingleAtomicLuaScript() {
+        doReturn(1L).when(redis).execute(any(RedisScript.class), anyList(), any());
         ModerationSignalService svc = service(2592000L, 0L, 0L);
 
         svc.clearDemotionIfPresent("d1");
-        svc.clearDemotionIfPresent("m1");
-        svc.clearDemotionIfPresent("i1");
-        svc.clearDemotionIfPresent("n1");
 
-        // 改描述 PASS 只能解除轻降权；人审隔离/下架信号必须由对应流程解除，否则可被改文案绕过
-        verify(redis, times(1)).delete("tf:mod:media:d1");
-        verify(redis, never()).delete("tf:mod:media:m1");
-        verify(redis, never()).delete("tf:mod:media:i1");
-        verify(redis, never()).delete("tf:mod:media:n1");
+        ArgumentCaptor<RedisScript> scriptCap = ArgumentCaptor.forClass(RedisScript.class);
+        ArgumentCaptor<List> keysCap = ArgumentCaptor.forClass(List.class);
+        verify(redis).execute(scriptCap.capture(), keysCap.capture(), eq("DEMOTE"));
+        assertEquals(List.of("tf:mod:media:d1"), keysCap.getValue());
+        String lua = scriptCap.getValue().getScriptAsString();
+        // 读 action 与删键必须在同一段脚本里，杜绝「读到 DEMOTE 后另一路升级为 MONITOR 却被误删」的窗口
+        assertTrue(lua.contains("HGET"), "脚本必须自己读 action");
+        assertTrue(lua.contains("'DEL'"), "脚本必须自己删键，不能退回 Java 侧第二次往返");
+        assertTrue(lua.contains("ARGV[1]"), "目标 action 必须由参数传入，避免硬编码漂移");
+        assertFalse(lua.contains("KEYS[2]"), "Redis Cluster 单 slot：脚本只能访问一个键");
+        verify(redis, never()).opsForHash();
+        verify(redis, never()).delete(anyString());
+    }
+
+    @Test
+    void clearDemotionIfPresent_scriptReturnsZero_neverDeletesFromJava() {
+        // 脚本返回 0 = 当前 action 不是 DEMOTE（MONITOR/INTERCEPT/缺失）：判定权完全在 Redis 侧
+        doReturn(0L).when(redis).execute(any(RedisScript.class), anyList(), any());
+        ModerationSignalService svc = service(2592000L, 0L, 0L);
+
+        svc.clearDemotionIfPresent("m1");
+
+        verify(redis, never()).delete(anyString());
+        verify(redis, never()).opsForHash();
     }
 
     @Test
@@ -300,11 +315,13 @@ class ModerationSignalServiceTest {
         svc.clearDemotionIfPresent(null);
 
         verify(redis, never()).delete(anyString());
+        verify(redis, never()).execute(any(RedisScript.class), anyList(), any());
     }
 
     @Test
     void clearDemotionIfPresent_whenRedisThrows_doesNotPropagate() {
-        when(redis.<String, String>opsForHash()).thenThrow(new RuntimeException("redis down"));
+        when(redis.execute(any(RedisScript.class), anyList(), any()))
+                .thenThrow(new RuntimeException("redis down"));
         ModerationSignalService svc = service(2592000L, 0L, 0L);
 
         svc.clearDemotionIfPresent("d9");

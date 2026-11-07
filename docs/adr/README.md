@@ -71,6 +71,7 @@
 | [0012](0012-async-executor-backpressure.md) | 异步执行器背压分层（可丢活 vs 持久化活） | 已采纳 | 2026-11-01 | 通知生成/交互样本走 bestEffort 丢弃策略（绝不阻塞主链路）；点赞/收藏/关注/评论持久化双写保留 CallerRuns 防丢 + 饱和计数；JDBC 加 socketTimeout 兜底 |
 | [0013](0013-content-review-limit-downstream.md) | 内容级 REVIEW/LIMIT 接通下游（引擎降权信号） | 被 0014 取代 | 2026-11-06 | 新增 fail-open 路由 `ModerationDownstreamRouter`：REVIEW/LIMIT→`tf:mod:media=MONITOR`；双开关可逆、severity 可配；评论/昵称/举报路径不改（**档位与语义已被 0014 修正，勿照此新增用法**） |
 | [0014](0014-content-demote-and-signal-lifecycle.md) | 新增内容级 DEMOTE 档与审核信号解除闭环 | 已采纳 | 2026-11-07 | 跨服务契约变更：REVIEW→MONITOR 硬剔除 / LIMIT→DEMOTE 精排轻降权；人审通过与改描述 PASS 分路径解除；直传主路径接通；引擎懒读+本页缓存；搜索/播放零改动 |
+| [0015](0015-signal-release-atomicity-and-readside-resign.md) | 审核信号解除闭环补齐、条件解除原子化与推荐流读取侧重签 | 已采纳 | 2026-11-08 | 判无违规按三闸门恢复公域时间线（投递成功后才删标记）、申诉翻案先清 INTERCEPT、条件解除改单键 Lua、推荐流按 URL 反推对象名现签；零契约变更、网关先引擎后 |
 
 ## 状态语义
 

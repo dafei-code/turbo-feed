@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.gateway.config.FeedEngineProperties;
 import com.turbofeed.gateway.service.feed.FeedDeliveryHealth;
 import com.turbofeed.gateway.service.query.MediaItem;
+import com.turbofeed.gateway.service.query.MediaUrlResolver;
 import com.turbofeed.shared.model.ContractVersion;
 import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.shared.model.FeedItemView;
@@ -77,6 +78,8 @@ public class FeedEngineClient {
     private final FeedDeliveryHealth health;
     /** 服务间内部接口共享令牌（评审 doc P0-2）；为空时不为请求附加 X-Internal-Token（fail-open 本地开发）。 */
     private final String internalToken;
+    /** 读取侧重签展示 URL：引擎物化的是投递时刻的预签名地址，私有桶下会过期（ADR-0015）。 */
+    private final MediaUrlResolver urlResolver;
 
     /**
      * 直连分支用 {@code directRestClientBuilder}（{@code ServiceDiscoveryRestClientConfig}
@@ -100,11 +103,13 @@ public class FeedEngineClient {
                             @Qualifier("directRestClientBuilder") RestClient.Builder restClientBuilder,
                             @LoadBalanced RestClient.Builder lbRestClientBuilder,
                             FeedDeliveryHealth health,
-                            @Value("${turbofeed.internal.token:}") String internalToken) {
+                            @Value("${turbofeed.internal.token:}") String internalToken,
+                            MediaUrlResolver urlResolver) {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.health = health;
         this.internalToken = internalToken == null ? "" : internalToken;
+        this.urlResolver = urlResolver;
         FeedEngineProperties.Engine engine = properties.getEngine();
         boolean useDiscovery = !engine.getServiceName().isBlank();
         RestClient.Builder chosenBuilder = useDiscovery ? lbRestClientBuilder : restClientBuilder;
@@ -189,7 +194,11 @@ public class FeedEngineClient {
             // 口径与引擎侧 ItemViewCodec 一致——不可消费的条目跳过，而不是让整页失败。
             List<RecommendedItem> consumable = ContractVersion.filterConsumable(rawItems,
                     FeedItemView.SCHEMA_VERSION, ri -> ri.item().schemaVersion());
-            List<MediaItem> items = consumable.stream().map(ri -> FeedItemMapper.toView(ri.item())).toList();
+            // ADR-0015：引擎物化的 url/imageUrls 是投递时刻的预签名地址，读取侧按对象名逐张重签，
+            // 否则私有桶下过期后整页 403；解析器对无法反推的历史直链原样返回。
+            List<MediaItem> items = consumable.stream()
+                    .map(ri -> FeedItemMapper.toView(ri.item(), urlResolver::resolveFromUrl))
+                    .toList();
             // 召回归因映射（timelineKey → RecommendedItem）：仅网关内部使用，供服务端曝光落盘回填
             // 通道/池层级（不序列化给前端）。前端拿 FeedRecommendedPage.requestId 回传即可离线关联。
             Map<String, RecommendedItem> attribution = consumable.stream()

@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -42,6 +43,20 @@ public class ModerationSignalService {
      * 显式日志与构造器（不用 {@code @Slf4j} / {@code @RequiredArgsConstructor}：本机构建环境 Lombok 对新文件不生效）。
      */
     private static final Logger log = LoggerFactory.getLogger(ModerationSignalService.class);
+
+    /**
+     * 条件解除 DEMOTE 的原子脚本（ADR-0015）：{@code HGET action} 与 {@code DEL} 在同一次
+     * EVAL 内完成，Redis 单线程执行保证「读到 DEMOTE 后另一路把信号升级成 MONITOR/INTERCEPT」
+     * 的窗口不存在——否则改一次描述就可能抹掉人审隔离或下架结论。
+     *
+     * <p>只访问 {@code KEYS[1]} 一个键，满足 Redis Cluster 单 slot 约束；Spring Data Redis
+     * 自动处理 EVALSHA 的 NOSCRIPT 回退。返回 1=已删除 / 0=未删除（含 action 缺失或不是 DEMOTE）。</p>
+     */
+    private static final DefaultRedisScript<Long> CLEAR_DEMOTE_SCRIPT = new DefaultRedisScript<>(
+            "local action = redis.call('HGET', KEYS[1], 'action') " +
+                    "if action == ARGV[1] then return redis.call('DEL', KEYS[1]) end " +
+                    "return 0",
+            Long.class);
 
     private final StringRedisTemplate redisTemplate;
     private final MediaProperties mediaProperties;
@@ -117,9 +132,12 @@ public class ModerationSignalService {
      * 「文本质量」的产物，只能由各自的业务流程解除，绝不能因为改了描述就抹掉——
      * 否则作者改一次文案即可绕过人审隔离甚至下架。</p>
      *
-     * <p>读 + 删非原子，极端并发下（读到 DEMOTE 后另一线程升级为 MONITOR）可能误删一次；
-     * 该窗口的后果仅是「少一次公域隔离」，且下一跳审核/举报会重写信号，属可接受边界。
-     * fail-open：读/删异常只记日志不抛。</p>
+     * <p><b>原子性（ADR-0015）</b>：早期实现是 Java 侧「{@code HGET} 判断再 {@code DEL}」两步，
+     * 并发下若另一路在这两步之间把 DEMOTE 升级为 MONITOR/INTERCEPT，改描述 PASS 会误删升级后的
+     * 信号，等于用一次改文案绕过人审隔离或下架。现改为 {@link #CLEAR_DEMOTE_SCRIPT} 一次 EVAL
+     * 完成条件判断与删除，脚本只碰一个键、集群兼容。</p>
+     *
+     * <p>fail-open：脚本执行异常只记日志不抛；信号最坏残留到 TTL 到期，不影响审核结论本身。</p>
      */
     public void clearDemotionIfPresent(String postId) {
         if (postId == null || postId.isBlank()) {
@@ -127,9 +145,8 @@ public class ModerationSignalService {
         }
         try {
             String key = mediaKey(postId);
-            Object action = redisTemplate.opsForHash().get(key, "action");
-            if (action != null && Disposition.DEMOTE.name().equals(action.toString())) {
-                redisTemplate.delete(key);
+            Long deleted = redisTemplate.execute(CLEAR_DEMOTE_SCRIPT, List.of(key), Disposition.DEMOTE.name());
+            if (deleted != null && deleted > 0L) {
                 log.info("内容重新合规→解除 DEMOTE 轻降权信号: postId={}", postId);
             }
         } catch (Exception e) {

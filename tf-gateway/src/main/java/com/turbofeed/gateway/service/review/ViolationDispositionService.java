@@ -2,6 +2,8 @@ package com.turbofeed.gateway.service.review;
 
 import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
+import com.turbofeed.gateway.service.query.MediaItem;
+import com.turbofeed.gateway.service.review.credit.CreditLevel;
 import com.turbofeed.gateway.service.penalty.PenaltyService;
 import com.turbofeed.gateway.service.penalty.ViolationCategory;
 import com.turbofeed.gateway.service.penalty.ViolationSeverity;
@@ -116,18 +118,20 @@ public class ViolationDispositionService {
     }
 
     /**
-     * 解除该帖的内容级处置信号（ADR-0014 解除闭环）。
+     * 解除该帖的内容处置信号（ADR-0014 / ADR-0015 解除闭环）。
      *
-     * <p>由 {@code MediaReviewService#decideReviewTask} 在 {@code CONTENT_REVIEW} 人审
-     * <b>判无违规</b>时调用。REVIEW 上传时写的 MONITOR 若不清，会在 KV 默认 30 天 TTL 内
-     * 一直被引擎召回层和搜索层硬剔除——表现为「人审通过了，内容却依然搜不到、进不了推荐」。</p>
+     * <p>用于「处置结论被推翻」的两种路径：{@code CONTENT_REVIEW} 人审判无违规（经
+     * {@link #restoreAfterNoViolation} 复用本方法）、以及
+     * {@code MediaReviewService#handleAppeal(upheld=true)} 申诉翻案。若不清，
+     * MONITOR/INTERCEPT 会在 KV 默认 30 天 TTL 内一直被引擎召回层和搜索层硬剔除——
+     * 表现为「审核/申诉通过了，内容却依然搜不到、进不了推荐」。</p>
      *
      * <p><b>为什么放在本服务而不是门面直接调信号服务</b>：门面
      * {@code MediaReviewService} 已被多个单测手动 {@code new}（19 参构造），再加一个依赖
      * 会让所有测试构造器编译断裂。本服务原本就持有 {@link ModerationSignalService} 与
      * {@code mediaRepository}，复用它们即可做到<b>零构造器变更</b>。</p>
      *
-     * <p>fail-open：反查或删除异常只记日志不抛，不影响人审结论落库；
+     * <p>fail-open：反查或删除异常只记日志不抛，不影响审核/申诉结论落库；
      * postId 为空（历史单图帖 {@code post_id=''}）直接跳过，避免误删同名前缀键。</p>
      */
     public void clearContentSignal(String mediaId, long authorId) {
@@ -137,9 +141,78 @@ public class ViolationDispositionService {
                 return;
             }
             moderationSignalService.clearMediaDisposition(postId);
-            log.info("人审判无违规→解除内容处置信号: mediaId={}, postId={}", mediaId, postId);
+            log.info("处置结论推翻→解除内容处置信号: mediaId={}, postId={}", mediaId, postId);
         } catch (Exception e) {
-            log.warn("解除内容处置信号失败（fail-open，不影响人审结论）: mediaId={}, {}", mediaId, e.getMessage());
+            log.warn("解除内容处置信号失败（fail-open，不影响审核结论）: mediaId={}, {}", mediaId, e.getMessage());
+        }
+    }
+
+    /**
+     * 判定「无违规」后恢复该帖的公域可见性（ADR-0015，补齐 ADR-0014 §5 遗留项）。
+     *
+     * <p>{@link #softLimit} 曾把内容从公域时间线摘除（{@code removeFromTimeline}）并写下
+     * {@code tf:media:disposition:{key}=MONITOR} 标记。此前人审判无违规只清了
+     * {@code tf:mod:media} 信号，<b>没有重投时间线</b> → 搜索恢复可见、发现流仍缺该帖。
+     * 本方法把「清信号 + 删标记 + 重投」收成一次幂等动作。</p>
+     *
+     * <p><b>幂等依据</b>：只有 {@code tf:media:disposition} 标记存在（确实被 softLimit 摘过）
+     * 才重投；标记删除后重复调用不会二次 append。内容级 CONTENT_REVIEW 任务没有该标记，
+     * 只清信号、不重投（时间线本来就在，此前只是被 MONITOR 硬剔除）。</p>
+     *
+     * <p><b>状态闸门</b>：仅 {@link MediaStatus#APPROVED} 才恢复。TAKEN_DOWN 的下架结论
+     * 不能由一次「判无违规」推翻（那是申诉流程的职责），否则会把已下架内容重新灌回公域；
+     * 该分支连信号都不清，保护 INTERCEPT 下架语义。</p>
+     *
+     * <p><b>任务类型闸门（零行为回归）</b>：ADR-0014 明确规定只有 {@code CONTENT_REVIEW}
+     * 判无违规才解除 {@code tf:mod:media}。举报累计 / 热度 / 晋级复扫等任务判无违规时，
+     * 若该帖同时还有<b>尚未判决</b>的内容审核隔离，贸然清信号会提前放行未审内容、误清
+     * INTERCEPT。因此这里保留原语义：{@code taskType != CONTENT_REVIEW} 且没有 softLimit
+     * 标记时，直接返回、不碰任何 Redis 键；只有「确实被摘过时间线」才走恢复闭环。</p>
+     *
+     * <p>调用方处于 {@code @Transactional} 内，{@code publishAppend} 的发件箱事件与本次
+     * 处置落在同一事务，失败由 OutboxRelay 补偿重投。fail-open：任何异常只记日志并返回
+     * {@code false}，不影响人审结论落库。</p>
+     *
+     * @param taskType 复审任务类型，用于保留 ADR-0014 的「只有 CONTENT_REVIEW 才清信号」语义
+     * @return 是否真的重投了公域时间线
+     */
+    public boolean restoreAfterNoViolation(String mediaId, long authorId, String taskType) {
+        try {
+            MediaStatus status = mediaRepository.getStatus(mediaId, authorId);
+            if (status != MediaStatus.APPROVED) {
+                log.info("判无违规但内容非 APPROVED，不恢复公域: mediaId={}, status={}", mediaId, status);
+                return false;
+            }
+            String postId = mediaRepository.findPostId(mediaId, authorId);
+            String key = (postId == null || postId.isBlank()) ? mediaId : postId;
+            String markerKey = DISPOSITION_KEY_PREFIX + key;
+            String marker = redisTemplate.opsForValue().get(markerKey);
+            boolean softLimited = Disposition.MONITOR.name().equals(marker);
+
+            // 既不是内容审核任务、又没被 softLimit 摘过 → 不碰信号（保持 ADR-0014 原行为）。
+            if (!softLimited && !ReviewTask.TYPE_CONTENT_REVIEW.equals(taskType)) {
+                return false;
+            }
+            clearContentSignal(mediaId, authorId); // 复用同一解除能力（内部含 blank 闸门与 fail-open）
+            if (!softLimited) {
+                // CONTENT_REVIEW：时间线本来就在，此前只是被 MONITOR 硬剔除，清信号即可。
+                return false;
+            }
+            MediaItem post = delivery.asTimelinePost(mediaRepository.findMedia(mediaId, authorId), authorId);
+            if (post == null) {
+                // 标记保留，便于补偿任务/下次判定重试；否则内容会永久停留在「摘除但无标记」的中间态
+                return false;
+            }
+            CreditLevel level = accountCreditService.ensure(authorId);
+            delivery.publishAppend(mediaId, authorId, post, level.poolLevel());
+            // 标记必须最后删：Redis 删除不随 DB 事务回滚，若投递失败或事务回滚，先删标记会让
+            // 这次恢复彻底不可重试（时间线缺帖 + 标记已消失）。保留标记则由 OutboxRelay/下次判定补偿。
+            redisTemplate.delete(markerKey);
+            log.info("判无违规→解除 MONITOR 软处置并重投公域时间线: mediaId={}, key={}", mediaId, key);
+            return true;
+        } catch (Exception e) {
+            log.warn("恢复公域可见性失败（fail-open，不影响人审结论）: mediaId={}, {}", mediaId, e.getMessage());
+            return false;
         }
     }
 

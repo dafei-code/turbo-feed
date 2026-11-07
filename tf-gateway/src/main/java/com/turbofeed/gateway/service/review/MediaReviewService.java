@@ -375,8 +375,13 @@ public class MediaReviewService {
      * <p>违规→整帖 TAKEN_DOWN + 扣信用 + 落处罚（与高危举报同处置力度）；无违规→维持发布。
      * 无论哪种，都一并清理该 media 的全部待处理举报与待复审任务。</p>
      *
-     * <p><b>ADR-0014</b>：无违规且任务类型为 {@code CONTENT_REVIEW} 时，额外解除该帖的
-     * 内容级处置信号（上传 REVIEW 时写的 MONITOR 公域隔离），否则信号会留到 TTL 到期。</p>
+     * <p><b>ADR-0014 / ADR-0015</b>：判无违规时统一走
+     * {@code disposition.restoreAfterNoViolation(mediaId, authorId, taskType)}：
+     * ① {@code CONTENT_REVIEW} 解除上传 REVIEW 时写的 MONITOR 公域隔离信号，否则会留到 TTL 到期；
+     * ② 若该帖曾被 {@code softLimit} 摘出公域时间线（有 {@code tf:media:disposition} 标记），
+     * 删标记并按信用池重投，否则「搜索恢复了、发现流还是缺」；
+     * ③ 其它任务类型且无摘除标记时保持原行为、不碰任何信号，避免提前放行未审内容或误清 INTERCEPT。
+     * 状态闸门保证 TAKEN_DOWN 的下架结论不被一次「判无违规」推翻。</p>
      */
     @Transactional(rollbackFor = Exception.class)
     public void decideReviewTask(long taskId, boolean takedown, String resolver) {
@@ -404,14 +409,12 @@ public class MediaReviewService {
         } else {
             reviewTaskRepository.resolveAllForMedia(mediaId, ReviewTask.STATUS_RESOLVED, resolver);
             reportRepository.resolve(mediaId, false);
-            // ADR-0014 解除闭环：CONTENT_REVIEW 是敏感词 REVIEW 上传时建的人审任务，当时同步写了
-            // tf:mod:media=MONITOR（公域隔离）。判无违规必须解除该信号，否则默认 30 天 TTL 内
-            // 内容一直被引擎召回层与搜索层硬剔除——表现为「人审通过了却依然搜不到、进不了推荐」。
-            // 其它任务类型（举报累计/热度/晋级复扫/风险分档）不在此清：它们对应举报处置链路，
-            // 贸然删除会误清 INTERCEPT 下架信号。自动审核 APPROVED 也不清（先发后审仍需隔离）。
-            if (ReviewTask.TYPE_CONTENT_REVIEW.equals(task.taskType())) {
-                disposition.clearContentSignal(mediaId, authorId);
-            }
+            // ADR-0015：判无违规 = 推翻此前处置结论，统一恢复该帖公域可见性。
+            // ① 清 tf:mod:media（CONTENT_REVIEW 的 MONITOR 隔离 / 举报软处置信号）；
+            // ② 若曾被 softLimit 摘过时间线（有 tf:media:disposition 标记），删标记并重投。
+            // 方法内以「状态必须 APPROVED + 标记存在」为闸门，幂等且不会把已下架内容灌回公域；
+            // 自动审核 APPROVED 不经过这里，先发后审期间的 MONITOR 隔离不受影响。
+            disposition.restoreAfterNoViolation(mediaId, authorId, task.taskType());
             log.info("复审任务判定无违规，维持发布: taskId={}, mediaId={}, taskType={}, resolver={}",
                     taskId, mediaId, task.taskType(), resolver);
         }
@@ -467,7 +470,12 @@ public class MediaReviewService {
         log.info("作者申诉（整帖暂不可见）: mediaId={}, authorUserId={}", mediaId, authorUserId);
     }
 
-    /** 管理员处理申诉：翻案→整帖 APPROVED 恢复公域（按信用池）+ 信用加回；维持→整帖 TAKEN_DOWN。 */
+    /**
+     * 管理员处理申诉：翻案→整帖 APPROVED 恢复公域（按信用池）+ 信用加回；维持→整帖 TAKEN_DOWN。
+     *
+     * <p><b>ADR-0015</b>：翻案时额外解除 {@code tf:mod:media} 的 INTERCEPT 信号。此前只重投
+     * 时间线、不清信号，引擎召回层与搜索层仍按「已下架」硬剔除，表现为「申诉赢了但内容还是看不见」。</p>
+     */
     @Transactional(rollbackFor = Exception.class)
     public void handleAppeal(String mediaId, boolean upheld) {
         long authorId = ReviewTimelineDelivery.parseUserId(mediaId);
@@ -475,6 +483,8 @@ public class MediaReviewService {
             // CAS 前置态为 APPEALING：只有真正完成「申诉中 → 已发布」的那一次才恢复公域与加信用。
             int rows = mediaRepository.updateStatusCas(mediaId, authorId, MediaStatus.APPEALING, MediaStatus.APPROVED);
             if (rows > 0) {
+                // 清信号放在重投之前：发件箱是异步投递，先清可避免投递落地后引擎仍读到旧的 INTERCEPT
+                disposition.clearContentSignal(mediaId, authorId);
                 MediaItem post = delivery.asTimelinePost(mediaRepository.findMedia(mediaId, authorId), authorId);
                 if (post != null) {
                     CreditLevel level = accountCreditService.ensure(authorId);

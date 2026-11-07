@@ -179,3 +179,11 @@ ADR-0013 落地后对**同仓模块**做只读核对，发现 4 个实质问题�
 - **申诉翻案（`handleAppeal(upheld=true)`）未清 INTERCEPT 信号**：同属举报/下架域，内容恢复 APPROVED 后仍被 KV 挡着，登记为后续独立修复项。
 - **severity / 系数运营校准**：沿用工程默认值。
 - `clearDemotionIfPresent` 的读删竞态（§3）未做 Lua 原子化，评估为低频低危。
+
+**后续状态（2026-11-08，详见 [ADR-0015](0015-signal-release-atomicity-and-readside-resign.md) 与 changelog 0084；本段为增量事实，不修改上文结论）**
+
+- ✅ 举报处置链路的解除（G1）：新增 `restoreAfterNoViolation`，按「状态 APPROVED / 任务类型 / softLimit 标记」三闸门清信号并重投时间线；标记在投递成功后才删，保证可重试。
+- ✅ 申诉翻案清 INTERCEPT（G2）：`handleAppeal(upheld=true)` 在 CAS 成功分支、重投之前清信号。
+- ✅ 读删竞态（G3）：`clearDemotionIfPresent` 改为单键 Lua `EVAL`（HGET + 条件 DEL），判定权移到 Redis 侧。
+- ✅ 另补一处前序遗留（G4）：公域推荐流读取侧按 URL 反推对象名现签。此前 403 修复只覆盖了 DB 查询出口与投递出口，引擎下发的物化 URL 路径漏接。
+- ⏳ 仍未做：真启动端到端联调（本机 Redis / MinIO / Docker 未运行）、MinIO 测试 PNG 孤儿对象清理、运营数值校准；`0.7 / LOW / MID` 仍为工程默认值，ADR-0015 §2.5 只补了口径与发布 checklist。

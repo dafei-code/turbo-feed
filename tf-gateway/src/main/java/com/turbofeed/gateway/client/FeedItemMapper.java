@@ -5,6 +5,7 @@ import com.turbofeed.gateway.service.review.MediaStatus;
 import com.turbofeed.shared.model.FeedItemView;
 
 import java.util.List;
+import java.util.function.UnaryOperator;
 
 /**
  * 网关视图 ⇄ 引擎契约的双向映射。
@@ -62,14 +63,35 @@ public final class FeedItemMapper {
      * 「公域发现流」不会把同一帖算成两帖。</p>
      */
     public static MediaItem toView(FeedItemView item) {
+        return toView(item, UnaryOperator.identity());
+    }
+
+    /**
+     * 引擎契约 → 网关视图，并在映射时重写展示 URL（ADR-0015 推荐流读取侧 403 修复）。
+     *
+     * <p>引擎时间线里物化的 {@code url} / {@code imageUrls()} 是<b>投递时刻</b>生成的地址，
+     * 私有桶下会过期。本重载把逐 URL 的重签能力以函数参数注入——映射层保持纯静态、不依赖
+     * Spring Bean，调用方（{@code FeedEngineClient}）传 {@code urlResolver::resolveFromUrl} 即可。
+     * 无法反推对象名的历史直链由解析器原样返回，不会产生 403 以外的回归。</p>
+     *
+     * <p>保留无参重载 {@link #toView(FeedItemView)} 供不需要重签的场景（如离线数据核对）使用，
+     * 避免所有既有调用点被迫改造。</p>
+     *
+     * @param urlRewriter 展示 URL 重写函数，为 {@code null} 时视为原样透传
+     */
+    public static MediaItem toView(FeedItemView item, UnaryOperator<String> urlRewriter) {
         if (item == null) {
             return null;
         }
+        UnaryOperator<String> rewrite = urlRewriter == null ? UnaryOperator.identity() : urlRewriter;
+        List<String> images = item.imageUrls() == null
+                ? List.of()
+                : item.imageUrls().stream().map(rewrite).toList();
         return new MediaItem(
                 item.postId(),
                 item.mediaId(),
-                item.url(),
-                item.imageUrls(),
+                rewrite.apply(item.url()),
+                images,
                 0,
                 parseStatus(item.status()),
                 item.createdAt(),

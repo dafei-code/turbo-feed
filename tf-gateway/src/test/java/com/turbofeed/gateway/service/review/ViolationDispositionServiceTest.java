@@ -2,6 +2,8 @@ package com.turbofeed.gateway.service.review;
 
 import com.turbofeed.gateway.config.MediaProperties;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
+import com.turbofeed.gateway.service.query.MediaItem;
+import com.turbofeed.gateway.service.review.credit.CreditLevel;
 import com.turbofeed.gateway.service.penalty.PenaltyService;
 import com.turbofeed.gateway.service.penalty.ViolationCategory;
 import com.turbofeed.gateway.service.penalty.ViolationSeverity;
@@ -13,12 +15,15 @@ import com.turbofeed.gateway.service.behavior.BehaviorLogService;
 import com.turbofeed.gateway.storage.MediaStorageClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import java.time.Instant;
+
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -132,5 +137,115 @@ class ViolationDispositionServiceTest {
         service().clearContentSignal("media/42/abc.jpg", 42L);
 
         verify(moderationSignalService, never()).clearMediaDisposition(any());
+    }
+
+    // ---- ADR-0015：判无违规恢复公域可见性（softLimit 摘除 → 重投时间线） ----
+
+    private static final String MEDIA_ID = "media/42/abc.jpg";
+    private static final long AUTHOR_ID = 42L;
+    private static final String POST_ID = "post/42/uuid";
+    private static final String MARKER_KEY = "tf:media:disposition:" + POST_ID;
+
+    private static MediaItem approvedPost() {
+        return new MediaItem(POST_ID, MEDIA_ID, "https://oss.turbofeed.com/media/42/abc.jpg",
+                MediaStatus.APPROVED, Instant.now(), "描述", "[]");
+    }
+
+    @Test
+    void restoreAfterNoViolation_takenDown_neverTouchesSignalOrTimeline() {
+        when(mediaRepository.getStatus(MEDIA_ID, AUTHOR_ID)).thenReturn(MediaStatus.TAKEN_DOWN);
+
+        assertFalse(service().restoreAfterNoViolation(MEDIA_ID, AUTHOR_ID, ReviewTask.TYPE_CONTENT_REVIEW));
+
+        // 下架结论不能被一次「判无违规」推翻（那是申诉的职责）：连 INTERCEPT 信号都不清
+        verify(moderationSignalService, never()).clearMediaDisposition(any());
+        verify(redisTemplate, never()).opsForValue();
+        verify(delivery, never()).publishAppend(anyString(), anyLong(), any(), anyInt());
+    }
+
+    @Test
+    void restoreAfterNoViolation_contentReviewWithoutMarker_clearsSignalOnly() {
+        when(mediaRepository.getStatus(MEDIA_ID, AUTHOR_ID)).thenReturn(MediaStatus.APPROVED);
+        when(mediaRepository.findPostId(MEDIA_ID, AUTHOR_ID)).thenReturn(POST_ID);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        // valueOps.get 默认 null：没被 softLimit 摘过时间线，清 MONITOR 隔离信号即可
+
+        assertFalse(service().restoreAfterNoViolation(MEDIA_ID, AUTHOR_ID, ReviewTask.TYPE_CONTENT_REVIEW));
+
+        verify(moderationSignalService).clearMediaDisposition(POST_ID);
+        verify(delivery, never()).publishAppend(anyString(), anyLong(), any(), anyInt());
+        verify(redisTemplate, never()).delete(anyString());
+    }
+
+    @Test
+    void restoreAfterNoViolation_otherTaskWithoutMarker_doesNotClearSignal() {
+        when(mediaRepository.getStatus(MEDIA_ID, AUTHOR_ID)).thenReturn(MediaStatus.APPROVED);
+        when(mediaRepository.findPostId(MEDIA_ID, AUTHOR_ID)).thenReturn(POST_ID);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+
+        assertFalse(service().restoreAfterNoViolation(MEDIA_ID, AUTHOR_ID,
+                ReviewTask.TYPE_REPORT_ACCUMULATED));
+
+        // ADR-0014 原语义：举报/热度/晋级任务判无违规，不得误清尚未判决的内容审核隔离或 INTERCEPT
+        verify(moderationSignalService, never()).clearMediaDisposition(any());
+        verify(delivery, never()).publishAppend(anyString(), anyLong(), any(), anyInt());
+        verify(redisTemplate, never()).delete(anyString());
+    }
+
+    @Test
+    void restoreAfterNoViolation_softLimited_republishesThenDeletesMarker() {
+        MediaItem post = approvedPost();
+        when(mediaRepository.getStatus(MEDIA_ID, AUTHOR_ID)).thenReturn(MediaStatus.APPROVED);
+        when(mediaRepository.findPostId(MEDIA_ID, AUTHOR_ID)).thenReturn(POST_ID);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get(MARKER_KEY)).thenReturn(Disposition.MONITOR.name());
+        when(mediaRepository.findMedia(MEDIA_ID, AUTHOR_ID)).thenReturn(post);
+        when(delivery.asTimelinePost(post, AUTHOR_ID)).thenReturn(post);
+        when(accountCreditService.ensure(AUTHOR_ID)).thenReturn(CreditLevel.L1);
+
+        assertTrue(service().restoreAfterNoViolation(MEDIA_ID, AUTHOR_ID,
+                ReviewTask.TYPE_REPORT_ACCUMULATED));
+
+        verify(moderationSignalService).clearMediaDisposition(POST_ID);
+        // 标记必须最后删：Redis 删除不随 DB 事务回滚，投递失败时须保留标记以便重试
+        InOrder order = inOrder(delivery, redisTemplate);
+        order.verify(delivery).publishAppend(MEDIA_ID, AUTHOR_ID, post, CreditLevel.L1.poolLevel());
+        order.verify(redisTemplate).delete(MARKER_KEY);
+    }
+
+    @Test
+    void restoreAfterNoViolation_postMissing_keepsMarkerForRetry() {
+        when(mediaRepository.getStatus(MEDIA_ID, AUTHOR_ID)).thenReturn(MediaStatus.APPROVED);
+        when(mediaRepository.findPostId(MEDIA_ID, AUTHOR_ID)).thenReturn(POST_ID);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get(MARKER_KEY)).thenReturn(Disposition.MONITOR.name());
+        // findMedia / asTimelinePost 默认返回 null：查不到帖子视图
+
+        assertFalse(service().restoreAfterNoViolation(MEDIA_ID, AUTHOR_ID,
+                ReviewTask.TYPE_REPORT_ACCUMULATED));
+
+        verify(redisTemplate, never()).delete(anyString());
+        verify(delivery, never()).publishAppend(anyString(), anyLong(), any(), anyInt());
+    }
+
+    @Test
+    void restoreAfterNoViolation_blankPostId_usesMediaIdAsMarkerKey() {
+        MediaItem post = approvedPost();
+        String markerKey = "tf:media:disposition:" + MEDIA_ID;
+        when(mediaRepository.getStatus(MEDIA_ID, AUTHOR_ID)).thenReturn(MediaStatus.APPROVED);
+        when(mediaRepository.findPostId(MEDIA_ID, AUTHOR_ID)).thenReturn("");
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        when(valueOps.get(markerKey)).thenReturn(Disposition.MONITOR.name());
+        when(mediaRepository.findMedia(MEDIA_ID, AUTHOR_ID)).thenReturn(post);
+        when(delivery.asTimelinePost(post, AUTHOR_ID)).thenReturn(post);
+        when(accountCreditService.ensure(AUTHOR_ID)).thenReturn(CreditLevel.L2);
+
+        assertTrue(service().restoreAfterNoViolation(MEDIA_ID, AUTHOR_ID,
+                ReviewTask.TYPE_REPORT_ACCUMULATED));
+
+        // post_id 为空时 softLimit 用 mediaId 作标记键；信号键不稳定则不解除（避免误删前缀键）
+        verify(moderationSignalService, never()).clearMediaDisposition(any());
+        verify(redisTemplate).delete(markerKey);
+        verify(delivery).publishAppend(MEDIA_ID, AUTHOR_ID, post, CreditLevel.L2.poolLevel());
     }
 }
