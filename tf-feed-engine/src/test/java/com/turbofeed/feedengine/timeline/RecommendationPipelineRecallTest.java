@@ -389,4 +389,25 @@ class RecommendationPipelineRecallTest {
         assertTrue(keys.contains("post/vec/1"), "page≠0 时向量召回仍须生效");
         assertFalse(keys.contains("post/authorA/f1"), "page≠0 时关注召回必须关闭");
     }
+
+    /**
+     * 韧性守护（ADR-0015 §5 登记的推荐流 NPE）：契约外 timelineKey（无斜杠）让
+     * {@code authorIdFromKey} 返回 null，且无关注用户时 followeeAuthors 为空集。
+     * 历史上空集用 JDK 不可变 {@code Set.of()}，{@code contains(null)} 抛 NPE → 整页推荐 500，
+     * 网关 degradedMode=EMPTY 又把它静默成空列表，排查成本极高。
+     * 修复后该候选应按 fail-open 保留，不得抛异常。
+     */
+    @Test
+    void malformedTimelineKey_failsOpenInsteadOfBreakingWholePage() {
+        stubCommon();
+        stubPools(1);
+        FeedItemView malformed = item("post-e2e-no-slash");
+        byPool.get(1).add(new DefaultTypedTuple<>(write(malformed), 1_699_999_999_000d));
+
+        // 若回归成不可变空集，recommend 会在流量池解析处直接抛 NPE，本用例随即失败
+        List<String> keys = keysOf(pipeline(0d, 0d, 0d, 0d).recommend("u1", 0, 20, byPool, null));
+
+        assertTrue(keys.contains("post-e2e-no-slash"),
+                "作者解析失败的帖子应按 fail-open 保留，不得让整页推荐抛异常");
+    }
 }

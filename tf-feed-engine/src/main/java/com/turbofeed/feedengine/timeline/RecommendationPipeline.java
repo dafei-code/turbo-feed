@@ -206,9 +206,12 @@ public class RecommendationPipeline {
         UserRealtimeProfile realtimeProfile = realtimeFeatureService.profileOf(userId);
         // 关注流作者集合（G6 跨页去重前置）：提前一次性取出，作为「除关注位外所有召回通道」的排除集，
         // 保证关注作者的内容只在首屏关注位曝光一次，不会在深页热点/兴趣/向量/流量池/冷启动位重复刷屏。
+        // 空集合必须用可变 HashSet：authorIdFromKey 对契约外 timelineKey 返回 null（契约明确的 fail-open），
+        // 而 JDK 不可变 Set.of() 的 contains(null) 会抛 NPE —— 一条脏 postId 就能打挂整页推荐，
+        // 网关 degradedMode=EMPTY 还会把它静默成「无内容」。全仓 8 处 followeeAuthors.contains(...) 共用此集合。
         Set<String> followeeAuthors = (userId != null && followService.hasFollows(userId))
                 ? new HashSet<>(followService.followedAuthors(userId, FOLLOW_SCAN_LIMIT))
-                : Set.of();
+                : new HashSet<>();
 
         double[] weights = parsePoolWeights();
 
