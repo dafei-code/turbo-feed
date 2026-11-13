@@ -12,6 +12,23 @@ package com.turbofeed.shared.model;
  * 本模块零第三方依赖，故不加 {@code @JsonProperty}——Jackson 2.12+ 通过
  * {@code getRecordComponents()} 取组件名，<b>不依赖</b> {@code -parameters}
  * （2026-10-26 实测订正，详见 tf-shared pom 注释）。</p>
+ *
+ * <p><b>traceId 走消息体而非 MQ 属性</b>：本事件同时被 MQ（{@code CounterMqConsumer}）与
+ * HTTP 兜底（{@code HttpCounterEventPublisher} → {@code CounterIncrController}）承载，
+ * 只有消息体字段能在两条通道上一致透传，且能被 Outbox 重投 / 对账 SQL 直接查到。</p>
+ *
+ * @param traceId 产生本次增量的请求链路 id（M4，纯诊断、可空）。新增可空字段按
+ *                {@link ContractVersion} 规则不升版本；消费侧必须容忍 {@code null}
  */
-public record CounterIncrementEvent(String postId, String type, int delta) {
+public record CounterIncrementEvent(String postId, String type, int delta, String traceId) {
+
+    /** 本字段引入前的 3 参形态：保留签名，避免生产点与测试被迫同步改。 */
+    public CounterIncrementEvent(String postId, String type, int delta) {
+        this(postId, type, delta, null);
+    }
+
+    /** 生产侧补链路 id；传 {@code null} 表示非请求线程。 */
+    public CounterIncrementEvent withTraceId(String traceId) {
+        return new CounterIncrementEvent(postId, type, delta, traceId);
+    }
 }

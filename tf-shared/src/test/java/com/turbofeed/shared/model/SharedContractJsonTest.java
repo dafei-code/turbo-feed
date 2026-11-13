@@ -113,14 +113,15 @@ class SharedContractJsonTest {
                         + "\"item\":{\"postId\":\"post/1/x\",\"mediaId\":\"media/1/a.jpg\",\"url\":\"http://u\","
                         + "\"images\":null,\"status\":\"APPROVED\",\"createdAt\":\"2026-10-26T00:00:00Z\","
                         + "\"caption\":null,\"captionMark\":null,\"tags\":null,\"schemaVersion\":1},"
-                        + "\"occurredAt\":\"2026-10-26T00:00:00Z\",\"schemaVersion\":1}");
+                        + "\"occurredAt\":\"2026-10-26T00:00:00Z\",\"schemaVersion\":1,\"traceId\":null}");
 
         FeedTimelineEvent remove = new FeedTimelineEvent("post/1/x", "REMOVE", null, null, CREATED_AT);
         assertThat(MAPPER.writeValueAsString(remove)).isEqualTo(
                 "{\"timelineKey\":\"post/1/x\",\"action\":\"REMOVE\",\"poolLevel\":null,"
-                        + "\"item\":null,\"occurredAt\":\"2026-10-26T00:00:00Z\",\"schemaVersion\":1}");
+                        + "\"item\":null,\"occurredAt\":\"2026-10-26T00:00:00Z\",\"schemaVersion\":1,"
+                        + "\"traceId\":null}");
         assertThat(keysOf(remove)).containsExactlyInAnyOrder(
-                "timelineKey", "action", "poolLevel", "item", "occurredAt", "schemaVersion");
+                "timelineKey", "action", "poolLevel", "item", "occurredAt", "schemaVersion", "traceId");
     }
 
     // ---------------------------------------------------------------- 其余契约
@@ -132,7 +133,7 @@ class SharedContractJsonTest {
         assertThat(MAPPER.writeValueAsString(e)).isEqualTo(
                 "{\"timelineKey\":\"post/1/x\",\"type\":\"LIKE\",\"watchDuration\":null,"
                         + "\"mediaDuration\":null,\"userId\":\"42\",\"requestId\":\"r1\",\"position\":3,"
-                        + "\"schemaVersion\":1}");
+                        + "\"schemaVersion\":1,\"traceId\":null}");
 
         // 旧端不带 requestId / position（position bias 校正上线前的数据）
         FeedBehaviorEvent legacy = MAPPER.readValue(
@@ -146,7 +147,7 @@ class SharedContractJsonTest {
     @DisplayName("CounterIncrementEvent / CounterView / PlayableView golden 串")
     void counter与playable_goldenJson() throws Exception {
         assertThat(MAPPER.writeValueAsString(new CounterIncrementEvent("post/1/x", "LIKE", 1)))
-                .isEqualTo("{\"postId\":\"post/1/x\",\"type\":\"LIKE\",\"delta\":1}");
+                .isEqualTo("{\"postId\":\"post/1/x\",\"type\":\"LIKE\",\"delta\":1,\"traceId\":null}");
 
         CounterView view = CounterView.zero("post/1/x").add(1, 2, 3, 4);
         assertThat(MAPPER.writeValueAsString(view)).isEqualTo(
@@ -157,6 +158,62 @@ class SharedContractJsonTest {
                 .isEqualTo("{\"postId\":\"post/1/x\",\"playable\":true,\"reason\":null}");
         assertThat(MAPPER.writeValueAsString(PlayableView.blocked("post/1/x", PlayableView.REASON_INTERCEPT)))
                 .isEqualTo("{\"postId\":\"post/1/x\",\"playable\":false,\"reason\":\"INTERCEPT\"}");
+    }
+
+    // ---------------------------------------------------------------- traceId 契约演进
+
+    @Test
+    @DisplayName("traceId 随消息体透传：三类契约均可写入并完整 JSON 往返")
+    void traceId_可空字段透传() throws Exception {
+        FeedTimelineEvent timeline = FeedTimelineEvent.remove("post/1/x").withTraceId("probe-abc123");
+        assertThat(timeline.traceId()).isEqualTo("probe-abc123");
+        assertThat(timeline.schemaVersion()).isEqualTo(FeedTimelineEvent.SCHEMA_VERSION);
+        assertThat(MAPPER.readValue(MAPPER.writeValueAsString(timeline), FeedTimelineEvent.class))
+                .isEqualTo(timeline);
+
+        FeedBehaviorEvent behavior = new FeedBehaviorEvent("post/1/x", "LIKE", null, null, "42", "r1", 3)
+                .withTraceId("probe-abc123");
+        assertThat(behavior.traceId()).isEqualTo("probe-abc123");
+        assertThat(MAPPER.readValue(MAPPER.writeValueAsString(behavior), FeedBehaviorEvent.class))
+                .isEqualTo(behavior);
+
+        CounterIncrementEvent counter = new CounterIncrementEvent("post/1/x", "LIKE", 1)
+                .withTraceId("probe-abc123");
+        assertThat(counter.traceId()).isEqualTo("probe-abc123");
+        assertThat(MAPPER.readValue(MAPPER.writeValueAsString(counter), CounterIncrementEvent.class))
+                .isEqualTo(counter);
+    }
+
+    @Test
+    @DisplayName("回滚安全网：旧消息（无 traceId 字段）能被新消费者解析，字段为 null")
+    void traceId_旧消息无字段可反序列化() throws Exception {
+        FeedTimelineEvent legacyTimeline = MAPPER.readValue(
+                "{\"timelineKey\":\"post/1/x\",\"action\":\"REMOVE\",\"poolLevel\":null,\"item\":null,"
+                        + "\"occurredAt\":\"2026-10-26T00:00:00Z\",\"schemaVersion\":1}",
+                FeedTimelineEvent.class);
+        assertThat(legacyTimeline.traceId()).isNull();
+
+        assertThat(MAPPER.readValue(
+                "{\"timelineKey\":\"post/1/x\",\"type\":\"IMPRESSION\",\"watchDuration\":null,"
+                        + "\"mediaDuration\":null,\"userId\":\"42\"}", FeedBehaviorEvent.class).traceId())
+                .isNull();
+
+        assertThat(MAPPER.readValue("{\"postId\":\"post/1/x\",\"type\":\"LIKE\",\"delta\":1}",
+                CounterIncrementEvent.class).traceId()).isNull();
+    }
+
+    @Test
+    @DisplayName("灰度安全网：新消息（含 traceId）能被「无该字段的旧消费者」在 Boot 口径下解析")
+    void traceId_旧消费者容忍新字段() throws Exception {
+        String newMessage = MAPPER.writeValueAsString(
+                new CounterIncrementEvent("post/1/x", "LIKE", 1, "probe-abc123"));
+        assertThat(newMessage).contains("\"traceId\":\"probe-abc123\"");
+
+        // 旧消费者视角：DTO 里没有 traceId 字段。Boot 口径默认忽略未知字段 → 正常解析。
+        LegacyCounterIncrementEvent seenByOldConsumer =
+                MAPPER.readValue(newMessage, LegacyCounterIncrementEvent.class);
+        assertThat(seenByOldConsumer.postId()).isEqualTo("post/1/x");
+        assertThat(seenByOldConsumer.delta()).isEqualTo(1);
     }
 
     // ---------------------------------------------------------------- 幽灵字段（Result）
@@ -272,6 +329,10 @@ class SharedContractJsonTest {
 
     /** 消费方视角的 Result DTO：用于演示幽灵字段在严格模式下的破坏力。 */
     private record ClientResult(int code, String message, String data, long timestamp) {
+    }
+
+    /** 旧版本消费者视角的计数契约：故意没有 traceId 字段，用于验证灰度期双向兼容。 */
+    private record LegacyCounterIncrementEvent(String postId, String type, int delta) {
     }
 
     /** 反面样本：证明 {@code is} 前缀确实会被 Jackson 当属性序列化（仅测试夹具）。 */

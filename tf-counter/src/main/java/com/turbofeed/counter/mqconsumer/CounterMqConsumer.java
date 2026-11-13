@@ -1,11 +1,14 @@
 package com.turbofeed.counter.mqconsumer;
 
 import com.turbofeed.counter.service.CounterIncrService;
+import com.turbofeed.counter.trace.TraceContext;
 import com.turbofeed.shared.model.CounterIncrementEvent;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+
+import java.util.Map;
 
 /**
  * 计数增量 MQ 消费者（opt-in，{@code turbofeed.mq.enabled=true} 时激活）。
@@ -27,6 +30,12 @@ public class CounterMqConsumer implements RocketMQListener<CounterIncrementEvent
 
     @Override
     public void onMessage(CounterIncrementEvent e) {
-        incrService.accept(e);
+        // 消费线程复用：恢复生产者写进消息体的 traceId，finally 还原快照（防止串到下一批消息）
+        Map<String, String> previous = TraceContext.begin(e == null ? null : e.traceId());
+        try {
+            incrService.accept(e);
+        } finally {
+            TraceContext.end(previous);
+        }
     }
 }

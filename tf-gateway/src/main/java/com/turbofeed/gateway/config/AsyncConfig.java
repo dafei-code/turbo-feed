@@ -4,11 +4,14 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.TaskDecorator;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.annotation.EnableAsync;
 
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -40,6 +43,7 @@ public class AsyncConfig {
         executor.setMaxPoolSize(16);
         executor.setQueueCapacity(256);
         executor.setThreadNamePrefix("review-async-");
+        executor.setTaskDecorator(mdcPropagating());
         // 弹性核心：空闲时回收核心线程（省内存），负载回升时自动重建至 corePoolSize。
         // 与"加节点水平扩容"互补——节点内空闲不空耗资源，突发自动顶上，零新依赖。
         executor.setAllowCoreThreadTimeOut(true);
@@ -68,6 +72,7 @@ public class AsyncConfig {
         executor.setMaxPoolSize(16);
         executor.setQueueCapacity(512);
         executor.setThreadNamePrefix("upload-finalize-");
+        executor.setTaskDecorator(mdcPropagating());
         executor.setAllowCoreThreadTimeOut(true);
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         executor.setWaitForTasksToCompleteOnShutdown(true);
@@ -91,6 +96,7 @@ public class AsyncConfig {
         executor.setMaxPoolSize(16);
         executor.setQueueCapacity(1024);
         executor.setThreadNamePrefix("interaction-");
+        executor.setTaskDecorator(mdcPropagating());
         executor.setAllowCoreThreadTimeOut(true);
         executor.setRejectedExecutionHandler(new CountingCallerRunsPolicy(meterRegistry));
         executor.setWaitForTasksToCompleteOnShutdown(true);
@@ -117,12 +123,52 @@ public class AsyncConfig {
         executor.setMaxPoolSize(8);
         executor.setQueueCapacity(256);
         executor.setThreadNamePrefix("best-effort-");
+        executor.setTaskDecorator(mdcPropagating());
         executor.setAllowCoreThreadTimeOut(true);
         executor.setRejectedExecutionHandler(new DiscardWithMetricPolicy(meterRegistry, log));
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(30);
         executor.initialize();
         return executor;
+    }
+
+    /**
+     * 把提交任务那一刻的 MDC 快照带进异步线程（M4）。
+     *
+     * <p><b>为什么需要</b>：审核、上传收尾、交互落库、可丢旁路这 4 个池子跑的都是「请求的下半段」。
+     * 改造前 MDC 是 ThreadLocal，任务一进池子日志里就变成 {@code []}——例如
+     * {@code MediaLikeService} 的 fire-and-forget 落库失败只打一行 warn，
+     * 这行 warn 无法关联回是哪次点赞请求产生的，等于没有排查线索。</p>
+     *
+     * <p><b>为什么保存 / 恢复 previous 而不是直接 clear</b>：这些 executor 是池化的，
+     * 任务 A 结束后直接 clear 会抹掉线程上可能存在的另一层上下文（嵌套调用、
+     * CallerRunsPolicy 让任务退回调用线程同步执行时尤其明显）。保存后恢复是幂等写法，
+     * 代价是两次 map 拷贝。</p>
+     *
+     * <p><b>必须在 {@code initialize()} 之前 set</b>：{@code ThreadPoolTaskExecutor} 在
+     * 初始化执行器时读取 decorator，之后再设不会作用到已创建的线程池。</p>
+     */
+    private static TaskDecorator mdcPropagating() {
+        return runnable -> {
+            Map<String, String> captured = MDC.getCopyOfContextMap();
+            return () -> {
+                Map<String, String> previous = MDC.getCopyOfContextMap();
+                if (captured == null) {
+                    MDC.clear();
+                } else {
+                    MDC.setContextMap(captured);
+                }
+                try {
+                    runnable.run();
+                } finally {
+                    if (previous == null) {
+                        MDC.clear();
+                    } else {
+                        MDC.setContextMap(previous);
+                    }
+                }
+            };
+        };
     }
 
     /**

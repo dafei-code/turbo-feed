@@ -36,6 +36,8 @@ import java.util.List;
  * @param captionMark 描述解析后的结构化标记 JSON（由 CaptionMarkParser 产出；可空）
  * @param requestId   客户端幂等键（可空，透传自 X-Request-Id 请求头）
  * @param occurredAt  事件发生时间
+ * @param traceId     产生本次上传的请求链路 id（M4，纯诊断、可空）。审核消费侧据此恢复 MDC；
+ *                    MQ 投递失败降级本地线程池时，由 TaskDecorator 传递，两条路径口径一致
  */
 public record MediaUploadedEvent(
         String postId,
@@ -45,7 +47,20 @@ public record MediaUploadedEvent(
         String caption,
         String captionMark,
         String requestId,
-        Instant occurredAt) {
+        Instant occurredAt,
+        String traceId) {
+
+    /** 本字段引入前的 8 参形态：上传主链路与预签名收尾都用它，保留签名不动调用点。 */
+    public MediaUploadedEvent(String postId, List<String> mediaIds, List<String> urls, String userId,
+                              String caption, String captionMark, String requestId, Instant occurredAt) {
+        this(postId, mediaIds, urls, userId, caption, captionMark, requestId, occurredAt, null);
+    }
+
+    /** 生产侧补链路 id；传 {@code null} 表示非请求线程。 */
+    public MediaUploadedEvent withTraceId(String traceId) {
+        return new MediaUploadedEvent(postId, mediaIds, urls, userId, caption, captionMark,
+                requestId, occurredAt, traceId);
+    }
 
     /**
      * 帖代表媒体 ID（首图）。审核状态读写与日志定位都以它为入口，因为

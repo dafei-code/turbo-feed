@@ -10,6 +10,7 @@ import com.turbofeed.gateway.service.event.outbox.TimelineAppendPayload;
 import com.turbofeed.gateway.service.event.outbox.TimelineRemovePayload;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.query.MediaUrlResolver;
+import com.turbofeed.gateway.trace.TraceContext;
 import com.turbofeed.shared.caption.CaptionTagParser;
 import com.turbofeed.shared.redis.RedisKeys;
 import com.turbofeed.shared.result.ErrorCode;
@@ -125,7 +126,7 @@ public class ReviewTimelineDelivery {
     /** 入流：同事务落发件箱事件 + 提交后直投（失败留行，由 OutboxRelay 补偿重投）。 */
     void publishAppend(String mediaId, long userId, MediaItem post, int poolLevel) {
         long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_APPEND, mediaId, userId,
-                new TimelineAppendPayload(post, poolLevel));
+                new TimelineAppendPayload(post, poolLevel, TraceContext.current()));
         outboxService.deliverAfterCommit(eventId);
         // 内容标签冷存同步写入：键用 post.timelineKey()（= Redis tf:media:tags 同源），
         // 标签由 caption 解析、随 post 透传，避免二次解析分叉。best-effort：冷存写入失败
@@ -136,7 +137,7 @@ public class ReviewTimelineDelivery {
     /** 移出公域：同上，走 TIMELINE_REMOVE。 */
     private void publishRemove(String mediaId, long userId, String timelineKey) {
         long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_REMOVE, mediaId, userId,
-                new TimelineRemovePayload(timelineKey));
+                new TimelineRemovePayload(timelineKey, TraceContext.current()));
         outboxService.deliverAfterCommit(eventId);
     }
 

@@ -12,6 +12,7 @@ import com.turbofeed.gateway.service.event.MediaUploadedEvent;
 import com.turbofeed.gateway.service.event.outbox.OutboxEventType;
 import com.turbofeed.gateway.service.event.outbox.OutboxService;
 import com.turbofeed.gateway.service.event.outbox.TimelineAppendPayload;
+import com.turbofeed.gateway.trace.TraceContext;
 import com.turbofeed.gateway.service.query.MediaItem;
 import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.service.review.credit.CreditLevel;
@@ -284,7 +285,7 @@ public class MediaReviewService {
                 if (post != null) {
                     CreditLevel level = accountCreditService.ensure(userId);
                     long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_APPEND, mediaId, userId,
-                            new TimelineAppendPayload(post, level.poolLevel()));
+                            new TimelineAppendPayload(post, level.poolLevel(), TraceContext.current()));
                     outboxService.deliverAfterCommit(eventId);
                 }
                 // 人工通过计数：新人观察期据此解除。只统计人工路径——先发后审的自动通过不计入。

@@ -1,5 +1,6 @@
 package com.turbofeed.feedengine.timeline;
 
+import com.turbofeed.feedengine.trace.TraceContext;
 import com.turbofeed.shared.model.FeedTimelineEvent;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -10,6 +11,8 @@ import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+
+import java.util.Map;
 
 /**
  * Feed 时间线事件消费者（B2：RocketMQ 顺序消息）。
@@ -64,6 +67,19 @@ public class FeedTimelineConsumer implements RocketMQListener<FeedTimelineEvent>
 
     @Override
     public void onMessage(FeedTimelineEvent event) {
+        // MQ 消费线程复用：恢复生产者写进消息体的 traceId，并在 finally 还原上下文快照。
+        // 存量消息 / 旧生产者没有该字段 → TraceContext 生成本地 id（同一次消费的多行日志仍可串）。
+        // DLQ 重放原样发回的是同一个事件对象，id 会跟着回来，这正是走消息体而非 MQ 属性的理由。
+        Map<String, String> previous = TraceContext.begin(event == null ? null : event.traceId());
+        try {
+            handle(event);
+        } finally {
+            TraceContext.end(previous);
+        }
+    }
+
+    /** 真正的消费逻辑：单独成方法，保证 {@code finally} 清理包住失败 rethrow 与指标计数。 */
+    private void handle(FeedTimelineEvent event) {
         // action 为空（消息体损坏）时打 unknown 而不是拼出 null 标签——Prometheus 标签空值
         // 会与「真的叫 null 的 action」混淆，且告警规则里难以表达。
         String action = event == null || event.action() == null ? "UNKNOWN" : event.action();

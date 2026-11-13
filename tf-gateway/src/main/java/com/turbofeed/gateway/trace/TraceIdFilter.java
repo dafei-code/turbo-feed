@@ -39,8 +39,9 @@ import java.io.IOException;
  * 因此：<b>纯逻辑（生成/校验/常量）共享在 {@link TraceIds}，servlet 管道各自一份</b>。
  * 两份的唯一契约锚点是 {@code TraceIdsTest} 里锁死的 header 名与 MDC 键。</p>
  *
- * <p><b>已知边界</b>：只覆盖 HTTP 入站。MQ 消费侧目前拿不到生产者 traceId
- * （契约里没有该字段，加字段等于升 schemaVersion），消费链路用新生成的 id。</p>
+ * <p><b>边界</b>：本过滤器只覆盖 HTTP 入站。MQ 消费侧由 {@link TraceContext} 从消息体的
+ * 可空 {@code traceId} 字段恢复 MDC（新增可空字段按 {@code ContractVersion} 规则不升版本）；
+ * 异步线程池由 {@code AsyncConfig} 的 {@code TaskDecorator} 传递。三者合起来才是一条完整链路。</p>
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)

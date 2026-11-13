@@ -27,9 +27,10 @@ import java.io.IOException;
  * {@link TraceIds}，servlet 管道各自一份；两份的契约锚点是 {@code TraceIdsTest}
  * 锁死的 header 名与 MDC 键——<b>改动其一时它会红</b>。</p>
  *
- * <p><b>已知边界</b>：本过滤器只覆盖 HTTP 入站。<b>MQ 消费链路拿不到生产者的 traceId</b>
- * （{@code FeedTimelineEvent} 契约里没有该字段，加字段等于升 schemaVersion），
- * 消费侧会用新生成的 id。这是如实登记的缺口（见 {@code docs/architecture/failure-mode-ledger.md}）。</p>
+ * <p><b>边界</b>：本过滤器只覆盖 HTTP 入站。MQ 消费侧由 {@link TraceContext} 从消息体的
+ * 可空 {@code traceId} 字段恢复 MDC；引擎 → 网关的回流由
+ * {@code TracePropagationInterceptor} 挂到两个 {@code RestClient.Builder} 上。
+ * 新增可空字段按 {@code ContractVersion} 规则不升版本。</p>
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)

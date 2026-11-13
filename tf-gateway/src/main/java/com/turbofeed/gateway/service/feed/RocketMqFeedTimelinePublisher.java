@@ -2,6 +2,7 @@ package com.turbofeed.gateway.service.feed;
 
 import com.turbofeed.gateway.client.FeedItemMapper;
 import com.turbofeed.gateway.service.query.MediaItem;
+import com.turbofeed.gateway.trace.TraceContext;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.model.FeedTimelineEvent;
 import lombok.RequiredArgsConstructor;
@@ -43,7 +44,9 @@ public class RocketMqFeedTimelinePublisher implements FeedTimelinePublisher {
             return false;
         }
         FeedItemView view = FeedItemMapper.toContract(item);
-        FeedTimelineEvent event = FeedTimelineEvent.append(view, poolLevel);
+        // traceId 落消息体：Outbox 重投 / DLQ 重放只保留消息体，MQ 属性会丢
+        FeedTimelineEvent event = FeedTimelineEvent.append(view, poolLevel)
+                .withTraceId(TraceContext.current());
         // hashKey 必须与 remove 用同一个键（view.timelineKey()：有 postId 用 postId，历史数据回退 mediaId），
         // 否则同一帖的 append 与 remove 会落不同队列、失去顺序保证，
         // 出现「remove 先执行、append 后执行 → 已下架内容重新出现」的内容安全事故。
@@ -58,7 +61,8 @@ public class RocketMqFeedTimelinePublisher implements FeedTimelinePublisher {
         if (timelineKey == null) {
             return false;
         }
-        FeedTimelineEvent event = FeedTimelineEvent.remove(timelineKey);
+        FeedTimelineEvent event = FeedTimelineEvent.remove(timelineKey)
+                .withTraceId(TraceContext.current());
         // 与 append 同键，保证同一帖严格有序
         rocketMQTemplate.syncSendOrderly(topic, event, timelineKey);
         return true;

@@ -1,5 +1,6 @@
 package com.turbofeed.feedengine.timeline;
 
+import com.turbofeed.feedengine.trace.TraceContext;
 import com.turbofeed.shared.model.ContractVersion;
 import com.turbofeed.shared.model.FeedBehaviorEvent;
 import com.turbofeed.feedengine.interest.InterestService;
@@ -10,6 +11,8 @@ import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+
+import java.util.Map;
 
 /**
  * 行为埋点的 RocketMQ 消费者（{@code turbofeed.mq.enabled=true} 时激活）。
@@ -46,6 +49,15 @@ public class FeedBehaviorConsumer implements RocketMQListener<FeedBehaviorEvent>
 
     @Override
     public void onMessage(FeedBehaviorEvent msg) {
+        Map<String, String> previous = TraceContext.begin(msg == null ? null : msg.traceId());
+        try {
+            handle(msg);
+        } finally {
+            TraceContext.end(previous);
+        }
+    }
+
+    private void handle(FeedBehaviorEvent msg) {
         if (msg == null) {
             return;
         }

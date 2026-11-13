@@ -30,6 +30,11 @@ import java.time.Instant;
  * @param schemaVersion 契约版本号（M2 / 4.1），协商规则见 {@link ContractVersion}。
  *                    MQ 里未被消费的存量消息没有本字段（反序列化为 {@code null}），按首版语义容忍。
  *                    生产侧请用 5 参便捷构造器，由本类统一填 {@link #SCHEMA_VERSION}
+ * @param traceId    产生本次事件的请求链路 id（M4 可观测性，纯诊断、<b>可空</b>）。
+ *                    经 MQ 消息体透传给消费侧，而不是放 MQ 属性：Outbox 重投与 DLQ 重放
+ *                    都只保留消息体，属性会丢。按 {@link ContractVersion} 的演进规则，
+ *                    新增可空字段<b>不升 schemaVersion</b>；消费侧必须容忍 {@code null}
+ *                    （存量消息 / 旧生产者 / 已物化的老事件都没有该字段）。
  */
 public record FeedTimelineEvent(
         String timelineKey,
@@ -37,7 +42,8 @@ public record FeedTimelineEvent(
         Integer poolLevel,
         FeedItemView item,
         Instant occurredAt,
-        Integer schemaVersion) {
+        Integer schemaVersion,
+        String traceId) {
 
     /** 入流（审核通过 / 申诉翻案）。 */
     public static final String ACTION_APPEND = "APPEND";
@@ -58,6 +64,25 @@ public record FeedTimelineEvent(
     public FeedTimelineEvent(String timelineKey, String action, Integer poolLevel, FeedItemView item,
                              Instant occurredAt) {
         this(timelineKey, action, poolLevel, item, occurredAt, SCHEMA_VERSION);
+    }
+
+    /**
+     * 6 参构造器：本字段引入前就存在，被大量测试用于构造「无版本号 / 指定版本号」的历史数据，
+     * 保留签名避免把契约演进的代价转嫁给所有调用点；{@code traceId} 按存量数据处理为 {@code null}。
+     */
+    public FeedTimelineEvent(String timelineKey, String action, Integer poolLevel, FeedItemView item,
+                             Instant occurredAt, Integer schemaVersion) {
+        this(timelineKey, action, poolLevel, item, occurredAt, schemaVersion, null);
+    }
+
+    /**
+     * 生产侧补链路 id，返回新实例（record 不可变，禁止 setter 式就地改）。
+     *
+     * <p>允许传 {@code null}：非请求线程（定时任务、启动期、MQ 消费后再次投递）没有 MDC，
+     * 此时消息体里就是 {@code null}，消费侧会自行生成本地 id。</p>
+     */
+    public FeedTimelineEvent withTraceId(String traceId) {
+        return new FeedTimelineEvent(timelineKey, action, poolLevel, item, occurredAt, schemaVersion, traceId);
     }
 
     // ⚠️ 刻意【不提供】isAppend() / isRemove() 这类 is 前缀布尔方法。

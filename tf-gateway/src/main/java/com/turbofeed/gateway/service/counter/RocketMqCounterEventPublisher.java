@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.service.counter;
 
+import com.turbofeed.gateway.trace.TraceContext;
 import com.turbofeed.shared.model.CounterIncrementEvent;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.slf4j.Logger;
@@ -30,7 +31,8 @@ public class RocketMqCounterEventPublisher implements CounterEventPublisher {
     @Override
     public void incr(String postId, String type, int delta) {
         try {
-            rocketMQTemplate.syncSendOrderly(topic, new CounterIncrementEvent(postId, type, delta), postId);
+            rocketMQTemplate.syncSendOrderly(topic,
+                    new CounterIncrementEvent(postId, type, delta).withTraceId(TraceContext.current()), postId);
         } catch (Exception e) {
             log.warn("计数增量投递 tf-counter(MQ)失败（fail-open，不影响点赞主流程）: postId={}, type={}, delta={}, {}",
                     postId, type, delta, e.getMessage());

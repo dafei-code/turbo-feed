@@ -70,6 +70,23 @@ class TraceIdsTest {
     }
 
     @Test
+    @DisplayName("orGenerate：合规上游值原样沿用，保证生产/消费两侧同一个 id")
+    void orGenerate_reusesValidCandidate() {
+        assertEquals("probe-abc123", TraceIds.orGenerate("probe-abc123"));
+        assertEquals("probe-abc123", TraceIds.orGenerate("  probe-abc123  "));
+    }
+
+    @Test
+    @DisplayName("orGenerate：缺失/伪造/超长值一律生成新 id，绝不把不可信内容放进 MDC")
+    void orGenerate_fallsBackOnUntrustedCandidate() {
+        for (String bad : new String[]{null, "", "   ", "abc\n2026 INFO 审核通过", "a".repeat(65), "中文"}) {
+            String generated = TraceIds.orGenerate(bad);
+            assertNotNull(generated);
+            assertTrue(generated.matches("[0-9a-f]{32}"), "应回退到 generate(): " + bad);
+        }
+    }
+
+    @Test
     @DisplayName("常量：header 名与 MDC 键是对外契约，不得随手改")
     void constants_areStableContract() {
         // header 名变了 → 网关与引擎之间的透传静默失效（两边都还能跑，只是日志串不起来）。

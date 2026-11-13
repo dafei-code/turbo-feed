@@ -20,6 +20,7 @@ import com.turbofeed.gateway.service.moderation.ContentSecurityService;
 import com.turbofeed.gateway.service.moderation.ContentVerdict;
 import com.turbofeed.gateway.service.moderation.ModerationAction;
 import com.turbofeed.gateway.service.signal.ModerationDownstreamRouter;
+import com.turbofeed.gateway.trace.TraceContext;
 import com.turbofeed.gateway.service.penalty.PenaltyService;
 import com.turbofeed.gateway.service.health.AccountHealth;
 import com.turbofeed.gateway.service.health.AccountHealthService;
@@ -762,7 +763,7 @@ public class MediaUploadService {
         //    改走发件箱：事件行与本方法的逻辑删除在同一事务里——删了就一定有一条待投递的 remove。
         //    改造前是「提交后直接调引擎、失败仅告警」= fail-open：内容已删，公域却还在展示。
         long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_REMOVE, mediaId, uid,
-                new TimelineRemovePayload(legacySingle ? mediaId : postId));
+                new TimelineRemovePayload(legacySingle ? mediaId : postId, TraceContext.current()));
         outboxService.deliverAfterCommit(eventId);
         // 4) 失效整帖状态缓存（旁路缓存 fail-open）：状态是整帖的，只清代表行会让其余图在 TTL 内返回旧状态
         try {

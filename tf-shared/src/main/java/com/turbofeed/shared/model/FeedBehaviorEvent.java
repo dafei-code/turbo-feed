@@ -31,9 +31,13 @@ package com.turbofeed.shared.model;
  * <p><b>为什么不落"服务端排序分 score"</b>：分数随模型/权重版本变化，历史分数与新分数不可比，
  * 落盘反而污染训练集。离线训练时应由<b>特征重算</b>（同一份特征代码在样本时间点重放）得到，
  * 这也是特征存储要解决的核心问题（训练- serving 一致性）。</p>
+ *
+ * @param traceId 产生本次埋点的请求链路 id（M4，纯诊断、可空）；随消息体透传给消费侧。
+ *                按 {@link ContractVersion} 规则新增可空字段不升版本，消费侧必须容忍 {@code null}
  */
 public record FeedBehaviorEvent(String timelineKey, String type, Integer watchDuration, Integer mediaDuration,
-                                String userId, String requestId, Integer position, Integer schemaVersion) {
+                                String userId, String requestId, Integer position, Integer schemaVersion,
+                                String traceId) {
 
     /**
      * 当前代码产生的契约版本（首版 = 1）。只在不兼容变更时递增，
@@ -48,5 +52,17 @@ public record FeedBehaviorEvent(String timelineKey, String type, Integer watchDu
     public FeedBehaviorEvent(String timelineKey, String type, Integer watchDuration, Integer mediaDuration,
                              String userId, String requestId, Integer position) {
         this(timelineKey, type, watchDuration, mediaDuration, userId, requestId, position, SCHEMA_VERSION);
+    }
+
+    /** 8 参构造器：本字段引入前的规范形态，保留以兼容构造历史版本数据的调用点。 */
+    public FeedBehaviorEvent(String timelineKey, String type, Integer watchDuration, Integer mediaDuration,
+                             String userId, String requestId, Integer position, Integer schemaVersion) {
+        this(timelineKey, type, watchDuration, mediaDuration, userId, requestId, position, schemaVersion, null);
+    }
+
+    /** 生产侧补链路 id；传 {@code null} 表示非请求线程，消费侧会自行生成。 */
+    public FeedBehaviorEvent withTraceId(String traceId) {
+        return new FeedBehaviorEvent(timelineKey, type, watchDuration, mediaDuration,
+                userId, requestId, position, schemaVersion, traceId);
     }
 }

@@ -1,5 +1,6 @@
 package com.turbofeed.feedengine.config;
 
+import com.turbofeed.feedengine.trace.TracePropagationInterceptor;
 import org.springframework.boot.autoconfigure.web.client.RestClientBuilderConfigurer;
 import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.context.annotation.Bean;
@@ -45,7 +46,7 @@ public class ServiceDiscoveryRestClientConfig {
     @Bean
     @Scope("prototype")
     public RestClient.Builder directRestClientBuilder(RestClientBuilderConfigurer configurer) {
-        return configurer.configure(RestClient.builder());
+        return withTracePropagation(configurer.configure(RestClient.builder()));
     }
 
     /**
@@ -58,6 +59,20 @@ public class ServiceDiscoveryRestClientConfig {
     @Bean
     @LoadBalanced
     public RestClient.Builder loadBalancedRestClientBuilder() {
-        return RestClient.builder();
+        return withTracePropagation(RestClient.builder());
+    }
+
+    /**
+     * 给出站请求带上当前 traceId（M4）。
+     *
+     * <p><b>为什么两个 builder 都要加</b>：只加直连那份，一旦开启 Nacos 服务发现走 LB 分支，
+     * 「引擎 → 网关」的回流就会静默断开——功能全都正常，只有日志再也串不起来。
+     * 这类「只在某种部署形态下失效」的缺口必须在同一处关掉，与网关侧同款写法。</p>
+     *
+     * <p>引擎侧此前没有这份拦截器：{@code GatewayReviewClient}（池级晋级加严回调）
+     * 注入的正是这两个 builder，导致上传 → 审核 → 回流网关这条链路最后一跳丢 id。</p>
+     */
+    private static RestClient.Builder withTracePropagation(RestClient.Builder builder) {
+        return builder.requestInterceptor(new TracePropagationInterceptor());
     }
 }

@@ -1,12 +1,15 @@
 package com.turbofeed.gateway.service.event;
 
 import com.turbofeed.gateway.service.review.MediaReviewService;
+import com.turbofeed.gateway.trace.TraceContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+
+import java.util.Map;
 
 /**
  * RocketMQ 审核消费者（Observer 模式：跨进程事件订阅方）。
@@ -35,6 +38,17 @@ public class MediaReviewConsumer implements RocketMQListener<MediaUploadedEvent>
 
     @Override
     public void onMessage(MediaUploadedEvent event) {
+        // 上传请求的 id 由 RocketMqMediaEventPublisher 写进消息体；缺失（旧消息 / 本地降级）
+        // 时生成本地 id，保证同一次审核的多行日志可串。finally 必须还原：消费线程是复用的。
+        Map<String, String> previous = TraceContext.begin(event == null ? null : event.traceId());
+        try {
+            handle(event);
+        } finally {
+            TraceContext.end(previous);
+        }
+    }
+
+    private void handle(MediaUploadedEvent event) {
         log.info("MQ 消费帖子上传事件: postId={}, images={}, userId={}",
                 event.postId(), event.imageCount(), event.userId());
         // 整帖 N 行落库与整帖审核翻转统一在 handleUploaded 内完成（insert PENDING -> review APPROVED），

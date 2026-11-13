@@ -16,8 +16,19 @@ import com.turbofeed.gateway.service.query.MediaItem;
  *
  * @param item      待入流的帖子条目（整帖视图，images 为该帖全部图片）
  * @param poolLevel 信用等级对应的流量池层级
+ * @param traceId   触发本次入流的请求链路 id（M4，可空）。<b>必须落在发件箱 payload 里</b>：
+ *                  {@code OutboxRelay} 补偿重投时是从库里读 JSON 再重新构造
+ *                  {@code FeedTimelineEvent} 的，不是把原事件对象原样重发；不落库就意味着
+ *                  中继重投的那一跳会丢 id。落库后还能用一条 SQL 查出「这条事件来自哪次请求」。
+ *                  存量事件行没有该字段，按 {@code null} 容忍。
  */
 public record TimelineAppendPayload(
         @JsonProperty("item") MediaItem item,
-        @JsonProperty("poolLevel") int poolLevel) {
+        @JsonProperty("poolLevel") int poolLevel,
+        @JsonProperty("traceId") String traceId) {
+
+    /** 本字段引入前的 2 参形态：存量调用点 / 测试无需改动，按无链路信息处理。 */
+    public TimelineAppendPayload(MediaItem item, int poolLevel) {
+        this(item, poolLevel, null);
+    }
 }

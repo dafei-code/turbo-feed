@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.service.comment;
 
+import com.turbofeed.gateway.trace.TraceContext;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,7 +28,8 @@ public class RocketMqCommentEventPublisher implements CommentEventPublisher {
     @Override
     public void publish(Comment c) {
         try {
-            rocketMQTemplate.syncSendOrderly(TOPIC, CommentCreatedEvent.from(c), c.mediaId());
+            rocketMQTemplate.syncSendOrderly(TOPIC,
+                    CommentCreatedEvent.from(c, TraceContext.current()), c.mediaId());
         } catch (Exception e) {
             log.warn("评论创建事件投递 MQ 失败（fail-open，不影响发布主流程）: mediaId={}, commentId={}, {}",
                     c.mediaId(), c.commentId(), e.getMessage());

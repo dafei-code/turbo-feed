@@ -26,10 +26,13 @@ import java.util.UUID;
  * <p>故 {@link #sanitize(String)} 只放行长 ≤64 的 {@code [A-Za-z0-9._-]}，
  * 不合规一律当作「没有传」，由本服务重新生成——宁可丢上游的关联性，也不让不可信内容进日志。</p>
  *
- * <h3>已知边界</h3>
- * <p>本类只解决「同一个 HTTP 请求内的日志能串起来」。<b>MQ 消费侧目前拿不到生产者的 traceId</b>
- * （{@code FeedTimelineEvent} 契约里没有这个字段，加字段等于升 schemaVersion），
- * 消费链路会用消费时刻新生成的 id。这是如实登记的缺口，不是遗漏。</p>
+ * <h3>边界</h3>
+ * <p>本类只提供<b>纯逻辑</b>（生成、白名单校验、常量名）。MDC 的写入与清理由各服务的
+ * {@code TraceContext} / {@code TraceIdFilter} 负责——tf-shared 禁止依赖 slf4j。</p>
+ *
+ * <p>契约消息体里新增可空 {@code traceId} 属于兼容变更：按 {@code ContractVersion}
+ * 「加可空字段不必递增版本」的规则<b>不升 schemaVersion</b>，消费侧必须无条件容忍
+ * {@code null}（存量消息、旧生产者、DLQ 里物化的老事件都没有该字段）。</p>
  */
 public final class TraceIds {
 
@@ -79,6 +82,25 @@ public final class TraceIds {
             }
         }
         return trimmed;
+    }
+
+    /**
+     * 取一个可安全写入日志的 traceId：优先沿用传入值（先过白名单），否则新生成一个。
+     *
+     * <p><b>为什么消费侧必须走这里</b>：消息体里的 traceId 和入站 header 一样是<b>不可信输入</b>
+     * ——MQ 消息可被伪造、DLQ 里可能躺着老数据，直接 {@code MDC.put} 会把带换行的值打进日志，
+     * 造成日志注入。沿用不上时也要生成一个本地 id，而不是留空：留空则消费日志出现 {@code []}，
+     * 与「非请求线程」无法区分，排查时会误判成「这条消息不是用户触发的」。</p>
+     *
+     * <p>生成新 id 意味着这一跳无法跨回生产侧，但至少同一次消费的多行日志能串起来，
+     * 与补齐前的状态等价，属于零退化。</p>
+     *
+     * @param candidate 消息体 / header 里携带的原始值，可为 {@code null}
+     * @return 合规的 traceId，永不为 {@code null}
+     */
+    public static String orGenerate(String candidate) {
+        String safe = sanitize(candidate);
+        return safe == null ? generate() : safe;
     }
 
     /** 白名单字符：字母数字与 {@code . _ -}（覆盖 UUID、W3C traceparent 的常用字符集）。 */

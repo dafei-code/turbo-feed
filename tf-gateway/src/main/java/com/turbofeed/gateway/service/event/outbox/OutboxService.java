@@ -4,7 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.gateway.repository.OutboxEventRepository;
 import com.turbofeed.gateway.service.feed.FeedTimelinePublisher;
+import com.turbofeed.gateway.trace.TraceContext;
 import com.turbofeed.gateway.util.SnowflakeIdGenerator;
+import com.turbofeed.shared.trace.TraceIds;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,6 +16,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.Map;
 
 /**
  * 发件箱服务：落事件 + 投递（快路径与补偿路径共用同一段投递逻辑）。
@@ -143,12 +146,40 @@ public class OutboxService {
         switch (OutboxEventType.valueOf(event.eventType())) {
             case TIMELINE_APPEND -> {
                 TimelineAppendPayload payload = objectMapper.readValue(event.payload(), TimelineAppendPayload.class);
-                feedTimelinePublisher.append(payload.item(), payload.poolLevel());
+                withPayloadTrace(payload.traceId(),
+                        () -> feedTimelinePublisher.append(payload.item(), payload.poolLevel()));
             }
             case TIMELINE_REMOVE -> {
                 TimelineRemovePayload payload = objectMapper.readValue(event.payload(), TimelineRemovePayload.class);
-                feedTimelinePublisher.remove(payload.timelineKey());
+                withPayloadTrace(payload.traceId(),
+                        () -> feedTimelinePublisher.remove(payload.timelineKey()));
             }
+        }
+    }
+
+    /**
+     * 投递前恢复<b>事件行里保存的</b> traceId（M4）。
+     *
+     * <p><b>为什么必须有这一步</b>：补偿路径（{@link OutboxRelay}）不在原请求线程上，
+     * 它从库里读出 payload JSON 再重新构造 {@code FeedTimelineEvent}——不是把原事件对象原样重发。
+     * 若 payload 不落 traceId、投递前也不恢复 MDC，中继重投的那一跳必然丢链路，
+     * 而「重投」恰恰是最需要 traceId 的场景（要回答这条迟到事件最初由哪次请求产生）。</p>
+     *
+     * <p><b>为什么缺字段时直接跑、不 begin</b>：存量事件行没有该字段。快路径
+     * {@code afterCommit} 跑在原请求线程上，MDC 里已经有正确的 id，此时若生成一个新 id
+     * 覆盖上去反而是回归。缺字段就沿用当前线程上下文，是零退化写法。</p>
+     */
+    private void withPayloadTrace(String rawTraceId, Runnable delivery) {
+        String safe = TraceIds.sanitize(rawTraceId);
+        if (safe == null) {
+            delivery.run();
+            return;
+        }
+        Map<String, String> previous = TraceContext.begin(safe);
+        try {
+            delivery.run();
+        } finally {
+            TraceContext.end(previous);
         }
     }
 }

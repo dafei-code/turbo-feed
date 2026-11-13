@@ -57,3 +57,12 @@ management:
     web:
       exposure:
         include: health,info
+
+# ---- M4 可观测性：traceId 进日志 ----
+# 与网关 / 引擎同口径（那两份在各自 application.yml）。缺这段时，即便消费侧把 traceId
+# 放进 MDC，日志里也打印不出来——这是「补了 Consumer 却依然查不到链路」最常见的假修复。
+# %X{traceId:-} 的 :- 空默认值很重要：定时任务 / 启动期等非请求线程没有 id 时输出空串，
+# 而不是字面量 traceId_IS_UNDEFINED。
+logging:
+  pattern:
+    level: "%5p [%X{traceId:-}]"

@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.service.event;
 
+import com.turbofeed.gateway.trace.TraceContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
@@ -44,15 +45,18 @@ public class RocketMqMediaEventPublisher implements MediaEventPublisher {
 
     @Override
     public void publish(MediaUploadedEvent event) {
+        // 消息体带 traceId：MQ 成功时由 MediaReviewConsumer 恢复 MDC；
+        // 失败降级本地线程池时由 AsyncConfig 的 TaskDecorator 传递同一份 MDC。
+        MediaUploadedEvent traced = event.withTraceId(TraceContext.current());
         try {
-            rocketMQTemplate.convertAndSend(topic, event);
+            rocketMQTemplate.convertAndSend(topic, traced);
             log.info("帖子上传事件已投递 RocketMQ: topic={}, postId={}, images={}",
-                    topic, event.postId(), event.imageCount());
+                    topic, traced.postId(), traced.imageCount());
         } catch (MessagingException e) {
             // MQ 不可用 → 降级本地线程池消费：上传不失败、审核不中断（幂等保证安全）
             log.warn("RocketMQ 投递失败，降级本地线程处理: topic={}, postId={}, {}",
-                    topic, event.postId(), e.getMessage());
-            applicationEventPublisher.publishEvent(event);
+                    topic, traced.postId(), e.getMessage());
+            applicationEventPublisher.publishEvent(traced);
         }
     }
 }

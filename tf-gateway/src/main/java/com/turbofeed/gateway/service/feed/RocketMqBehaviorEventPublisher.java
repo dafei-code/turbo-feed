@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.service.feed;
 
+import com.turbofeed.gateway.trace.TraceContext;
 import com.turbofeed.shared.model.FeedBehaviorEvent;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,6 +38,8 @@ public class RocketMqBehaviorEventPublisher implements BehaviorEventPublisher {
         if (reports == null) {
             return;
         }
+        // 一次上报的批量埋点同属一个请求，取一次即可；非请求线程为 null，消费侧会自行生成
+        String traceId = TraceContext.current();
         for (BehaviorReport r : reports) {
             if (r == null || r.postId() == null) {
                 continue;
@@ -44,7 +47,7 @@ public class RocketMqBehaviorEventPublisher implements BehaviorEventPublisher {
             try {
                 rocketMQTemplate.syncSendOrderly(topic,
                         new FeedBehaviorEvent(r.postId(), r.type(), r.watchDuration(), r.mediaDuration(),
-                                userId, r.requestId(), r.position()), r.postId());
+                                userId, r.requestId(), r.position()).withTraceId(traceId), r.postId());
             } catch (Exception e) {
                 // 非关键路径：MQ 不可用时静默丢弃埋点，仅告警
                 org.slf4j.LoggerFactory.getLogger(RocketMqBehaviorEventPublisher.class)
