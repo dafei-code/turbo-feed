@@ -41,7 +41,8 @@ class ModerationDownstreamRouterTest {
     ModerationDownstreamRouter router;
 
     private static ContentVerdict v(ModerationAction action) {
-        return new ContentVerdict(action, ContentScene.CAPTION, "w", "c", false, 0, 1);
+        // 第 8 参 hitId：本测试只验证信号路由，不涉及命中审计行回链，传 null 即可
+        return new ContentVerdict(action, ContentScene.CAPTION, "w", "c", false, 0, 1, null);
     }
 
     private static ModerationSignalView.DispositionView signal(String action) {
