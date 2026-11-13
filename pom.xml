@@ -41,6 +41,9 @@
         <!-- ArchUnit（M1/3.1）：把「架构决策」写成可执行规则。版本 1.3.0 与 JUnit 5.11（Boot 3.4）
              兼容；只用于测试，不进任何运行期 classpath。 -->
         <archunit.version>1.3.0</archunit.version>
+        <!-- 结构化 JSON 日志（M4）：8.1 修复了 Logback ≥1.5.13 改 Supplier 接口后
+             8.0 的 %property 解析不兼容；Boot 3.4.3 带 Logback 1.5.x，故钉 8.1。 -->
+        <logstash-logback-encoder.version>8.1</logstash-logback-encoder.version>
         <!-- caffeine / h2 / mysql-connector-j 由 spring-boot-dependencies BOM 托管，无需声明版本 -->
     </properties>
 
@@ -98,6 +101,16 @@
                 <artifactId>archunit-junit5</artifactId>
                 <version>${archunit.version}</version>
                 <scope>test</scope>
+            </dependency>
+            <!-- 结构化 JSON 日志（M4）：生产多副本时纯文本 console 日志无法跨实例聚合，
+                 且容器 json-file 轮转会在重建 / 扩缩容后丢日志。这里只提供 encoder，
+                 采集侧（DaemonSet / sidecar → Loki / ES）由部署平台接线，仓库不绑定编排形态。
+                 scope 钉死 runtime：业务代码不应依赖 encoder 类型，只有 logback 配置引用它。 -->
+            <dependency>
+                <groupId>net.logstash.logback</groupId>
+                <artifactId>logstash-logback-encoder</artifactId>
+                <version>${logstash-logback-encoder.version}</version>
+                <scope>runtime</scope>
             </dependency>
             <!-- RocketMQ：钉死 2.3.5（2.3.x 最新，对 Spring Boot 3.4.x 的 @ConfigurationProperties 绑定兼容）。
                  关键点：spring-cloud-alibaba-dependencies BOM 会把内层 rocketmq-spring-boot

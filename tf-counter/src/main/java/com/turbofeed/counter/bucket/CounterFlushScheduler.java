@@ -1,8 +1,11 @@
 package com.turbofeed.counter.bucket;
 
+import com.turbofeed.counter.trace.TraceContext;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+
+import java.util.Map;
 
 /**
  * standalone 模式 flush 调度器（<b>默认</b>，{@code redis-buffer-enabled=false} / 缺省时生效）。
@@ -27,6 +30,11 @@ public class CounterFlushScheduler {
 
     @Scheduled(fixedDelayString = "${turbofeed.counter.flush-interval-ms:5000}")
     public void flush() {
-        flushService.flush();
+        Map<String, String> previous = TraceContext.beginCycle();
+        try {
+            flushService.flush();
+        } finally {
+            TraceContext.end(previous);
+        }
     }
 }

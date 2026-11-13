@@ -1,9 +1,12 @@
 package com.turbofeed.counter.bucket;
 
+import com.turbofeed.counter.trace.TraceContext;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+
+import java.util.Map;
 
 /**
  * 集群模式 flush 调度器（{@code redis-buffer-enabled=true} 时生效，覆盖 standalone 调度器）。
@@ -33,6 +36,11 @@ public class ClusteredCounterFlushScheduler {
     @Scheduled(fixedDelayString = "${turbofeed.counter.flush-interval-ms:5000}")
     @SchedulerLock(name = "tf-counter-flush", lockAtMostFor = "9s", lockAtLeastFor = "4s")
     public void flush() {
-        flushService.flush();
+        Map<String, String> previous = TraceContext.beginCycle();
+        try {
+            flushService.flush();
+        } finally {
+            TraceContext.end(previous);
+        }
     }
 }

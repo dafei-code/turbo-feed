@@ -42,6 +42,18 @@ public final class TraceIds {
     /** 日志 MDC 中的键名；日志格式里的 {@code %X{traceId}} 必须与此一致。 */
     public static final String MDC_KEY = "traceId";
 
+    /** 处理请求的实例标识（多副本下区分日志来自哪个 Pod / 容器），由 {@link InstanceIds} 生成。 */
+    public static final String MDC_INSTANCE_KEY = "instanceId";
+
+    /** 定时任务轮次标识：同一轮调度内的多行日志靠它自关联（多实例同时调度时尤其必要）。 */
+    public static final String MDC_CYCLE_KEY = "cycleId";
+
+    /** 业务维度键名（L3 尚未接入，先在此固定，避免各服务散落字符串字面量）。 */
+    public static final String MDC_USER_KEY = "userId";
+
+    /** 业务维度键名（L3 尚未接入）。 */
+    public static final String MDC_POST_KEY = "postId";
+
     /** traceId 最大长度：够放 UUID(32) / W3C traceparent 的 32 位十六进制，又能挡住超长 header。 */
     private static final int MAX_LENGTH = 64;
 

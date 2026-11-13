@@ -1,5 +1,6 @@
 package com.turbofeed.feedengine.timeline;
 
+import com.turbofeed.feedengine.trace.TraceContext;
 import com.turbofeed.shared.feature.FeatureFlagKeys;
 import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.model.FeedTimelineEvent;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 死信积压告警巡检（P0-2 DLQ 告警部署接线）。
@@ -65,7 +67,12 @@ public class DlqAlertService {
     /** 定时巡检（部署可调间隔，默认 60s）。 */
     @Scheduled(fixedDelayString = "${turbofeed.feed.timeline.dlq-alert.check-interval-ms:60000}")
     public void scheduledCheck() {
-        check();
+        Map<String, String> previous = TraceContext.beginCycle();
+        try {
+            check();
+        } finally {
+            TraceContext.end(previous);
+        }
     }
 
     /**

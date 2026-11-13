@@ -63,6 +63,9 @@ management:
 # 放进 MDC，日志里也打印不出来——这是「补了 Consumer 却依然查不到链路」最常见的假修复。
 # %X{traceId:-} 的 :- 空默认值很重要：定时任务 / 启动期等非请求线程没有 id 时输出空串，
 # 而不是字面量 traceId_IS_UNDEFINED。
+# 非 prod 文本 console；prod 由 logback-spring.xml 切 JSON。
+# 缺这段时即便消费侧把 id 放进 MDC，日志里也打不出来——这是「补了 Consumer 却依然查不到
+# 链路」最常见的假修复。instanceId / cycleId 同理，见网关 application.yml 同一段。
 logging:
   pattern:
-    level: "%5p [%X{traceId:-}]"
+    level: "%5p [%X{traceId:-}] [%X{instanceId:-}] [%X{cycleId:-}]"

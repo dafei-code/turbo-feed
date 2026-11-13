@@ -380,7 +380,10 @@ turbofeed:
 # %X{traceId:-} 的 :- 空默认值很重要：缺失时输出空串，而不是字面量 traceId_IS_UNDEFINED
 # （Logback 对未定义 MDC 键的默认输出），那种日志既难看又会干扰 grep。
 # 无 traceId 的场景是正常的：定时任务、MQ 消费、启动期，都不在 HTTP 请求线程上。
+# 非 prod 走文本 console（prod 由 logback-spring.xml 切换为 JSON encoder 输出到 stdout）。
+# instanceId / cycleId 与 traceId 同口径：多副本集中日志里，前者区分来源实例，后者把同一轮
+# 定时调度的多行日志自关联；:- 空默认值保证无该维度时输出空串而不是 IS_UNDEFINED。
 logging:
   pattern:
-    level: "%5p [%X{traceId:-}]"
+    level: "%5p [%X{traceId:-}] [%X{instanceId:-}] [%X{cycleId:-}]"
 

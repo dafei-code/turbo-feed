@@ -12,6 +12,9 @@ import org.springframework.data.redis.connection.lettuce.LettuceClientConfigurat
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.connection.lettuce.LettucePoolingClientConfiguration;
 
+import org.apache.rocketmq.spring.core.RocketMQListener;
+
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 /**
@@ -60,4 +63,21 @@ class ArchitectureTest {
                     "com.turbofeed.gateway..",
                     "com.turbofeed.feedengine..")
             .because("tf-counter 与网关 / 引擎是独立部署单元：跨服务只走 HTTP / MQ，共享契约放 tf-shared。");
+
+    /**
+     * MQ 消费者必须恢复生产侧 traceId（M4）。
+     *
+     * <p><b>防的是什么</b>：本服务九成流量走 MQ，消费线程池化复用；新增
+     * {@code RocketMQListener} 实现时漏写 {@code TraceContext.begin/end}，
+     * 功能正常、编译通过、单测全绿，只有线上排查才发现该链路 traceId 为空或串号。</p>
+     *
+     * <p>rocketmq-spring-boot 2.3.5 无通用 MessageInterceptor 扩展点，tf-shared 又禁止
+     * slf4j/MDC，统一装饰器无法下沉；因此用构建期规则把漏写挡住。</p>
+     */
+    @ArchTest
+    static final ArchRule MQ消费者必须恢复MDC = classes()
+            .that().implement(RocketMQListener.class)
+            .should().dependOnClassesThat().haveSimpleName("TraceContext")
+            .because("消费线程复用：不调用 TraceContext.begin/end 会让该链路日志丢失或串用 traceId，"
+                    + "且不会有任何编译期 / 运行期报错，只能靠构建期规则兜住。");
 }

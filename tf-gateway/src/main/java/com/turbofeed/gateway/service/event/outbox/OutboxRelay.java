@@ -1,6 +1,7 @@
 package com.turbofeed.gateway.service.event.outbox;
 
 import com.turbofeed.gateway.repository.OutboxEventRepository;
+import com.turbofeed.gateway.trace.TraceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 发件箱中继：把库里「待投递 / 失败待重试 / 卡死待回收」的事件投出去（P0-3 的补偿通道）。
@@ -56,6 +58,20 @@ public class OutboxRelay {
     @Scheduled(initialDelayString = "${turbofeed.outbox.initial-delay-ms:10000}",
                fixedDelayString = "${turbofeed.outbox.poll-interval-ms:2000}")
     public void relay() {
+        Map<String, String> previous = TraceContext.beginCycle();
+        try {
+            relayInternal();
+        } finally {
+            TraceContext.end(previous);
+        }
+    }
+
+    /**
+     * 实际补偿逻辑：拆成独立方法，让 {@link #relay()} 用 {@code try/finally} 完整包住
+     * 本轮所有日志（含中途 return 与异常），且不必改动原逻辑的缩进。
+     * 多副本并发轮询时，同一轮的「回收卡死行」「补偿统计」靠 cycleId 聚合、靠 instanceId 区分实例。
+     */
+    private void relayInternal() {
         Instant now = Instant.now();
         int reaped = repository.reapStuck(stuckTimeoutSeconds, now);
         if (reaped > 0) {

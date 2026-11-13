@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.trace;
 
+import com.turbofeed.shared.trace.InstanceIds;
 import com.turbofeed.shared.trace.TraceIds;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -14,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * M4：MQ 消费侧 / 异步线程池的 MDC 管道契约。
+ * M4：MQ 消费侧 / 异步线程池 / 定时调度的 MDC 管道契约。
  *
  * <p>最要紧的是「线程复用」这条：只 put 不清会把上一批消息的 id 带进下一批，
  * 把两笔请求错误地串成一条；只 clear 又会抹掉外层 TaskDecorator 传进来的上下文。
@@ -43,6 +44,17 @@ class TraceContextTest {
         Map<String, String> previous = TraceContext.begin("probe-abc123");
         try {
             assertEquals("probe-abc123", MDC.get(TraceIds.MDC_KEY));
+        } finally {
+            TraceContext.end(previous);
+        }
+    }
+
+    @Test
+    @DisplayName("begin：注入 instanceId，多副本集中日志可区分来源实例")
+    void begin_injectsInstanceId() {
+        Map<String, String> previous = TraceContext.begin("probe-abc123");
+        try {
+            assertEquals(InstanceIds.current(), MDC.get(TraceIds.MDC_INSTANCE_KEY));
         } finally {
             TraceContext.end(previous);
         }
@@ -87,5 +99,23 @@ class TraceContextTest {
         String generated = MDC.get(TraceIds.MDC_KEY);
         TraceContext.end(second);
         assertNotEquals("batch-1", generated, "上一批的 id 绝不能残留到下一批");
+    }
+
+    @Test
+    @DisplayName("beginCycle：建立轮次 id、清掉残留 traceId、注入 instanceId")
+    void beginCycle_establishesCycleContext() {
+        MDC.put(TraceIds.MDC_KEY, "stale-request-id");
+        Map<String, String> previous = TraceContext.beginCycle();
+        try {
+            assertNull(MDC.get(TraceIds.MDC_KEY), "定时轮次是一次新的根，不继承请求 id");
+            String cycleId = MDC.get(TraceIds.MDC_CYCLE_KEY);
+            assertTrue(cycleId != null && cycleId.matches("[0-9a-f]{32}"),
+                    "应生成合规轮次 id: " + cycleId);
+            assertEquals(InstanceIds.current(), MDC.get(TraceIds.MDC_INSTANCE_KEY));
+        } finally {
+            TraceContext.end(previous);
+        }
+        assertEquals("stale-request-id", MDC.get(TraceIds.MDC_KEY), "轮次结束必须还原外层上下文");
+        assertNull(MDC.get(TraceIds.MDC_CYCLE_KEY), "cycleId 不能残留到下一次调度");
     }
 }

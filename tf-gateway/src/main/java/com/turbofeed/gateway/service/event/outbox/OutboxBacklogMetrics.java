@@ -1,6 +1,7 @@
 package com.turbofeed.gateway.service.event.outbox;
 
 import com.turbofeed.gateway.repository.OutboxEventRepository;
+import com.turbofeed.gateway.trace.TraceContext;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
@@ -94,6 +95,16 @@ public class OutboxBacklogMetrics {
     @Scheduled(initialDelayString = "${turbofeed.outbox.backlog-initial-delay-ms:15000}",
                fixedDelayString = "${turbofeed.outbox.backlog-poll-ms:15000}")
     public void refresh() {
+        Map<String, String> previous = TraceContext.beginCycle();
+        try {
+            refreshInternal();
+        } finally {
+            TraceContext.end(previous);
+        }
+    }
+
+    /** 实际统计逻辑：由 {@link #refresh()} 包裹轮次 MDC 后调用（查询失败 early return 也在包裹内）。 */
+    private void refreshInternal() {
         List<OutboxEventRepository.BacklogRow> rows;
         try {
             rows = repository.backlog();

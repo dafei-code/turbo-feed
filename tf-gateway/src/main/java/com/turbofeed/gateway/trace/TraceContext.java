@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.trace;
 
+import com.turbofeed.shared.trace.InstanceIds;
 import com.turbofeed.shared.trace.TraceIds;
 import org.slf4j.MDC;
 
@@ -38,10 +39,31 @@ public final class TraceContext {
     public static Map<String, String> begin(String rawTraceId) {
         Map<String, String> previous = MDC.getCopyOfContextMap();
         MDC.put(TraceIds.MDC_KEY, TraceIds.orGenerate(rawTraceId));
+        MDC.put(TraceIds.MDC_INSTANCE_KEY, InstanceIds.current());
         return previous;
     }
 
-    /** 恢复 {@link #begin} 之前的 MDC 快照；务必放在 {@code finally} 中。 */
+    /**
+     * 开启一轮定时调度上下文，返回调用前的 MDC 快照（务必在 {@code finally} 里传给 {@link #end}）。
+     *
+     * <p><b>为什么需要独立轮次 id</b>：{@code @Scheduled} 线程不经过任何 Servlet 过滤器，
+     * 改造前 MDC 是空的，一轮内多行日志（回收卡死行、补偿统计、失败告警）在集中日志里
+     * 只能靠时间戳聚类；而生产是多副本部署，N 个实例同一秒都会打「发件箱补偿一轮」，
+     * 没有 {@code cycleId} + {@code instanceId} 根本分不清哪几行属于同一次调度。</p>
+     *
+     * <p><b>为什么不复用 {@link #begin}</b>：定时轮次是一次新的「根」，不应继承任何请求 traceId
+     * （调度线程被复用时可能残留），也不该凭空造一个看起来像用户请求链路的 traceId。
+     * 因此显式清掉 traceId，只用 cycleId 做轮内自关联。</p>
+     */
+    public static Map<String, String> beginCycle() {
+        Map<String, String> previous = MDC.getCopyOfContextMap();
+        MDC.remove(TraceIds.MDC_KEY);
+        MDC.put(TraceIds.MDC_CYCLE_KEY, TraceIds.generate());
+        MDC.put(TraceIds.MDC_INSTANCE_KEY, InstanceIds.current());
+        return previous;
+    }
+
+    /** 恢复 {@link #begin} / {@link #beginCycle} 之前的 MDC 快照；务必放在 {@code finally} 中。 */
     public static void end(Map<String, String> previous) {
         if (previous == null) {
             MDC.clear();

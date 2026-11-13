@@ -1,6 +1,7 @@
 package com.turbofeed.gateway.service.event.outbox;
 
 import com.turbofeed.gateway.repository.OutboxEventRepository;
+import com.turbofeed.gateway.trace.TraceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -54,6 +56,16 @@ public class OutboxDeadLetterSweeper {
     @Scheduled(initialDelayString = "${turbofeed.outbox.dead-initial-delay-ms:60000}",
                fixedDelayString = "${turbofeed.outbox.dead-poll-ms:300000}")
     public void sweep() {
+        Map<String, String> previous = TraceContext.beginCycle();
+        try {
+            sweepInternal();
+        } finally {
+            TraceContext.end(previous);
+        }
+    }
+
+    /** 实际巡检逻辑：由 {@link #sweep()} 包裹轮次 MDC 后调用（含 early return 也在包裹内）。 */
+    private void sweepInternal() {
         Instant now = Instant.now();
         List<Long> ids = repository.findDeadIds(batchSize, now, maxDeadRedeliveries);
         if (ids.isEmpty()) {

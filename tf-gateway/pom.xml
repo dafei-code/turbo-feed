@@ -41,6 +41,13 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- 结构化 JSON 日志（M4，生产多副本集中采集）：仅 prod profile 的
+             logback-spring.xml 引用，本地/测试仍走 Boot 默认 console 文本。
+             scope 由父 POM 钉为 runtime，编译期不可见，避免业务代码误用 encoder 类型。 -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+        </dependency>
         <!-- Prometheus 指标暴露（P0-4 可观测性）：actuator 已传递 micrometer-core，
              本依赖仅补充 PrometheusMeterRegistry + /actuator/prometheus 端点；
              版本由 spring-boot-dependencies BOM 托管，无需写 version。与 tf-feed-engine 对齐。 -->

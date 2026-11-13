@@ -14,6 +14,9 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.connection.lettuce.LettucePoolingClientConfiguration;
 import org.springframework.stereotype.Service;
 
+import org.apache.rocketmq.spring.core.RocketMQListener;
+
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 /**
@@ -130,4 +133,22 @@ class ArchitectureTest {
                     LettucePoolingClientConfiguration.class)
             .because("Redis 拓扑必须由 tf-redis 作为单一事实源装配。业务模块自建客户端 = 又一套连接参数，"
                     + "切换集群/哨兵时必然只改一处、另一处静默失效（本项目已因此导致整个推荐流空白）。");
+
+    /**
+     * MQ 消费者必须恢复生产侧 traceId（M4）。
+     *
+     * <p><b>防的是什么</b>：RocketMQ 消费线程是池化复用的，新增 {@code RocketMQListener}
+     * 实现时漏掉 {@code TraceContext.begin/end}，功能全正常、编译不报错、单测全绿，
+     * 只有线上排查才发现该链路 traceId 为空或残留上一条消息的 id；多副本下更难定位是哪几个实例漏了。</p>
+     *
+     * <p><b>为什么不做成统一装饰器</b>：rocketmq-spring-boot 2.3.5 没有通用 MessageInterceptor
+     * 扩展点，且 tf-shared 禁止 slf4j/MDC，管道无法下沉到共享库。于是退而求其次，
+     * 在构建期把「漏写」挡住——这是当前依赖与架构约束下成本最低的等价保障。</p>
+     */
+    @ArchTest
+    static final ArchRule MQ消费者必须恢复MDC = classes()
+            .that().implement(RocketMQListener.class)
+            .should().dependOnClassesThat().haveSimpleName("TraceContext")
+            .because("消费线程复用：不调用 TraceContext.begin/end 会让该链路日志丢失或串用 traceId，"
+                    + "且不会有任何编译期 / 运行期报错，只能靠构建期规则兜住。");
 }

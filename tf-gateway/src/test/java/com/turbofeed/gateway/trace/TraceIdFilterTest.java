@@ -1,5 +1,6 @@
 package com.turbofeed.gateway.trace;
 
+import com.turbofeed.shared.trace.InstanceIds;
 import com.turbofeed.shared.trace.TraceIds;
 import jakarta.servlet.FilterChain;
 import org.junit.jupiter.api.AfterEach;
@@ -100,5 +101,36 @@ class TraceIdFilterTest {
     void afterChain_mdcCleared() throws Exception {
         run("abc");
         assertNull(MDC.get(TraceIds.MDC_KEY));
+    }
+
+    @Test
+    @DisplayName("finally 恢复完整快照：业务新增的 MDC 键不串到下一笔请求")
+    void restoresFullSnapshot() throws Exception {
+        MDC.put("outer", "keep-me");
+        FilterChain chain = (req, res) -> {
+            MDC.put(TraceIds.MDC_USER_KEY, "user-42");
+            MDC.put(TraceIds.MDC_POST_KEY, "post-1");
+        };
+
+        filter.doFilter(new MockHttpServletRequest(), new MockHttpServletResponse(), chain);
+
+        assertNull(MDC.get(TraceIds.MDC_KEY));
+        assertNull(MDC.get(TraceIds.MDC_INSTANCE_KEY), "instanceId 也必须清理");
+        assertNull(MDC.get(TraceIds.MDC_USER_KEY), "业务维度不能残留在 Tomcat 线程上");
+        assertNull(MDC.get(TraceIds.MDC_POST_KEY));
+        assertEquals("keep-me", MDC.get("outer"), "外层上下文必须原样保留");
+    }
+
+    @Test
+    @DisplayName("入站注入 instanceId，多副本集中日志可区分来源实例")
+    void setsInstanceId() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/x");
+        request.addHeader(TraceIds.HEADER, "upstream-abc123");
+        FilterChain chain = (req, res) ->
+                assertEquals(InstanceIds.current(), MDC.get(TraceIds.MDC_INSTANCE_KEY));
+
+        filter.doFilter(request, new MockHttpServletResponse(), chain);
+
+        assertNull(MDC.get(TraceIds.MDC_INSTANCE_KEY), "instanceId 必须随请求结束清理");
     }
 }

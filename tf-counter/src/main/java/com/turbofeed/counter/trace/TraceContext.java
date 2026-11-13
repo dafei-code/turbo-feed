@@ -1,5 +1,6 @@
 package com.turbofeed.counter.trace;
 
+import com.turbofeed.shared.trace.InstanceIds;
 import com.turbofeed.shared.trace.TraceIds;
 import org.slf4j.MDC;
 
@@ -35,10 +36,26 @@ public final class TraceContext {
     public static Map<String, String> begin(String rawTraceId) {
         Map<String, String> previous = MDC.getCopyOfContextMap();
         MDC.put(TraceIds.MDC_KEY, TraceIds.orGenerate(rawTraceId));
+        MDC.put(TraceIds.MDC_INSTANCE_KEY, InstanceIds.current());
         return previous;
     }
 
-    /** 恢复 {@link #begin} 之前的 MDC 快照；务必放在 {@code finally} 中。 */
+    /**
+     * 开启一轮定时调度上下文，返回调用前的 MDC 快照（务必在 {@code finally} 里传给 {@link #end}）。
+     *
+     * <p>计数 flush 由 standalone / clustered 两种调度器驱动，多副本下同一秒会有多行
+     * 聚合日志；{@code cycleId} 让同一轮自关联，{@code instanceId} 区分来源实例。
+     * 轮次是一次新的「根」，显式清掉可能残留的 traceId。</p>
+     */
+    public static Map<String, String> beginCycle() {
+        Map<String, String> previous = MDC.getCopyOfContextMap();
+        MDC.remove(TraceIds.MDC_KEY);
+        MDC.put(TraceIds.MDC_CYCLE_KEY, TraceIds.generate());
+        MDC.put(TraceIds.MDC_INSTANCE_KEY, InstanceIds.current());
+        return previous;
+    }
+
+    /** 恢复 {@link #begin} / {@link #beginCycle} 之前的 MDC 快照；务必放在 {@code finally} 中。 */
     public static void end(Map<String, String> previous) {
         if (previous == null) {
             MDC.clear();

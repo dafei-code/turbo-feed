@@ -1,5 +1,6 @@
 package com.turbofeed.feedengine.trace;
 
+import com.turbofeed.shared.trace.InstanceIds;
 import com.turbofeed.shared.trace.TraceIds;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Map;
 
 /**
  * 入站 traceId 透传（M4 可观测性）：采信网关传来的 {@code X-Trace-Id}，放进 MDC。
@@ -27,10 +29,14 @@ import java.io.IOException;
  * {@link TraceIds}，servlet 管道各自一份；两份的契约锚点是 {@code TraceIdsTest}
  * 锁死的 header 名与 MDC 键——<b>改动其一时它会红</b>。</p>
  *
+ * <p><b>finally 恢复完整快照</b>：只 {@code remove(traceId)} 会让业务代码新增的 MDC 键
+ * （userId / postId / 错误指纹等）随线程复用残留到下一笔请求。这里统一交给
+ * {@link TraceContext#end} 恢复调用前的整份上下文，与网关、计数两份过滤器同构。</p>
+ *
  * <p><b>边界</b>：本过滤器只覆盖 HTTP 入站。MQ 消费侧由 {@link TraceContext} 从消息体的
- * 可空 {@code traceId} 字段恢复 MDC；引擎 → 网关的回流由
- * {@code TracePropagationInterceptor} 挂到两个 {@code RestClient.Builder} 上。
- * 新增可空字段按 {@code ContractVersion} 规则不升版本。</p>
+ * 可空 {@code traceId} 字段恢复 MDC；定时调度由 {@code TraceContext.beginCycle()} 建立轮次上下文；
+ * 引擎 → 网关的回流由 {@code TracePropagationInterceptor} 挂到两个 {@code RestClient.Builder} 上。
+ * 所有入口都会注入 {@code instanceId}，多副本集中日志里才能区分来源实例。</p>
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -39,17 +45,18 @@ public class TraceIdFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
+        Map<String, String> previous = MDC.getCopyOfContextMap();
         String traceId = TraceIds.sanitize(request.getHeader(TraceIds.HEADER));
         if (traceId == null) {
             traceId = TraceIds.generate();
         }
         MDC.put(TraceIds.MDC_KEY, traceId);
+        MDC.put(TraceIds.MDC_INSTANCE_KEY, InstanceIds.current());
         response.setHeader(TraceIds.HEADER, traceId);
         try {
             filterChain.doFilter(request, response);
         } finally {
-            // 必须清理：线程复用下残留值会把下一笔请求的日志错误地串到这一条上。
-            MDC.remove(TraceIds.MDC_KEY);
+            TraceContext.end(previous);
         }
     }
 }

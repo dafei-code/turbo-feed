@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  M4 可观测性：按 profile 切换日志形态（tf-gateway）。
+
+  · 非 prod —— 沿用 Spring Boot 默认 console appender，application.yml 的
+    logging.pattern.level 仍通过 LOG_LEVEL_PATTERN 生效，本地读取体验不变。
+  · prod     —— 每行一条 JSON 写到 stdout，由容器运行时 / 采集代理接管。
+
+  为什么不写 file appender：生产是多副本部署，容器内文件日志会随 Pod 重建、
+  调度迁移、扩缩容一起消失；stdout 才是容器编排下唯一稳定的日志出口。
+  采集侧（DaemonSet / sidecar → Loki / ES）由部署平台接线，仓库不绑定具体编排形态。
+
+  实测（2026-11-13）：LogstashEncoder 8.1 把 MDC 键输出为【顶层字段】，不是 mdc 嵌套对象。
+  下面的白名单只放行 traceId / instanceId / cycleId / userId / postId；
+  新增业务维度时必须同步登记，prod 日志里才查得到。
+  Nacos 等中间件塞进 LoggerContext 的系统属性由 includeContext=false 单独关掉（见下）。
+  customFields 注入 service：Loki 用 {service="tf-gateway"} | json | traceId="..."，ES 直接按 traceId 精确查。
+-->
+<configuration>
+    <springProfile name="!prod">
+        <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+        <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="prod">
+        <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"service":"tf-gateway","application":"turbo-feed"}</customFields>
+                <!-- 实测 2026-11-13：Nacos 日志适配器把 8 个系统属性写进 LoggerContext，
+                     由 encoder 的 context provider 输出到 JSON 顶层（不是 MDC / KeyValuePairs）。
+                     关掉该通道避免每条 JSON 都带噪声字段；业务维度全走下面的 MDC 白名单。 -->
+                <includeContext>false</includeContext>
+                <includeMdcKeyName>traceId</includeMdcKeyName>
+                <includeMdcKeyName>instanceId</includeMdcKeyName>
+                <includeMdcKeyName>cycleId</includeMdcKeyName>
+                <includeMdcKeyName>userId</includeMdcKeyName>
+                <includeMdcKeyName>postId</includeMdcKeyName>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="JSON_CONSOLE"/>
+        </root>
+    </springProfile>
+</configuration>

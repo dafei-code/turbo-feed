@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  M4 可观测性：按 profile 切换日志形态（tf-feed-engine）。
+
+  · 非 prod —— Boot 默认 console appender，application.yml 的 logging.pattern.level 仍生效。
+  · prod     —— 每行一条 JSON 写 stdout，由容器运行时 / 采集代理接管。
+
+  生产为多副本：容器内 file appender 会随 Pod 重建 / 扩缩容丢日志，故只走 stdout。
+  采集侧由部署平台接线（Loki / ES），仓库不绑定编排形态。
+
+  MDC 键输出为顶层字段，白名单只放行 traceId / instanceId / cycleId / userId / postId；
+  新增业务维度必须同步登记。Nacos 塞进 LoggerContext 的系统属性由 includeContext=false 关掉。
+  customFields 的 service 用于跨服务过滤。
+-->
+<configuration>
+    <springProfile name="!prod">
+        <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+        <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="prod">
+        <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"service":"tf-feed-engine","application":"turbo-feed"}</customFields>
+                <!-- 实测 2026-11-13：Nacos 把 8 个系统属性写进 LoggerContext，由 context provider
+                     输出到 JSON 顶层（不是 MDC / KeyValuePairs）；关掉该通道避免噪声。 -->
+                <includeContext>false</includeContext>
+                <includeMdcKeyName>traceId</includeMdcKeyName>
+                <includeMdcKeyName>instanceId</includeMdcKeyName>
+                <includeMdcKeyName>cycleId</includeMdcKeyName>
+                <includeMdcKeyName>userId</includeMdcKeyName>
+                <includeMdcKeyName>postId</includeMdcKeyName>
+            </encoder>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="JSON_CONSOLE"/>
+        </root>
+    </springProfile>
+</configuration>

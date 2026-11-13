@@ -221,7 +221,9 @@ turbofeed:
 # 值由 trace/TraceIdFilter 从网关透传的 X-Trace-Id 取来放进 MDC（键名见 TraceIds.MDC_KEY）。
 # 改 logging.pattern.level 而非整份 logback-spring.xml 的理由见网关 application.yml 同一段：
 # Boot 三套默认 pattern 都引用 ${LOG_LEVEL_PATTERN:-%5p}，只替换 level 段可以保留其余默认行为。
+# 非 prod 文本 console；prod 由 logback-spring.xml 切 JSON。
+# instanceId 区分多副本来源，cycleId 关联同一轮定时调度；缺维度时 :- 输出空串。
 logging:
   pattern:
-    level: "%5p [%X{traceId:-}]"
+    level: "%5p [%X{traceId:-}] [%X{instanceId:-}] [%X{cycleId:-}]"
 
