@@ -89,6 +89,41 @@ public class ContentSecurityProperties {
     /** REVIEW 裁定映射的违规严重度（默认 {@link ViolationSeverity#MID}：待人审的边界内容，比 LIMIT 重一档）。 */
     private ViolationSeverity defaultReviewSeverity = ViolationSeverity.MID;
 
+    /** 语义层配置（L2：embedding 近邻，兜规则漏放的改写/谐音变体）。 */
+    private Semantic semantic = new Semantic();
+
+    public static class Semantic {
+
+        /** 语义层总开关。关闭后规则未命中直接放行（fail-open）。 */
+        private boolean enabled = false;
+
+        /** sidecar 地址（如 http://127.0.0.1:7800）。 */
+        private String endpoint = "http://127.0.0.1:7800";
+
+        /** 调用超时（毫秒）。超时即 fail-open 放行，绝不拖垮写路径。 */
+        private int timeoutMs = 100;
+
+        /** 相似度 ≥ 此值 → BLOCK。需用真实样本校准。 */
+        private double blockThreshold = 0.86;
+
+        /** 相似度 ≥ 此值（且 < blockThreshold）→ REVIEW。需用真实样本校准。 */
+        private double reviewThreshold = 0.78;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getEndpoint() { return endpoint; }
+        public void setEndpoint(String endpoint) { this.endpoint = endpoint; }
+        public int getTimeoutMs() { return timeoutMs; }
+        public void setTimeoutMs(int timeoutMs) { this.timeoutMs = timeoutMs; }
+        public double getBlockThreshold() { return blockThreshold; }
+        public void setBlockThreshold(double v) { this.blockThreshold = v; }
+        public double getReviewThreshold() { return reviewThreshold; }
+        public void setReviewThreshold(double v) { this.reviewThreshold = v; }
+    }
+
+    public Semantic getSemantic() { return semantic; }
+    public void setSemantic(Semantic semantic) { this.semantic = semantic; }
+
     private static Map<ContentScene, Integer> defaultSceneMaxLength() {
         Map<ContentScene, Integer> m = new EnumMap<>(ContentScene.class);
         // 昵称 32：抖音昵称上限 24 字符，留出余量；昵称是全站公开展示位，短且必须严

@@ -25,10 +25,10 @@ public enum ModerationAction {
     /** 放行。 */
     PASS,
 
-    /** 放行但降权（尚未接通 feed 侧标记，当前等同 PASS）。 */
+    /** 放行但降权：调用方（CommentService）据裁定置 FOLDED，本层不阻断发布。 */
     LIMIT,
 
-    /** 转人工复审（尚未接通审核队列，当前等同 BLOCK）。 */
+    /** 放行但转人工复审：调用方（CommentService）据裁定建 CONTENT_REVIEW 任务，先发后审。 */
     REVIEW,
 
     /** 拒绝发布。 */

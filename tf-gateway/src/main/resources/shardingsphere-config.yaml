@@ -253,6 +253,12 @@ rules:
       - ds_0.behavior_log
       # 交互行为事件（A1 真双塔训练样本底座）：单表落 ds_0，只写多读少追加流。
       - ds_0.interaction_event
+      # 内容安全命中审计（V3，反馈闭环样本底座）：单表落 ds_0，只写多读少追加流。
+      # 每条 BLOCK/REVIEW/LIMIT 命中一行；人审结论回灌白名单/坏样本库。
+      - ds_0.content_moderation_hit
+      # 内容安全坏样本库（V4，语义层近邻检索底座）：单表落 ds_0。
+      # sidecar 加载本表样本 embedding，对新文本打分；人审 CONFIRMED 的漏放样本补录。
+      - ds_0.moderation_exemplar
       # 用户兴趣标签持久化（抖音式画像耐久层 + 离线特征源）：单表落 ds_0。
       # 由网关 InterestTagSnapshotJob 定时 SCAN 引擎 Redis 画像键 upsert（引擎无 DataSource）。
       - ds_0.interest_tag

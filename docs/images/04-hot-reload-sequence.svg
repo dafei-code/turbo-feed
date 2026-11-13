@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 560" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <rect width="920" height="560" fill="#fafbfc"/>
+  <text x="460" y="32" text-anchor="middle" font-size="20" font-weight="700" fill="#1f2328">词库热更新时序：读路径零锁、后台重建、CAS 切换</text>
+
+  <!-- 三列泳道 -->
+  <rect x="60" y="60" width="240" height="60" rx="8" fill="#ddf4ff" stroke="#0969da"/>
+  <text x="180" y="95" text-anchor="middle" font-size="14" font-weight="700" fill="#0969da">Admin HTTP 线程</text>
+
+  <rect x="340" y="60" width="240" height="60" rx="8" fill="#fff8c5" stroke="#9a6700"/>
+  <text x="460" y="95" text-anchor="middle" font-size="14" font-weight="700" fill="#9a6700">reloadExecutor 后台线程</text>
+
+  <rect x="620" y="60" width="240" height="60" rx="8" fill="#dafbe1" stroke="#1a7f37"/>
+  <text x="740" y="95" text-anchor="middle" font-size="14" font-weight="700" fill="#1a7f37">线上读路径（写请求）</text>
+
+  <!-- 生命线 -->
+  <line x1="180" y1="120" x2="180" y2="530" stroke="#0969da" stroke-width="1" stroke-dasharray="3,3"/>
+  <line x1="460" y1="120" x2="460" y2="530" stroke="#9a6700" stroke-width="1" stroke-dasharray="3,3"/>
+  <line x1="740" y1="120" x2="740" y2="530" stroke="#1a7f37" stroke-width="1" stroke-dasharray="3,3"/>
+
+  <!-- 消息 1: admin POST -->
+  <rect x="100" y="150" width="160" height="40" rx="6" fill="#fff" stroke="#0969da"/>
+  <text x="180" y="175" text-anchor="middle" font-size="12" fill="#0969da">POST /admin/words</text>
+
+  <!-- 2: 写 DB 立即返回 -->
+  <line x1="180" y1="210" x2="460" y2="210" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a4)"/>
+  <text x="320" y="202" text-anchor="middle" font-size="11" fill="#57606a">INSERT/UPDATE DB</text>
+  <line x1="460" y1="225" x2="180" y2="225" stroke="#1a7f37" stroke-width="1.5" marker-end="url(#a4)"/>
+  <text x="320" y="242" text-anchor="middle" font-size="11" fill="#1a7f37">200 OK（HTTP 线程不阻塞）</text>
+
+  <!-- 3: 后台读 DB 重建 AC -->
+  <rect x="360" y="270" width="200" height="40" rx="6" fill="#fff" stroke="#9a6700"/>
+  <text x="460" y="295" text-anchor="middle" font-size="12" fill="#9a6700">读全表 → 建新 AC</text>
+
+  <rect x="360" y="325" width="200" height="40" rx="6" fill="#fff" stroke="#9a6700"/>
+  <text x="460" y="350" text-anchor="middle" font-size="12" fill="#9a6700">CAS: dictRef = newDict</text>
+
+  <!-- 4: 读路径一直 get() -->
+  <rect x="660" y="150" width="160" height="40" rx="6" fill="#fff" stroke="#1a7f37"/>
+  <text x="740" y="175" text-anchor="middle" font-size="12" fill="#1a7f37">dictRef.get() → 旧快照</text>
+  <rect x="660" y="220" width="160" height="40" rx="6" fill="#fff" stroke="#1a7f37"/>
+  <text x="740" y="245" text-anchor="middle" font-size="12" fill="#1a7f37">扫描请求（无锁）</text>
+  <rect x="660" y="395" width="160" height="40" rx="6" fill="#fff" stroke="#1a7f37"/>
+  <text x="740" y="420" text-anchor="middle" font-size="12" fill="#1a7f37">dictRef.get() → 新快照</text>
+
+  <!-- 5: 定时 30s 指纹兜底 -->
+  <rect x="360" y="450" width="200" height="50" rx="6" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="460" y="472" text-anchor="middle" font-size="11" fill="#57606a">30s 定时 (COUNT, MAX(updated_at)) 指纹对比</text>
+  <text x="460" y="490" text-anchor="middle" font-size="11" fill="#57606a">不一致才重建（双保险）</text>
+
+  <!-- 说明 -->
+  <text x="460" y="540" text-anchor="middle" font-size="12" fill="#cf222e">关键：AC 与分类表打包在一个 Dictionary record 里整体切换，避免"新词命中但按旧分类处置"的窗口</text>
+
+  <defs>
+    <marker id="a4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#8b949e"/>
+    </marker>
+  </defs>
+</svg>

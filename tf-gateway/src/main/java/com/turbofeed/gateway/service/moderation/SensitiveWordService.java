@@ -84,6 +84,14 @@ public class SensitiveWordService {
     private volatile int loadedSize = 0;
 
     /**
+     * 上次成功加载的时刻（Phase 0：排障与指标用）。
+     *
+     * <p>与 {@code WhitelistService#lastLoadedAt()} 同构。暴露成指标后，
+     * 「词库年龄持续增大」是热更新卡住最直接的信号——比等运营发现「新词不生效」要早得多。</p>
+     */
+    private volatile Instant lastLoadedAt = Instant.EPOCH;
+
+    /**
      * 后台重建线程池（单线程，保证重建串行、避免并发全量重建相互踩踏）。
      *
      * <p>admin 变更只把 DB 写入落地，真正的 AC 重建交给它，HTTP 线程零等待——
@@ -113,11 +121,18 @@ public class SensitiveWordService {
     }
 
     /**
-     * 30s 定时检测：指纹变化才重建。
+     * 30s 定时检测：指纹变化才触发后台重建。
      *
      * <p>固定 30s 是「动态」的常规阈值（变更秒级可感知）；
-     * admin 增删会立即触发 {@link #reload()}，不等定时器。
-     * 异常仅记日志、保留旧快照——旧词库总比空词库好。</p>
+     * admin 增删会立即触发 {@link #triggerReload()}，不等定时器。</p>
+     *
+     * <p><b>为什么必须走 triggerReload 而不是直接 doReload</b>：定时路径原先在 Spring
+     * 调度线程里同步全量重建，既占用调度线程（1M 词约 1.2s），又绕过了
+     * {@code reloadInFlight} 单飞标志——与 admin 触发的后台重建并发时，
+     * 两次 {@code dictRef.set(...)} 存在「读到较早 DB 快照的那次后写、把新词库回退」的窗口。
+     * 改为共用单飞入口后，所有全量重建串行发生，且重建完成再取最新指纹，不会用旧指纹覆盖。</p>
+     *
+     * <p>异常仅记日志、保留旧快照——旧词库总比空词库好。</p>
      */
     @Scheduled(fixedDelay = 30_000, initialDelay = 30_000)
     public void scheduledReload() {
@@ -126,8 +141,8 @@ public class SensitiveWordService {
             if (current.equals(lastCheckSum)) {
                 return;
             }
-            int size = doReload(current);
-            log.info("敏感词库定时刷新: count={}, trieSize={}", current.count(), size);
+            log.info("敏感词库定时检测到变更，触发后台重建: count={}", current.count());
+            triggerReload();
         } catch (Exception e) {
             log.warn("敏感词库定时刷新失败（保留旧 Trie）: {}", e.getMessage());
         }
@@ -157,6 +172,7 @@ public class SensitiveWordService {
         SensitiveWordRepository.CheckSum cs = precomputed != null ? precomputed : repository.checkSum();
         lastCheckSum = cs;
         loadedSize = ac.size();
+        lastLoadedAt = Instant.now();
         log.info("敏感词 AC 重建完成: trieSize={}, dbCount={}", ac.size(), cs.count());
         return ac.size();
     }
@@ -205,6 +221,11 @@ public class SensitiveWordService {
     /** 当前词库大小（已加载到 AC 的词条数）。 */
     public int currentSize() {
         return loadedSize;
+    }
+
+    /** 上次成功重建词库的时刻（Phase 0 指标用；{@code Instant.EPOCH} 表示从未成功加载）。 */
+    public Instant lastLoadedAt() {
+        return lastLoadedAt;
     }
 
     /**

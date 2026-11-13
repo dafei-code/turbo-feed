@@ -92,6 +92,11 @@ public final class PinyinTable {
         put(m, '规', "gui"); put(m, '法', "fa"); put(m, '罪', "zui");
         put(m, '犯', "fan"); put(m, '刑', "xing"); put(m, '拘', "ju");
         put(m, '捕', "bu"); put(m, '判', "pan");
+        // 词族公共前缀（漏掉会让整族拼音绕过失效，如「涉黄/涉政/涉毒/涉赌」）
+        put(m, '涉', "she"); put(m, '造', "zao"); put(m, '谣', "yao");
+        put(m, '传', "chuan"); put(m, '播', "bo"); put(m, '散', "san");
+        put(m, '恐', "kong"); put(m, '吓', "he"); put(m, '威', "wei");
+        put(m, '胁', "xie"); put(m, '勒', "le"); put(m, '索', "suo");
         return Map.copyOf(m);
     }
 

@@ -5,6 +5,7 @@ import com.turbofeed.gateway.service.moderation.ContentScene;
 import com.turbofeed.gateway.service.moderation.ContentSecurityService;
 import com.turbofeed.gateway.service.moderation.ContentVerdict;
 import com.turbofeed.gateway.service.moderation.ModerationAction;
+import com.turbofeed.gateway.service.moderation.ModerationHitRepository;
 import com.turbofeed.gateway.service.notify.NotificationEvent;
 import com.turbofeed.gateway.service.notify.NotificationGenerator;
 import com.turbofeed.gateway.service.notify.NotificationType;
@@ -76,6 +77,8 @@ public class CommentService {
     private final UploadRateLimiter rateLimiter;
     /** 复审任务仓储（进 COMMENT_ANOMALY 巡查队列，复用 review_task 单表）。 */
     private final ReviewTaskRepository reviewTaskRepository;
+    /** 内容安全命中审计仓储：把 REVIEW 任务 ID 回链到命中行。 */
+    private final ModerationHitRepository moderationHitRepository;
     /** 评论区风控配置（turbofeed.media.comment-risk.*）。 */
     private final MediaProperties properties;
     /** 异常行为日志（P2-2）：评论异常行为持久化，供 P2-1 信号闭环来源（fail-open）。 */
@@ -167,9 +170,18 @@ public class CommentService {
         // P1：敏感词 REVIEW 裁定 → 建人审任务（先发后审，评论已发布可见但需 REVIEWER 复核）
         if (contentVerdict.action() == ModerationAction.REVIEW) {
             try {
-                reviewTaskRepository.insert(mediaId, userId, ReviewTask.TYPE_CONTENT_REVIEW, 0);
-                log.info("敏感词REVIEW→建人审任务(CONTENT_REVIEW): mediaId={}, commentId={}, word={}, category={}",
-                        mediaId, commentId, contentVerdict.matchedWord(), contentVerdict.category());
+                long taskId = reviewTaskRepository.insert(mediaId, userId, ReviewTask.TYPE_CONTENT_REVIEW, 0);
+                // 回链：把 ReviewTask ID 回填到 content_moderation_hit，形成「命中→任务→裁决」闭环
+                if (contentVerdict.hitId() != null) {
+                    try {
+                        moderationHitRepository.updateReviewTaskId(contentVerdict.hitId(), taskId);
+                    } catch (Exception be) {
+                        log.warn("命中审计回链review_task_id失败(fail-open): hitId={}, taskId={}",
+                                contentVerdict.hitId(), taskId, be);
+                    }
+                }
+                log.info("敏感词REVIEW→建人审任务(CONTENT_REVIEW): mediaId={}, commentId={}, taskId={}, word={}, category={}",
+                        mediaId, commentId, taskId, contentVerdict.matchedWord(), contentVerdict.category());
             } catch (Exception e) {
                 // fail-open：建任务失败不阻断评论发布（评论已落库），人审可由定时巡检补
                 log.warn("敏感词REVIEW建任务失败(fail-open): mediaId={}, commentId={}, {}", mediaId, commentId, e.getMessage());

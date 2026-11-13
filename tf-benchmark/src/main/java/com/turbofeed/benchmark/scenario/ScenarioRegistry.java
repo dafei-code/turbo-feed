@@ -176,6 +176,21 @@ public final class ScenarioRegistry {
      * <p><b>会产生真实数据</b>，只应在可清理的环境跑；报告头部会标注。</p>
      */
     record CommentPublishScenario() implements Scenario {
+        /**
+         * 压测正文的重复填充片段。
+         *
+         * <p><b>为什么要凑长度</b>：改造前正文是 {@code "bench-" + seq}（约 8 字符），
+         * 一条这样的评论在内容安全链路上会被极快扫过，<b>测不出归一化的真实成本</b>——
+         * 而 {@code TextNormalizer} 目前是逐字符调 NFKC，成本与长度线性相关。
+         * 短文本压测会让人误以为「检测很便宜」，从而低估 Phase 1 的优化必要性。</p>
+         *
+         * <p>这里填入约 200 字符的中英混排文本（接近真实评论的中位长度），
+         * 让压测结果能反映「有实质内容要检测」时的成本。文本本身不含敏感词——
+         * 压测要测的是检测<b>开销</b>，不是命中率。</p>
+         */
+        private static final String FILLER =
+                "这是一条用于压测的内容安全链路测试文本，包含中英文混排 mixed content 与数字 12345。";
+
         @Override
         public String name() {
             return COMMENT_PUBLISH;
@@ -193,7 +208,13 @@ public final class ScenarioRegistry {
 
         @Override
         public RequestSpec next(ScenarioContext ctx) {
-            String content = "bench-" + ctx.nextSeq();
+            // 拼到约 200 字符（FILLER 约 45 字符 × 4 轮），再附上序号保证内容互不相同
+            StringBuilder sb = new StringBuilder(220);
+            sb.append("bench-").append(ctx.nextSeq()).append('-');
+            while (sb.length() < 200) {
+                sb.append(FILLER);
+            }
+            String content = sb.toString();
             return RequestSpec.post("/api/v1/comments?mediaId=" + encode(ctx.randomPostId())
                     + "&content=" + encode(content), null, true);
         }

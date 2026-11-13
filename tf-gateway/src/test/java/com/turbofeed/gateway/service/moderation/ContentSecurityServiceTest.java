@@ -8,6 +8,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.List;
 
@@ -35,6 +36,10 @@ class ContentSecurityServiceTest {
     private SensitiveWordService sensitiveWordService;
     @Mock
     private WhitelistService whitelistService;
+    @Mock
+    private ModerationHitRepository moderationHitRepository;
+    @Mock
+    private ObjectProvider<ContentScorer> contentScorerProvider;
 
     @InjectMocks
     private ContentSecurityService service;
@@ -43,6 +48,7 @@ class ContentSecurityServiceTest {
     void setUp() {
         when(properties.isEnabled()).thenReturn(true);
         when(properties.getNormalize()).thenReturn(new ContentSecurityProperties.Normalize());
+        when(contentScorerProvider.getIfAvailable()).thenReturn(null); // 测试默认关闭语义层
     }
 
     private SensitiveWordHit hit(String word, String category, int start, int end) {

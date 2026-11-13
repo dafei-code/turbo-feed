@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 760" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <rect width="920" height="760" fill="#fafbfc"/>
+  <text x="460" y="32" text-anchor="middle" font-size="20" font-weight="700" fill="#1f2328">敏感词模块 · 六层分层架构</text>
+
+  <!-- 入口 -->
+  <rect x="260" y="55" width="400" height="44" rx="8" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <text x="460" y="82" text-anchor="middle" font-size="14" font-weight="600" fill="#0969da">写路径入口：评论 / 昵称 / 视频描述</text>
+
+  <!-- L1 -->
+  <rect x="120" y="120" width="680" height="60" rx="8" fill="#fff" stroke="#d0d7de"/>
+  <text x="140" y="145" font-size="13" font-weight="700" fill="#1f2328">① 统一入口</text>
+  <text x="140" y="165" font-size="12" fill="#57606a">ContentSecurityService.requireClean(scene, text, userId) → ContentVerdict</text>
+
+  <!-- L2 -->
+  <rect x="120" y="195" width="680" height="70" rx="8" fill="#fff" stroke="#d0d7de"/>
+  <text x="140" y="218" font-size="13" font-weight="700" fill="#1f2328">② 归一化层 TextNormalizer（纯函数）</text>
+  <text x="140" y="238" font-size="12" fill="#57606a">NFKC → 剥零宽 → 剥分隔符 → 小写 → 繁→简</text>
+  <text x="140" y="255" font-size="12" fill="#57606a">同步维护「归一化下标 → 原文下标」映射</text>
+
+  <!-- L3 -->
+  <rect x="120" y="280" width="680" height="60" rx="8" fill="#fff" stroke="#d0d7de"/>
+  <text x="140" y="305" font-size="13" font-weight="700" fill="#1f2328">③ 匹配层 AhoCorasick（216 行手写自动机）</text>
+  <text x="140" y="325" font-size="12" fill="#57606a">一次扫描返回全部命中（含 fail 链短词），O(n+m+z)，1M 词 2.76µs/次</text>
+
+  <!-- L4 -->
+  <rect x="120" y="355" width="680" height="80" rx="8" fill="#fff" stroke="#d0d7de"/>
+  <text x="140" y="378" font-size="13" font-weight="700" fill="#1f2328">④ 决策层</text>
+  <text x="140" y="398" font-size="12" fill="#57606a">白名单只减不增 → 多命中取最严重动作 → 四级动作</text>
+  <text x="140" y="418" font-size="12" fill="#1a7f37">PASS</text>
+  <text x="190" y="418" font-size="12" fill="#9a6700">LIMIT 降权</text>
+  <text x="280" y="418" font-size="12" fill="#9a6700">REVIEW 人审</text>
+  <text x="380" y="418" font-size="12" fill="#cf222e" font-weight="600">BLOCK 拒绝</text>
+
+  <!-- L5 -->
+  <rect x="120" y="455" width="680" height="60" rx="8" fill="#fff" stroke="#d0d7de"/>
+  <text x="140" y="478" font-size="13" font-weight="700" fill="#1f2328">⑤ 审计落库 content_moderation_hit（fail-open）</text>
+  <text x="140" y="498" font-size="12" fill="#57606a">BLOCK/REVIEW/LIMIT 才写；snippet 打码；DB 异常只告警不阻断主路径</text>
+
+  <!-- L6 side path -->
+  <rect x="120" y="535" width="680" height="70" rx="8" fill="#fff8c5" stroke="#9a6700" stroke-dasharray="4,3"/>
+  <text x="140" y="558" font-size="13" font-weight="700" fill="#9a6700">⑥ 语义层 sidecar（可选，规则未命中才问）</text>
+  <text x="140" y="578" font-size="12" fill="#57606a">Python FastAPI · embedding 近邻 · score≥0.86→BLOCK / ≥0.78→REVIEW</text>
+  <text x="140" y="595" font-size="12" fill="#57606a">fail-open：超时/不可用直接放行，规则层仍 fail-closed</text>
+
+  <!-- 外部依赖 -->
+  <rect x="120" y="630" width="330" height="90" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="140" y="653" font-size="13" font-weight="700" fill="#1f2328">MySQL（ds_0 单表）</text>
+  <text x="140" y="673" font-size="12" fill="#57606a">sensitive_word / whitelist /</text>
+  <text x="140" y="690" font-size="12" fill="#57606a">content_moderation_hit / moderation_exemplar</text>
+
+  <rect x="470" y="630" width="330" height="90" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="490" y="653" font-size="13" font-weight="700" fill="#1f2328">运营后台（/api/v1/admin/moderation/*）</text>
+  <text x="490" y="673" font-size="12" fill="#57606a">词库热更 / 白名单 / 命中列表 / 人审裁决</text>
+  <text x="490" y="690" font-size="12" fill="#57606a">权限：CONTENT_REVIEW / SYSTEM_CONFIG</text>
+
+  <!-- 箭头 -->
+  <line x1="460" y1="99" x2="460" y2="118" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="460" y1="180" x2="460" y2="193" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="460" y1="265" x2="460" y2="278" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="460" y1="340" x2="460" y2="353" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="460" y1="435" x2="460" y2="453" stroke="#8b949e" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#8b949e"/>
+    </marker>
+  </defs>
+</svg>

@@ -2,9 +2,14 @@ package com.turbofeed.gateway.service.moderation;
 
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.shared.result.ErrorCode;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -65,6 +70,21 @@ public class ContentSecurityService {
     private final ContentSecurityProperties properties;
     private final SensitiveWordService sensitiveWordService;
     private final WhitelistService whitelistService;
+    private final ModerationHitRepository moderationHitRepository;
+    private final org.springframework.beans.factory.ObjectProvider<ContentScorer> contentScorerProvider;
+
+    /**
+     * 指标注册表（Phase 0：接入既有 Prometheus 基建）。
+     *
+     * <p><b>为什么用 {@link ObjectProvider} 而不是直接注入</b>：单测用 {@code @InjectMocks} 构造本类，
+     * 容器里没有 {@code MeterRegistry}，直接注入会拿到 null 并在每次计数时 NPE。
+     * 通过 provider 取，缺了就退化为「不记指标」——可观测性是<b>可选增强</b>，
+     * 不该让核心拦截逻辑硬依赖它。</p>
+     */
+    private final ObjectProvider<io.micrometer.core.instrument.MeterRegistry> meterRegistryProvider;
+
+    /** 指标门面（懒初始化；{@code MeterRegistry} 缺失时为 no-op 实现）。 */
+    private volatile ModerationMetrics metrics;
 
     /**
      * 计数器：{@code "场景:结果"} → 次数。
@@ -229,6 +249,114 @@ public class ContentSecurityService {
      * @return 裁定结果；未命中或总开关关闭返回 {@link ContentVerdict#pass}
      */
     public ContentVerdict check(ContentScene scene, String text, long userId) {
+        // Phase 0：统一在入口计时并记录结果，避免在 4 个返回出口逐个插桩（易漏记）
+        ModerationMetrics m = metrics();
+        long t0 = System.nanoTime();
+        ContentVerdict verdict = doCheck(scene, text, userId);
+        m.recordDuration(System.nanoTime() - t0);
+        m.count(scene, labelOf(verdict));
+        Long hitId = recordHitIfNeeded(text, userId, verdict);
+        return hitId == null ? verdict : verdict.withHitId(hitId);
+    }
+
+    /**
+     * 命中审计：BLOCK/REVIEW/LIMIT 以及白名单豁免（易误杀样本）写一行。
+     *
+     * <p>fail-open：DB 异常只告警，绝不影响裁定主路径——审计是观测增强，不是拦截依赖。
+     * PASS 且未命中不写（无样本）。snippet 只存命中区间打码后的短片段，不存原文全量。</p>
+     *
+     * @return 写入的审计行 ID；未写或失败返回 null
+     */
+    private Long recordHitIfNeeded(String text, long userId, ContentVerdict verdict) {
+        boolean recordable = verdict.action() != ModerationAction.PASS || verdict.whitelisted();
+        if (!recordable) {
+            return null;
+        }
+        try {
+            return moderationHitRepository.insert(
+                    verdict.scene(),
+                    userId,
+                    null, // targetId：写路径此刻尚未生成（如评论ID在后），后续可由调用方补
+                    maskSnippet(text, verdict),
+                    verdict.matchedWord(),
+                    verdict.category(),
+                    verdict.action(),
+                    null);
+        } catch (Exception e) {
+            log.warn("内容安全命中审计写入失败(fail-open, 不影响裁定): {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 语义层裁决（规则未命中时调用）。
+     *
+     * <p>无 scorer bean（未启用）或模型不可用（fail-open）→ 返回 null（放行）。
+     * score ≥ blockThreshold → BLOCK；≥ reviewThreshold → REVIEW；否则 null。
+     * 语义命中没有字面区间，hitStart/hitEnd 置 -1。</p>
+     */
+    private ContentVerdict semanticCheck(ContentScene scene, String normalizedText, long userId) {
+        ContentScorer scorer = contentScorerProvider.getIfAvailable();
+        if (scorer == null) {
+            return null;
+        }
+        ContentScorer.SemanticScore s = scorer.score(normalizedText, userId);
+        if (s == null || !s.available()) {
+            return null;
+        }
+        var sem = properties.getSemantic();
+        String nearest = s.nearestWord() != null ? s.nearestWord() : "semantic";
+        if (s.score() >= sem.getBlockThreshold()) {
+            log.info("语义层 BLOCK: scene={}, score={}, nearest={}, category={}, latencyMs={}",
+                    scene, s.score(), nearest, s.category(), s.latencyMs());
+            return new ContentVerdict(ModerationAction.BLOCK, scene, nearest, s.category(), false, -1, -1, null);
+        }
+        if (s.score() >= sem.getReviewThreshold()) {
+            log.info("语义层 REVIEW: scene={}, score={}, nearest={}, category={}, latencyMs={}",
+                    scene, s.score(), nearest, s.category(), s.latencyMs());
+            return new ContentVerdict(ModerationAction.REVIEW, scene, nearest, s.category(), false, -1, -1, null);
+        }
+        return null;
+    }
+
+    /** 命中点前后各保留多少字符作为上下文，避免把整段原文写进审计表。 */
+    private static final int SNIPPET_CONTEXT = 20;
+
+    /**
+     * 命中区间的脱敏片段：命中区间整体打码为 *，只保留前后有限上下文。
+     *
+     * <p>语义层命中没有字面区间（hitStart/hitEnd = -1），此时<b>绝不写任何原文</b>，
+     * 只记一个长度标记——命中词与分类已由 matched_word / category 单独落库，
+     * 不需要靠原文片段来还原。旧的 fallback 分支会把原文前 255 字原样写入，
+     * 与「snippet_masked 是脱敏片段」的列语义冲突，已修正。</p>
+     *
+     * <p>规则命中时也只取命中点前后各 20 字，而不是从第 0 字一路拼到命中词——
+     * 否则长文本下前缀原文会被完整保留。</p>
+     */
+    private static String maskSnippet(String text, ContentVerdict verdict) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        if (verdict.hitStart() < 0 || verdict.hitEnd() <= verdict.hitStart()
+                || verdict.hitEnd() > text.length()) {
+            return "[masked:no-offset,len=" + text.length() + "]";
+        }
+        int from = Math.max(0, verdict.hitStart() - SNIPPET_CONTEXT);
+        int to = Math.min(text.length(), verdict.hitEnd() + SNIPPET_CONTEXT);
+        StringBuilder sb = new StringBuilder(to - from + 1);
+        sb.append(text, from, verdict.hitStart());
+        sb.append('*');
+        sb.append(text, verdict.hitEnd(), to);
+        return sb.length() <= 255 ? sb.toString() : sb.substring(0, 255);
+    }
+
+    /** 指标结果标签：白名单豁免单独一档，其余用动作名。 */
+    private static String labelOf(ContentVerdict verdict) {
+        return verdict.whitelisted() ? RESULT_WHITELISTED : verdict.action().name();
+    }
+
+    /** 实际检测逻辑（不含计量，便于 `check` 统一包裹）。 */
+    private ContentVerdict doCheck(ContentScene scene, String text, long userId) {
         if (text == null || text.isEmpty() || !properties.isEnabled()) {
             return ContentVerdict.pass(scene);
         }
@@ -242,7 +370,9 @@ public class ContentSecurityService {
         // 收集全部命中（含同位置更短的词），按严重度决策，避免「首词定生死」漏拦
         List<SensitiveWordHit> all = sensitiveWordService.matchAll(normalized.text());
         if (all.isEmpty()) {
-            return ContentVerdict.pass(scene);
+            // 规则未命中 → 语义层兜字面变体（改写/谐音/同义）；fail-open：模型不可用则放行
+            ContentVerdict semanticVerdict = semanticCheck(scene, normalized.text(), userId);
+            return semanticVerdict != null ? semanticVerdict : ContentVerdict.pass(scene);
         }
 
         // 白名单只减不增：被豁免的词移出决策集；剩余命中按动作严重度取最大者裁定。
@@ -288,7 +418,7 @@ public class ContentSecurityService {
         int end = (start < 0 || lastOriginal < 0) ? -1 : lastOriginal + 1;
 
         return new ContentVerdict(worst, scene, worstHit.word(), worstHit.category(), false,
-                end < 0 ? -1 : start, end);
+                end < 0 ? -1 : start, end, null);
     }
 
     /** 无用户上下文的便捷重载。 */
@@ -406,5 +536,98 @@ public class ContentSecurityService {
      */
     private static String denyMessage(ContentVerdict verdict) {
         return sceneLabel(verdict.scene()) + "包含不允许发布的内容";
+    }
+
+    // ==================== Phase 0：指标（接入既有 Prometheus） ====================
+
+    /**
+     * 指标门面：把「检测在不在工作、快不快、拦得准不准」变成可观测的四组数字。
+     *
+     * <p><b>为什么必须做</b>：规模演进的所有决策都依赖这些数字——没有 P99 就不知道要不要换 DAT，
+     * 没有词库年龄就不知道热更新是否卡住，没有豁免计数就不知道误杀率。这是
+     * 「先让失效可见 → 再增量更新 → 最后才是内存结构」这条路的第一步。</p>
+     *
+     * <p><b>为什么是 no-op 兜底</b>：单测与无 actuator 的极简部署下 {@code MeterRegistry} 可能缺失，
+     * 此时所有记录方法空转——观测能力不该成为核心链路的硬依赖。</p>
+     */
+    static final class ModerationMetrics {
+
+        /** 检测耗时（纳秒）：用于 P50/P95/P99。 */
+        private final DistributionSummary duration;
+        private final MeterRegistry registry;
+        private final boolean enabled;
+
+        /** 无注册表时的 no-op 实例。 */
+        static final ModerationMetrics NOOP = new ModerationMetrics(null);
+
+        private ModerationMetrics(MeterRegistry registry) {
+            this.registry = registry;
+            this.enabled = registry != null;
+            if (!enabled) {
+                this.duration = null;
+                return;
+            }
+            // 耗时用 DistributionSummary（纳秒），Prometheus 侧按 histogram 输出可直接算分位
+            this.duration = DistributionSummary.builder("content_security_check_duration_nanos")
+                    .description("内容安全单次检测耗时（纳秒，含归一化+匹配+决策）")
+                    .publishPercentiles(0.5, 0.95, 0.99)
+                    .register(registry);
+        }
+
+        /** 记录一次检测的结果标签。 */
+        void count(ContentScene scene, String action) {
+            if (!enabled) {
+                return;
+            }
+            Counter.builder("content_security_check_total")
+                    .description("内容安全检测次数（按场景与动作）")
+                    .tag("scene", scene.name())
+                    .tag("action", action)
+                    .register(registry)
+                    .increment();
+        }
+
+        /** 记录一次检测耗时。 */
+        void recordDuration(long nanos) {
+            if (enabled) {
+                duration.record(nanos);
+            }
+        }
+
+        /** 注册词库规模与新鲜度（值由 supplier 实时提供，避免与快照切换时机错位）。 */
+        void bindDictionary(java.util.function.IntSupplier size, java.util.function.LongSupplier ageSeconds) {
+            if (!enabled) {
+                return;
+            }
+            // Gauge 按同名同标签幂等：重复注册只会返回已有实例，不会重复创建
+            Gauge.builder("content_security_dict_size", size, java.util.function.IntSupplier::getAsInt)
+                    .description("已加载到 AC 的敏感词条数（0 = 过滤失效）")
+                    .register(registry);
+            Gauge.builder("content_security_dict_age_seconds", ageSeconds, java.util.function.LongSupplier::getAsLong)
+                    .description("距上次成功重建词库的秒数（持续增大 = 热更新可能卡住）")
+                    .register(registry);
+        }
+    }
+
+    /** 懒初始化指标门面（首次使用时绑定注册表与词库 Gauge）。 */
+    private ModerationMetrics metrics() {
+        ModerationMetrics m = metrics;
+        if (m == null) {
+            synchronized (this) {
+                m = metrics;
+                if (m == null) {
+                    MeterRegistry registry = meterRegistryProvider == null
+                            ? null : meterRegistryProvider.getIfAvailable();
+                    m = registry == null ? ModerationMetrics.NOOP : new ModerationMetrics(registry);
+                    if (registry != null) {
+                        m.bindDictionary(sensitiveWordService::currentSize,
+                                () -> java.time.Duration.between(
+                                        sensitiveWordService.lastLoadedAt(), java.time.Instant.now()).getSeconds());
+                    }
+                    metrics = m;
+                }
+            }
+        }
+        return m;
     }
 }

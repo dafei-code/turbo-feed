@@ -3,9 +3,13 @@ package com.turbofeed.gateway.repository;
 import com.turbofeed.gateway.service.review.ReviewTask;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -42,12 +46,25 @@ public class ReviewTaskRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    /** 建一条待复审任务（id 由库 AUTO_INCREMENT 生成）。 */
-    public void insert(String mediaId, long authorId, String taskType, int triggerCount) {
-        jdbcTemplate.update(
-                "INSERT INTO review_task (media_id, author_id, task_type, trigger_count, status, created_at) "
-                        + "VALUES (?, ?, ?, ?, 0, ?)",
-                mediaId, authorId, taskType, triggerCount, Timestamp.from(Instant.now()));
+    /**
+     * 建一条待复审任务，返回自增 ID（调用方据此回链内容审计行）。
+     */
+    public long insert(String mediaId, long authorId, String taskType, int triggerCount) {
+        KeyHolder kh = new GeneratedKeyHolder();
+        jdbcTemplate.update(con -> {
+            PreparedStatement ps = con.prepareStatement(
+                    "INSERT INTO review_task (media_id, author_id, task_type, trigger_count, status, created_at) "
+                            + "VALUES (?, ?, ?, ?, 0, ?)",
+                    Statement.RETURN_GENERATED_KEYS);
+            ps.setString(1, mediaId);
+            ps.setLong(2, authorId);
+            ps.setString(3, taskType);
+            ps.setInt(4, triggerCount);
+            ps.setTimestamp(5, Timestamp.from(Instant.now()));
+            return ps;
+        }, kh);
+        Number key = kh.getKey();
+        return key == null ? -1L : key.longValue();
     }
 
     /** 该 media 是否已有待复审任务（防重复建单）。 */

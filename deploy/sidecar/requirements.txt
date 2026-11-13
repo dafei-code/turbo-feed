@@ -1,0 +1,7 @@
+fastapi==0.115.0
+uvicorn==0.30.6
+pydantic==2.9.2
+pymysql==1.1.1
+# 接真模型时取消注释（约 120MB，首次启动下载权重）：
+# sentence-transformers==3.1.1
+# torch==2.4.0

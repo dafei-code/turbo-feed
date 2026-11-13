@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 980" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <rect width="900" height="980" fill="#fafbfc"/>
+  <text x="450" y="32" text-anchor="middle" font-size="20" font-weight="700" fill="#1f2328">doCheck 决策流程图</text>
+
+  <!-- 开始 -->
+  <rect x="350" y="55" width="200" height="44" rx="22" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <text x="450" y="82" text-anchor="middle" font-size="14" font-weight="600" fill="#0969da">文本进入 requireClean()</text>
+
+  <!-- 归一化 -->
+  <rect x="300" y="125" width="300" height="50" rx="8" fill="#fff" stroke="#d0d7de"/>
+  <text x="450" y="148" text-anchor="middle" font-size="13" fill="#1f2328">TextNormalizer 归一化</text>
+  <text x="450" y="166" text-anchor="middle" font-size="11" fill="#57606a">NFKC → 剥零宽 → 剥分隔符 → 小写 → 繁→简</text>
+
+  <!-- AC 扫描 -->
+  <rect x="280" y="200" width="340" height="50" rx="8" fill="#fff" stroke="#d0d7de"/>
+  <text x="450" y="223" text-anchor="middle" font-size="13" fill="#1f2328">AhoCorasick.allMatches(normalized)</text>
+  <text x="450" y="241" text-anchor="middle" font-size="11" fill="#57606a">返回全部命中（含 fail 链短词）</text>
+
+  <!-- 判断 all.isEmpty() -->
+  <polygon points="450,275 560,320 450,365 340,320" fill="#fff8c5" stroke="#9a6700" stroke-width="1.5"/>
+  <text x="450" y="318" text-anchor="middle" font-size="13" font-weight="600" fill="#9a6700">规则未命中？</text>
+  <text x="450" y="338" text-anchor="middle" font-size="11" fill="#57606a">all.isEmpty()</text>
+
+  <!-- 语义层分支（右） -->
+  <rect x="600" y="295" width="260" height="60" rx="8" fill="#fff8c5" stroke="#9a6700" stroke-dasharray="4,3"/>
+  <text x="730" y="318" text-anchor="middle" font-size="12" font-weight="600" fill="#9a6700">调 sidecar /score</text>
+  <text x="730" y="338" text-anchor="middle" font-size="11" fill="#57606a">超时/不可用 → fail-open 放行</text>
+
+  <polygon points="730,380 820,415 730,450 640,415" fill="#fff" stroke="#d0d7de"/>
+  <text x="730" y="413" text-anchor="middle" font-size="12" fill="#1f2328">score≥0.86?</text>
+  <text x="730" y="430" text-anchor="middle" font-size="11" fill="#57606a">否 → 看 ≥0.78</text>
+
+  <!-- 白名单过滤（下） -->
+  <rect x="280" y="395" width="340" height="60" rx="8" fill="#fff" stroke="#d0d7de"/>
+  <text x="450" y="418" text-anchor="middle" font-size="13" fill="#1f2328">白名单过滤：命中词在白名单？</text>
+  <text x="450" y="438" text-anchor="middle" font-size="11" fill="#57606a">是 → 移出决策集；全部命中都被豁免 → exempt</text>
+
+  <!-- 多命中取最严重 -->
+  <rect x="280" y="485" width="340" height="60" rx="8" fill="#fff" stroke="#d0d7de"/>
+  <text x="450" y="508" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">多命中取最严重动作</text>
+  <text x="450" y="528" text-anchor="middle" font-size="11" fill="#57606a">worst = max(severity(action))</text>
+
+  <!-- 四个动作出口 -->
+  <rect x="80" y="590" width="150" height="56" rx="8" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.5"/>
+  <text x="155" y="615" text-anchor="middle" font-size="13" font-weight="700" fill="#1a7f37">PASS</text>
+  <text x="155" y="635" text-anchor="middle" font-size="11" fill="#1a7f37">放行</text>
+
+  <rect x="250" y="590" width="150" height="56" rx="8" fill="#fff8c5" stroke="#9a6700" stroke-width="1.5"/>
+  <text x="325" y="615" text-anchor="middle" font-size="13" font-weight="700" fill="#9a6700">LIMIT</text>
+  <text x="325" y="635" text-anchor="middle" font-size="11" fill="#9a6700">放行+降权</text>
+
+  <rect x="420" y="590" width="150" height="56" rx="8" fill="#fff8c5" stroke="#9a6700" stroke-width="1.5"/>
+  <text x="495" y="615" text-anchor="middle" font-size="13" font-weight="700" fill="#9a6700">REVIEW</text>
+  <text x="495" y="635" text-anchor="middle" font-size="11" fill="#9a6700">放行+人审</text>
+
+  <rect x="590" y="590" width="150" height="56" rx="8" fill="#ffebe9" stroke="#cf222e" stroke-width="1.5"/>
+  <text x="665" y="615" text-anchor="middle" font-size="13" font-weight="700" fill="#cf222e">BLOCK</text>
+  <text x="665" y="635" text-anchor="middle" font-size="11" fill="#cf222e">拒绝发布</text>
+
+  <!-- 审计落库 -->
+  <rect x="180" y="690" width="540" height="60" rx="8" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="450" y="715" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">审计落库 content_moderation_hit（fail-open）</text>
+  <text x="450" y="735" text-anchor="middle" font-size="11" fill="#57606a">BLOCK/REVIEW/LIMIT/白名单豁免才写；snippet 打码；异常吞掉告警</text>
+
+  <!-- 返回 ContentVerdict -->
+  <rect x="300" y="790" width="300" height="50" rx="25" fill="#ddf4ff" stroke="#0969da" stroke-width="1.5"/>
+  <text x="450" y="820" text-anchor="middle" font-size="14" font-weight="600" fill="#0969da">返回 ContentVerdict</text>
+
+  <!-- 箭头 -->
+  <line x1="450" y1="99" x2="450" y2="123" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="450" y1="175" x2="450" y2="198" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="450" y1="250" x2="450" y2="273" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+
+  <!-- 是 → 语义层 -->
+  <line x1="560" y1="320" x2="598" y2="320" stroke="#9a6700" stroke-width="1.5" marker-end="url(#a3)"/>
+  <text x="575" y="312" font-size="11" fill="#9a6700">是</text>
+  <line x1="730" y1="355" x2="730" y2="378" stroke="#9a6700" stroke-width="1.5" marker-end="url(#a3)"/>
+  <path d="M 640 415 L 200 415 L 200 600" stroke="#9a6700" stroke-width="1.5" stroke-dasharray="4,3" fill="none" marker-end="url(#a3)"/>
+  <text x="210" y="405" font-size="11" fill="#9a6700">否→PASS</text>
+
+  <!-- 否 → 白名单 -->
+  <line x1="450" y1="365" x2="450" y2="393" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+  <text x="460" y="383" font-size="11" fill="#57606a">否</text>
+  <line x1="450" y1="455" x2="450" y2="483" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+
+  <!-- 动作分布线 -->
+  <path d="M 450 545 L 450 575 L 155 575 L 155 588" stroke="#8b949e" stroke-width="1.5" fill="none" marker-end="url(#a3)"/>
+  <path d="M 450 575 L 325 575 L 325 588" stroke="#8b949e" stroke-width="1.5" fill="none" marker-end="url(#a3)"/>
+  <path d="M 450 575 L 495 575 L 495 588" stroke="#8b949e" stroke-width="1.5" fill="none" marker-end="url(#a3)"/>
+  <path d="M 450 575 L 665 575 L 665 588" stroke="#8b949e" stroke-width="1.5" fill="none" marker-end="url(#a3)"/>
+
+  <line x1="450" y1="646" x2="450" y2="688" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+  <line x1="450" y1="750" x2="450" y2="788" stroke="#8b949e" stroke-width="1.5" marker-end="url(#a3)"/>
+
+  <defs>
+    <marker id="a3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#8b949e"/>
+    </marker>
+  </defs>
+</svg>

@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 620" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <rect width="940" height="620" fill="#fafbfc"/>
+  <text x="470" y="32" text-anchor="middle" font-size="20" font-weight="700" fill="#1f2328">演进路线：从当前规模到抖音量级</text>
+
+  <!-- 三列 -->
+  <rect x="40" y="70" width="270" height="500" rx="10" fill="#dafbe1" stroke="#1a7f37" stroke-width="1.5"/>
+  <text x="175" y="100" text-anchor="middle" font-size="15" font-weight="700" fill="#1a7f37">当前（本地/初创）</text>
+  <text x="175" y="125" text-anchor="middle" font-size="12" fill="#57606a">单网关 · 1M 词 · 单 sidecar</text>
+
+  <rect x="335" y="70" width="270" height="500" rx="10" fill="#fff8c5" stroke="#9a6700" stroke-width="1.5"/>
+  <text x="470" y="100" text-anchor="middle" font-size="15" font-weight="700" fill="#9a6700">中期（10x~100x）</text>
+  <text x="470" y="125" text-anchor="middle" font-size="12" fill="#57606a">网关×N · 10M 词 · GPU sidecar</text>
+
+  <rect x="630" y="70" width="270" height="500" rx="10" fill="#ffebe9" stroke="#cf222e" stroke-width="1.5"/>
+  <text x="765" y="100" text-anchor="middle" font-size="15" font-weight="700" fill="#cf222e">抖音量级</text>
+  <text x="765" y="125" text-anchor="middle" font-size="12" fill="#57606a">百万 QPS · 亿级词 · 多机房</text>
+
+  <!-- 当前列内容 -->
+  <text x="60" y="160" font-size="12" fill="#1f2328">• 手写 AC，HashMap 子节点</text>
+  <text x="60" y="185" font-size="12" fill="#1f2328">• 词库 1M 词，590MB 内存</text>
+  <text x="60" y="210" font-size="12" fill="#1f2328">• 热更新：后台线程重建快照</text>
+  <text x="60" y="235" font-size="12" fill="#1f2328">• 语义层：hashing 向量占位</text>
+  <text x="60" y="260" font-size="12" fill="#1f2328">• 审计：单表，运营后台查</text>
+  <text x="60" y="285" font-size="12" fill="#1f2328">• 媒体审核：未做</text>
+  <text x="60" y="310" font-size="12" fill="#1f2328">• A/B：无</text>
+  <text x="60" y="335" font-size="12" fill="#1f2328">• 样本回流：人工录入</text>
+
+  <!-- 中期列内容 -->
+  <text x="355" y="160" font-size="12" fill="#1f2328">• AC 换 DAT/双数组 Trie，省内存</text>
+  <text x="355" y="185" font-size="12" fill="#1f2328">• 词库分片：按 category 多 AC 实例</text>
+  <text x="355" y="210" font-size="12" fill="#1f2328">• 增量更新：只补新词，不全量重建</text>
+  <text x="355" y="235" font-size="12" fill="#1f2328">• 真 embedding：bge-small-zh on GPU</text>
+  <text x="355" y="260" font-size="12" fill="#1f2328">• 向量检索：Faiss/Milvus，亿级样本</text>
+  <text x="355" y="285" font-size="12" fill="#1f2328">• 审计表分区：按月归档，冷热分离</text>
+  <text x="355" y="310" font-size="12" fill="#1f2328">• 媒体审核：抽帧 + 图像分类 + ASR</text>
+  <text x="355" y="335" font-size="12" fill="#1f2328">• A/B：规则灰度 + 阈值实验</text>
+  <text x="355" y="360" font-size="12" fill="#1f2328">• 样本回流：人审结果自动入 exemplar</text>
+
+  <!-- 抖音量级列内容 -->
+  <text x="650" y="160" font-size="12" fill="#1f2328">• 分布式 AC 服务：词库独立部署</text>
+  <text x="650" y="185" font-size="12" fill="#1f2328">• 千万级词，多级缓存（本地+远端）</text>
+  <text x="650" y="210" font-size="12" fill="#1f2328">• 秒级热更：消息总线广播新词</text>
+  <text x="650" y="235" font-size="12" fill="#1f2328">• 大模型：LLM 直接审文本/图片</text>
+  <text x="650" y="260" font-size="12" fill="#1f2328">• 多模态：视频帧 + 音频 + OCR 联合</text>
+  <text x="650" y="285" font-size="12" fill="#1f2328">• 实时特征：用户画像 + 文本联合判</text>
+  <text x="650" y="310" font-size="12" fill="#1f2328">• 主动学习：模型挑不确定样本送人审</text>
+  <text x="650" y="335" font-size="12" fill="#1f2328">• 对抗：模拟绕过攻击，自动补样本</text>
+  <text x="650" y="360" font-size="12" fill="#1f2328">• 多机房：词库同步 + 就近接入</text>
+
+  <!-- 箭头 -->
+  <path d="M 310 320 L 335 320" stroke="#8b949e" stroke-width="2" marker-end="url(#a7)"/>
+  <path d="M 605 320 L 630 320" stroke="#8b949e" stroke-width="2" marker-end="url(#a7)"/>
+
+  <text x="470" y="560" text-anchor="middle" font-size="12" fill="#cf222e">原则：先让失效可见 → 再增量更新 → 最后才是内存结构；不要为想象的规模过度设计</text>
+
+  <defs>
+    <marker id="a7" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#8b949e"/>
+    </marker>
+  </defs>
+</svg>

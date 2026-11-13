@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620" font-family="-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <rect width="900" height="620" fill="#fafbfc"/>
+  <text x="450" y="32" text-anchor="middle" font-size="20" font-weight="700" fill="#1f2328">审计反馈闭环：每次人审都让系统变聪明</text>
+
+  <!-- 中心 -->
+  <circle cx="450" cy="310" r="60" fill="#ddf4ff" stroke="#0969da" stroke-width="2"/>
+  <text x="450" y="305" text-anchor="middle" font-size="13" font-weight="700" fill="#0969da">content_</text>
+  <text x="450" y="322" text-anchor="middle" font-size="13" font-weight="700" fill="#0969da">moderation_hit</text>
+
+  <!-- 节点 1: 命中落库（左上） -->
+  <rect x="80" y="100" width="200" height="70" rx="8" fill="#fff" stroke="#d0d7de"/>
+  <text x="180" y="128" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">① 规则/语义命中</text>
+  <text x="180" y="148" text-anchor="middle" font-size="11" fill="#57606a">BLOCK/REVIEW/LIMIT 落一行</text>
+  <text x="180" y="163" text-anchor="middle" font-size="11" fill="#57606a">snippet 打码</text>
+
+  <!-- 节点 2: 建 ReviewTask（右上） -->
+  <rect x="620" y="100" width="200" height="70" rx="8" fill="#fff" stroke="#d0d7de"/>
+  <text x="720" y="128" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2328">② REVIEW → 建人审任务</text>
+  <text x="720" y="148" text-anchor="middle" font-size="11" fill="#57606a">GeneratedKeyHolder 拿 taskId</text>
+  <text x="720" y="163" text-anchor="middle" font-size="11" fill="#57606a">回填 hit.review_task_id</text>
+
+  <!-- 节点 3: 人审裁决（右） -->
+  <rect x="620" y="280" width="200" height="80" rx="8" fill="#fff8c5" stroke="#9a6700"/>
+  <text x="720" y="308" text-anchor="middle" font-size="13" font-weight="600" fill="#9a6700">③ 审核员后台裁决</text>
+  <text x="720" y="328" text-anchor="middle" font-size="11" fill="#57606a">GET /admin/moderation/hits</text>
+  <text x="720" y="345" text-anchor="middle" font-size="11" fill="#57606a">POST /verdict</text>
+
+  <!-- 分叉: REJECTED（左下） -->
+  <rect x="80" y="280" width="200" height="80" rx="8" fill="#dafbe1" stroke="#1a7f37"/>
+  <text x="180" y="308" text-anchor="middle" font-size="13" font-weight="600" fill="#1a7f37">④a REJECTED（误杀）</text>
+  <text x="180" y="328" text-anchor="middle" font-size="11" fill="#57606a">运营把词加白名单</text>
+  <text x="180" y="345" text-anchor="middle" font-size="11" fill="#57606a">下次不再拦</text>
+
+  <!-- 分叉: CONFIRMED（下） -->
+  <rect x="350" y="480" width="200" height="80" rx="8" fill="#ffebe9" stroke="#cf222e"/>
+  <text x="450" y="508" text-anchor="middle" font-size="13" font-weight="600" fill="#cf222e">④b CONFIRMED（真违规）</text>
+  <text x="450" y="528" text-anchor="middle" font-size="11" fill="#57606a">样本入 moderation_exemplar</text>
+  <text x="450" y="545" text-anchor="middle" font-size="11" fill="#57606a">sidecar 加载，下次挡住同类改写</text>
+
+  <!-- 箭头 -->
+  <path d="M 280 135 Q 380 180 410 260" stroke="#8b949e" stroke-width="1.8" fill="none" marker-end="url(#a5)"/>
+  <path d="M 510 280 Q 560 200 620 160" stroke="#8b949e" stroke-width="1.8" fill="none" marker-end="url(#a5)"/>
+  <path d="M 720 170 L 720 278" stroke="#8b949e" stroke-width="1.8" marker-end="url(#a5)"/>
+  <path d="M 620 320 L 290 320" stroke="#8b949e" stroke-width="1.8" fill="none"/>
+  <path d="M 620 340 Q 540 420 500 478" stroke="#8b949e" stroke-width="1.8" fill="none" marker-end="url(#a5)"/>
+
+  <!-- 闭环箭头：白名单→下次，exemplar→下次 -->
+  <path d="M 180 280 Q 100 200 130 170" stroke="#1a7f37" stroke-width="1.8" stroke-dasharray="5,4" fill="none" marker-end="url(#a5g)"/>
+  <text x="70" y="230" font-size="11" fill="#1a7f37">下次放行</text>
+
+  <path d="M 450 480 Q 450 420 450 375" stroke="#cf222e" stroke-width="1.8" stroke-dasharray="5,4" fill="none" marker-end="url(#a5r)"/>
+  <text x="460" y="430" font-size="11" fill="#cf222e">下次挡住</text>
+
+  <defs>
+    <marker id="a5" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#8b949e"/>
+    </marker>
+    <marker id="a5g" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#1a7f37"/>
+    </marker>
+    <marker id="a5r" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#cf222e"/>
+    </marker>
+  </defs>
+</svg>
