@@ -89,7 +89,7 @@ public class RedisCounterBuffer implements CounterBuffer {
     }
 
     @Override
-    public Map<String, long[]> drain() {
+    public CounterFlushSnapshot drain(String batchId) {
         List<Object> raw = redisson.getScript().eval(RScript.Mode.READ_WRITE, DRAIN_LUA,
                 RScript.ReturnType.MULTI, Collections.singletonList(KEYSET_KEY));
         Map<String, long[]> snapshot = new HashMap<>();
@@ -102,7 +102,7 @@ public class RedisCounterBuffer implements CounterBuffer {
             long commentLike = parse(raw.get(i + 4));
             snapshot.put(postId, new long[]{like, comment, share, commentLike});
         }
-        return snapshot;
+        return new CounterFlushSnapshot(batchId, snapshot);
     }
 
     @Override

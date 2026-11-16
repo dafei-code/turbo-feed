@@ -146,9 +146,11 @@ public class PostCounterRepository {
             }
             return new ApplyResult(applied, postIds.size() - applied);
         }
-        // 其它异常（UPSERT 失败 / 连接中断）不在此捕获：事务已回滚，dedup 与计数都没落，
-        // 交由调度器下个周期用新 batch_id 重放。绝不能吞掉——吞掉就等于把「可重放」
-        // 变成「静默丢弃」，那正是本次改造要消灭的失效形状。
+        // 其它异常（UPSERT 失败 / 连接中断）不在此捕获：事务已回滚，dedup 与计数都没落。
+        // PR-E：上层 CounterFlushService 会把「整份快照 + 原 batch_id」写入 counter_flush_pending，
+        // 下个周期（含重启后首个周期）用【同一个 batch_id】重放。绝不能换新 batch_id
+        // （累加式 UPSERT 会重复计数），也绝不能吞掉异常（等于把「可重放」变成「静默丢弃」）。
+        // 旧注释里「交由调度器下个周期用新 batch_id 重放」对应的代码路径并不存在，已纠正。
     }
 
     /**

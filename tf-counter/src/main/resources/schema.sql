@@ -24,8 +24,19 @@ CREATE TABLE IF NOT EXISTS counter_flush_dedup (
 -- 选主保证多 tf-counter 副本中只有一个执行 drain；JdbcLockProvider 复用本服务 DataSource。
 CREATE TABLE IF NOT EXISTS shedlock (
   name       VARCHAR(64)  NOT NULL,
-  lock_until TIMESTAMP   NOT NULL,
-  locked_at  TIMESTAMP   NULL,
+  lock_until TIMESTAMP    NOT NULL,
+  locked_at  TIMESTAMP    NULL,
   locked_by  VARCHAR(255) NULL,
   PRIMARY KEY (name)
+);
+
+-- PR-E 失败批次暂存：flush 落库失败时整份快照连同原 batch_id 落此处，
+-- 下个周期（含重启后首个周期）复用原 batch_id 重放，命中 counter_flush_dedup 才是真幂等。
+-- payload 为 JSON：{postId:[like,comment,share,commentLike]}；仅 dry-run 报告与重放读取。
+CREATE TABLE IF NOT EXISTS counter_flush_pending (
+  batch_id   VARCHAR(64)  NOT NULL PRIMARY KEY COMMENT '原 flush 批次 id（重放必须复用，换新 id 会重复累加）',
+  payload    TEXT         NOT NULL COMMENT '增量快照 JSON: {postId:[like,comment,share,commentLike]}',
+  attempts   INT          NOT NULL DEFAULT 0 COMMENT '重放失败次数累计',
+  created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '首次登记时间（重放按此排序）',
+  last_error VARCHAR(512) NULL COMMENT '最近一次失败原因（截断到 512 字符）'
 );

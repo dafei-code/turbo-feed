@@ -39,11 +39,12 @@ public class CounterBufferService implements CounterBuffer {
         buffer.computeIfAbsent(postId, k -> new long[DIM])[type.ordinal()] += delta;
     }
 
-    /** 取出当前全部增量快照并清空（原子交接给 flush 线程）。 */
-    public Map<String, long[]> drain() {
+    /** 取出当前全部增量快照并清空（原子交接给 flush 线程，批次身份随快照一同交接）。 */
+    @Override
+    public CounterFlushSnapshot drain(String batchId) {
         Map<String, long[]> snapshot = new HashMap<>(buffer);
         buffer.clear();
-        return snapshot;
+        return new CounterFlushSnapshot(batchId, snapshot);
     }
 
     /** 读取某帖当前仍在缓冲中（未落库）的增量；无则返回 {@code null}。flush 后修正 L1 用。 */

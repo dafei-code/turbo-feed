@@ -1,0 +1,34 @@
+# =============================================================================
+# tf-counter 的 RocketMQ 连接配置（仅 --spring.profiles.active=mq 时加载）
+#
+# 为什么必须单独成文件（与 tf-gateway/application-mq.yml 同一纪律）：
+# rocketmq-spring-boot-starter 的 RocketMQAutoConfiguration 以
+#   @ConditionalOnProperty(prefix = "rocketmq", value = {"name-server", "producer.group"})
+# 决定是否创建生产者 Bean；该注解没有 havingValue，"属性存在但为空串" 同样算命中，
+# 会把 producer.start() 拉起来并在无 name-server 时直接启动失败。
+# 因此只有让属性在 profile 未激活时【真正缺席】，默认部署才能保持零 MQ 依赖。
+#
+# 突发档启用方式（三个服务必须一起开，否则一边发 MQ 一边等 HTTP）：
+#   TURBOFEED_SPRING_PROFILES=prod,mq
+#   TURBOFEED_ROCKETMQ_NAME_SERVER=<namesrv>:9876
+#   TURBOFEED_MQ_ENABLED=true
+#   TURBOFEED_COUNTER_ENABLED=true
+# 详见 docs/ops/burst-mq-profile.md。
+#
+# 在本 profile 之前，tf-counter 只有 application.yml 里被注释掉的示例配置，
+# 生产开 MQ 时 CounterMqConsumer 会因缺 name-server 静默不注册 —— 这是本轮补的部署缺口。
+# =============================================================================
+turbofeed:
+  mq:
+    # profile 激活即代表要用真 MQ，开关随之置 true，保证「profile 开 = MQ 开」只有一处真相。
+    enabled: true
+
+# name-server 三处齐设：PUSH 消费者在 starter 里优先读 rocketmq.consumer.name-server，
+# 仅配顶层会导致消费端 setNamesrvAddr 不被调用、启动报 "connect to null failed"。
+rocketmq:
+  name-server: ${TURBOFEED_ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+  producer:
+    group: turbofeed-counter-producer-group
+    name-server: ${TURBOFEED_ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+  consumer:
+    name-server: ${TURBOFEED_ROCKETMQ_NAME_SERVER:127.0.0.1:9876}

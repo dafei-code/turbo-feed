@@ -2,8 +2,6 @@ package com.turbofeed.counter.bucket;
 
 import com.turbofeed.counter.CounterType;
 
-import java.util.Map;
-
 /**
  * 计数增量缓冲抽象（削峰层契约）。
  *
@@ -17,16 +15,25 @@ import java.util.Map;
  * </ul>
  * </p>
  *
- * <p>契约要点：{@link #drain()} 必须是「取出快照并清空」的原子交接——同一份增量只会被
+ * <p>契约要点：{@link #drain(String)} 必须是「取出快照并清空」的原子交接——同一份增量只会被
  * 一个 flush 周期消费一次（standalone 由单副本独占；集群由 ShedLock leader 独占）。</p>
+ *
+ * <p><b>PR-E 接口变更</b>：{@code drain} 现在接收由 flush 线程<b>提前生成</b>的 {@code batchId}，
+ * 并返回 {@link CounterFlushSnapshot}（批次身份 + 增量快照）。这样落库失败时整份快照可以
+ * 连同原 batchId 写入独立暂存、原样重放；若仍只返回裸 Map，失败后既没有身份也没有可持久化载体，
+ * 而换新 batchId 重放会让累加式 UPSERT 重复计数。</p>
  */
 public interface CounterBuffer {
 
     /** 累加某帖某维度增量。 */
     void add(String postId, CounterType type, long delta);
 
-    /** 取出当前全部增量快照并清空（原子交接给 flush 线程）。 */
-    Map<String, long[]> drain();
+    /**
+     * 取出当前全部增量快照并清空（原子交接给 flush 线程）。
+     *
+     * @param batchId 由 flush 线程在调用本方法<b>之前</b>生成的周期唯一标识，随快照一同交接
+     */
+    CounterFlushSnapshot drain(String batchId);
 
     /** 读取某帖当前仍在缓冲中（未落库）的增量；无则返回 {@code null}（flush 后修正 L1 用）。 */
     long[] get(String postId);

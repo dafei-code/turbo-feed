@@ -1,6 +1,7 @@
 package com.turbofeed.counter.mqconsumer;
 
 import com.turbofeed.counter.bucket.CounterBuffer;
+import com.turbofeed.counter.bucket.CounterFlushPendingStore;
 import com.turbofeed.counter.cache.CounterReadService;
 import com.turbofeed.counter.service.CounterIncrService;
 import com.turbofeed.shared.model.CounterIncrementEvent;
@@ -23,6 +24,8 @@ import java.util.List;
  *       MQ 启用时由 {@link CounterMqConsumer} 消费同契约事件后汇流到 {@link CounterIncrService}）。</li>
  *   <li>{@code GET /internal/counter/{postId}}：三级读缓存查询聚合计数（管理端 / 批量计数用）。</li>
  *   <li>{@code GET /internal/counter/buckets}：缓冲待落库负载快照（管理后台「计数分桶负载」面板用）。</li>
+ *   <li>{@code GET /internal/counter/reconciliation/dry-run}：PR-E B4 对账 dry-run，
+ *       只报告失败暂存里尚未落库的批次与增量，不改数据、不触发重放。</li>
  * </ul>
  */
 @RestController
@@ -32,12 +35,14 @@ public class CounterIncrController {
     private final CounterIncrService incrService;
     private final CounterReadService readService;
     private final CounterBuffer buffer;
+    private final CounterFlushPendingStore pendingStore;
 
     public CounterIncrController(CounterIncrService incrService, CounterReadService readService,
-                                 CounterBuffer buffer) {
+                                 CounterBuffer buffer, CounterFlushPendingStore pendingStore) {
         this.incrService = incrService;
         this.readService = readService;
         this.buffer = buffer;
+        this.pendingStore = pendingStore;
     }
 
     @PostMapping("/incr")
@@ -61,5 +66,14 @@ public class CounterIncrController {
     @GetMapping("/buckets")
     public Result<CounterBuffer.PendingStats> buckets() {
         return Result.ok(buffer.pendingStats());
+    }
+
+    /**
+     * PR-E B4 对账 dry-run：突发期 / DB 抖动后查看「还差多少增量没落库」。
+     * 只读，不触发重放（重放由 flush 周期自动执行），也不修改任何计数。
+     */
+    @GetMapping("/reconciliation/dry-run")
+    public Result<CounterFlushPendingStore.DryRunReport> reconciliationDryRun() {
+        return Result.ok(pendingStore.dryRun());
     }
 }
