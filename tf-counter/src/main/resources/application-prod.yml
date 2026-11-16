@@ -1,0 +1,45 @@
+# =============================================================================
+# tf-counter 生产形态：共享 MySQL + Redis 集群（阶段 B1）
+#
+# 为什么必须单独一个 profile：application.yml 写死 H2 内存库是为了「克隆即跑」，
+# 但多副本下 H2 会让 shedlock / post_counter / counter_flush_dedup 三张表各副本一份：
+#   · ShedLock 的 JdbcLockProvider 各锁各的 → 选主失效，多个副本同时 drain
+#   · post_counter 各写各的 → 计数不共享
+#   · counter_flush_dedup 各去重各的 → 同批次重放会重复累加
+# 共享 Redis 缓冲只保证「增量不丢」，补不上锁与结果表的共享，故 prod 必须切共享库。
+# 表由 deploy/compose/mysql/01-counter-shared-db.sql 在空数据卷初始化时建立。
+#
+# 默认行为约束：三个 B1 开关在这里仍是 false，靠环境变量显式打开；
+# 不激活本 profile 时（local / 默认）完全走 application.yml 的 H2，零回归。
+# =============================================================================
+spring:
+  datasource:
+    # 库名与迁移脚本一致。覆盖为外部 URL 时可把 counter 指向独立实例。
+    url: ${TURBOFEED_COUNTER_DB_URL:jdbc:mysql://mysql:3306/turbo_feed_counter?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 凭据沿用 prod 编排已有的变量名，不新增敏感值；缺失即启动失败（fail-fast）。
+    username: ${TURBOFEED_DB_USERNAME}
+    password: ${TURBOFEED_DB_PASSWORD}
+  sql:
+    init:
+      # 生产不靠 classpath schema.sql 自动建表：多副本同时启动会并发 DDL，
+      # 且表结构应随迁移脚本版本化。schema.sql 只作本地开发与契约参考。
+      mode: never
+  data:
+    redis:
+      # 与 gateway / engine 同源：RedisTopologyConfig 用 RedisProperties 取密码。
+      password: ${TURBOFEED_REDIS_PASSWORD:}
+
+turbofeed:
+  redis:
+    # prod 默认集群；FeatureFlagGuard.validateRedisTopology() 会在缺 cluster-nodes 时
+    # 启动期 fail-fast，绝不静默回落单机。三服务必须一起切（engine 注释记录过推荐流全空）。
+    mode: ${TURBOFEED_REDIS_MODE:cluster}
+    cluster-nodes: ${TURBOFEED_REDIS_CLUSTER_NODES:}
+    # 下面三个开关默认全关，由 .env.multinode 注入才打开。
+    # 组合约束（FeatureFlagGuard.validateCounterBuffer）：
+    #   redis-buffer-enabled=true ⇒ redis-enabled=true ⇒ redisson-enabled=true
+    redisson-enabled: ${TURBOFEED_REDIS_REDISSON_ENABLED:false}
+  counter:
+    redis-enabled: ${TURBOFEED_COUNTER_REDIS_ENABLED:false}
+    redis-buffer-enabled: ${TURBOFEED_COUNTER_REDIS_BUFFER_ENABLED:false}

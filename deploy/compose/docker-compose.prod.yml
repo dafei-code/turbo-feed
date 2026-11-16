@@ -39,7 +39,10 @@ services:
       TZ: Asia/Shanghai
     volumes:
       - mysql-data:/var/lib/mysql
-      - ./mysql/00-create-databases.sql:/docker-entrypoint-initdb.d/00-create-databases.sql:ro
+      # 挂目录而非单文件：新增的 01-counter-shared-db.sql 会按文件名顺序一并执行
+      # （tf-counter 生产共享库）。⚠️ initdb 只在【空数据卷】首次初始化时跑，
+      # 已有环境需手工补跑该脚本，重启容器不会自动建表。
+      - ./mysql:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${TURBOFEED_DB_PASSWORD}"]
       interval: 10s
@@ -147,6 +150,12 @@ services:
       # 网关与引擎必须同值；prod profile 无默认值，缺失直接启动失败（fail-fast）
       TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN:?请在 deploy/env/.env 中设置 TURBOFEED_INTERNAL_TOKEN}
       TURBOFEED_MQ_ENABLED: ${TURBOFEED_MQ_ENABLED:-false}
+      # ── 阶段 B1 多副本开关（默认全关，注入才生效）─────────────────────────
+      # compose 的 environment: 是白名单，未显式列出的变量进不了容器（历史坑：
+      # TURBOFEED_BEHAVIOR_LOG_ENABLED 设了却静默按默认值走）。
+      TURBOFEED_REDIS_REDISSON_ENABLED: ${TURBOFEED_REDIS_REDISSON_ENABLED:-false}
+      TURBOFEED_SNOWFLAKE_LEASE_ENABLED: ${TURBOFEED_SNOWFLAKE_LEASE_ENABLED:-false}
+      TURBOFEED_COUNTER_ENABLED: ${TURBOFEED_COUNTER_ENABLED:-false}
     ports:
       # 唯一对宿主发布的端口。裸 HTTP——生产必须在前面放 TLS 终结（Nginx/Traefik/云 LB）。
       - "${TURBOFEED_GATEWAY_HOST_PORT:-8080}:8080"
@@ -207,6 +216,8 @@ services:
       TURBOFEED_BEHAVIOR_LOG_ARCHIVE_BUCKET: ${TURBOFEED_BEHAVIOR_LOG_ARCHIVE_BUCKET:-turbo-feed}
       TURBOFEED_BEHAVIOR_LOG_ARCHIVE_BASE_KEY_PREFIX: ${TURBOFEED_BEHAVIOR_LOG_ARCHIVE_BASE_KEY_PREFIX:-behavior}
       TURBOFEED_BEHAVIOR_LOG_ARCHIVE_LOCAL_RETENTION_HOURS: ${TURBOFEED_BEHAVIOR_LOG_ARCHIVE_LOCAL_RETENTION_HOURS:-168}
+      # 阶段 B1：Redisson 客户端开关（与网关 / counter 同一 tf-redis 装配口径）
+      TURBOFEED_REDIS_REDISSON_ENABLED: ${TURBOFEED_REDIS_REDISSON_ENABLED:-false}
     # 不发布端口：只在内部网络被网关调用。需要直连排障时临时用 `docker compose exec`。
     volumes:
       - behavior-logs:/app/logs
@@ -238,6 +249,22 @@ services:
     environment:
       SERVER_PORT: "8081"
       SPRING_PROFILES_ACTIVE: prod
+      # ── 阶段 B1：共享 MySQL（application-prod.yml）+ Redis 集群 ──────────────
+      # 原先本段只有上面两行：prod profile 形同虚设，counter 仍连 127.0.0.1:6379
+      # 与 H2 内存库，多副本下 ShedLock 锁 / 计数 / 去重表都不共享。
+      TURBOFEED_DB_USERNAME: ${TURBOFEED_DB_USERNAME:?请在 deploy/env/.env 中设置 TURBOFEED_DB_USERNAME}
+      TURBOFEED_DB_PASSWORD: ${TURBOFEED_DB_PASSWORD:?请在 deploy/env/.env 中设置 TURBOFEED_DB_PASSWORD}
+      TURBOFEED_REDIS_MODE: ${TURBOFEED_REDIS_MODE:-cluster}
+      TURBOFEED_REDIS_CLUSTER_NODES: ${TURBOFEED_REDIS_CLUSTER_NODES:?请设置集群节点列表}
+      TURBOFEED_REDIS_PASSWORD: ${TURBOFEED_REDIS_PASSWORD:?请在 deploy/env/.env 中设置 TURBOFEED_REDIS_PASSWORD}
+      # 三个开关默认全关；组合约束见 FeatureFlagGuard.validateCounterBuffer()
+      TURBOFEED_REDIS_REDISSON_ENABLED: ${TURBOFEED_REDIS_REDISSON_ENABLED:-false}
+      TURBOFEED_COUNTER_REDIS_ENABLED: ${TURBOFEED_COUNTER_REDIS_ENABLED:-false}
+      TURBOFEED_COUNTER_REDIS_BUFFER_ENABLED: ${TURBOFEED_COUNTER_REDIS_BUFFER_ENABLED:-false}
+    # 共享库必须先就绪，否则 HikariCP 初始化即失败
+    depends_on:
+      mysql:
+        condition: service_healthy
     # 不发布端口：计数服务只被网关/引擎内部调用。
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/actuator/health"]
