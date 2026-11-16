@@ -85,6 +85,27 @@ public record FeedTimelineEvent(
         return new FeedTimelineEvent(timelineKey, action, poolLevel, item, occurredAt, schemaVersion, traceId);
     }
 
+    /**
+     * 显式指定<b>事件发生时刻</b>，返回新实例（record 不可变）。
+     *
+     * <p><b>PR-D3 为什么必须有它</b>：{@link #append(FeedItemView, int)} / {@link #remove(String)}
+     * 工厂固定用 {@code Instant.now()}，那是「构造这一跳」的时刻。发件箱 DEAD 行被
+     * {@code OutboxDeadLetterSweeper} 重投时，Handler 会从 payload JSON 重新构造事件——
+     * 若沿用工厂，迟到的 APPEND 会被打上「重投时刻」的新时间戳，比同一帖后续 REMOVE 更晚，
+     * 引擎侧墓碑比对（{@code append.occurredAt <= tombstone}）必然漏判，已下架内容被复活。
+     * 因此网关必须把 <b>enqueue 时刻</b>固化进 payload，一路透传到这里覆盖。</p>
+     *
+     * <p><b>允许传 {@code null}</b>：存量事件行 / 存量 MQ 消息 / 未接防旧链路的调用点
+     * 没有该语义，按「时刻未知」处理，引擎侧一律放行（向后兼容，只对新生效事件启用防旧）。</p>
+     *
+     * <p>本方法不改变字段结构，仅是 {@code occurredAt} 的取值来源变化，
+     * 按 {@link ContractVersion} 的演进规则<b>不升 schemaVersion</b>：存量消费者读到的仍是
+     * 同一个 {@code occurredAt} 字段，只是值由「投递时刻」变成了「事件产生时刻」。</p>
+     */
+    public FeedTimelineEvent withOccurredAt(Instant occurredAt) {
+        return new FeedTimelineEvent(timelineKey, action, poolLevel, item, occurredAt, schemaVersion, traceId);
+    }
+
     // ⚠️ 刻意【不提供】isAppend() / isRemove() 这类 is 前缀布尔方法。
     // 实测：Jackson 会把 isXxx() 当作 boolean getter 序列化出去，线上 body 里因此多出
     //   "append":true,"remove":false

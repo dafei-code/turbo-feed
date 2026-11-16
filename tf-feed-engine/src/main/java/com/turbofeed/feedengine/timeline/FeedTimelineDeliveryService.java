@@ -6,6 +6,7 @@ import com.turbofeed.shared.model.FeedItemView;
 import com.turbofeed.shared.model.FeedTimelineEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -41,6 +42,16 @@ import org.springframework.stereotype.Service;
  *
  * <p><b>未知 action 绝不按 REMOVE 兜底</b>：坏消息若被当成下架，会把正常内容摘掉，是反方向的安全事故。
  * 两种通道都<b>只告警 / 抛异常、不改动任何数据</b>。</p>
+ *
+ * <h3>PR-D3：墓碑防旧前置闸门</h3>
+ * <p>本类是<b>引擎侧所有通道的唯一写入口</b>（HTTP 兜底 / RocketMQ 顺序消息 / DLQ 重放
+ * 最终都汇到这里），因此「迟到的 APPEND 会不会让已下架内容复活」必须在这里判定，
+ * 而不是在网关 Relay——网关看不到引擎的下架状态，也覆盖不了引擎自己的 DLQ 重放。
+ * 评审文档把落点写成「引擎侧 {@code FeedTimelinePublisher.remove}」不准确：那是网关侧端口。</p>
+ *
+ * <p>判定为陈旧时<b>直接 return、绝不抛异常</b>：抛异常会触发发件箱重试 / MQ DLQ，
+ * 而「产生于下架之前」这个事实重试多少次都不会变，只会把死信越堆越多。
+ * 正常返回才能让事件标 SENT / ACK，这也正是 ADR 要求的终态。</p>
  */
 @Slf4j
 @Service
@@ -50,6 +61,14 @@ public class FeedTimelineDeliveryService {
     private final FeedTimelineStore feedTimelineStore;
     private final TagIndexService tagIndexService;
     private final RecommendedFeedService recommendedFeedService;
+
+    /**
+     * PR-D3 墓碑组件用<b>可选字段注入</b>而非构造器参数：本类已被大量单测用三参构造器直接
+     * {@code new}，改成四参会破坏既有测试契约；同时裁剪部署 / 单测里没有该 Bean 时，
+     * 判定整体跳过（等价于改造前行为），零回归。生产由 Spring 注入。
+     */
+    @Autowired(required = false)
+    private TimelineTombstoneStore tombstones;
 
     /**
      * 投递一条时间线变更（HTTP 兜底通道，fail-open）。
@@ -108,6 +127,13 @@ public class FeedTimelineDeliveryService {
                 throw new IllegalArgumentException("APPEND 事件缺少 item: timelineKey=" + event.timelineKey());
             }
             int pool = event.poolLevel() == null ? 1 : event.poolLevel();
+            // PR-D3 前置闸门：必须在写时间线之前。命中即直接结束（不抛异常、不改任何数据），
+            // 让发件箱标 SENT / MQ ACK——重试一个「产生于下架之前」的事件永远不会改变结论。
+            // 用 item.timelineKey() 而非 event.timelineKey()：APPEND 事件的信封键可能为空
+            // （存量消息只带 item），而墓碑按帖身份记，必须与 REMOVE 用同一口径。
+            if (tombstones != null && tombstones.isStaleAppend(item.timelineKey(), event.occurredAt())) {
+                return;
+            }
             if (strict) {
                 feedTimelineStore.appendStrict(item, pool);
             } else {
@@ -123,6 +149,11 @@ public class FeedTimelineDeliveryService {
                 feedTimelineStore.removeStrict(key);
             } else {
                 feedTimelineStore.remove(key);
+            }
+            // 下架主操作成功后才写墓碑：removeStrict 抛异常时不写，避免「没摘掉却已经开始拦 APPEND」。
+            // occurredAt 为 null（存量事件）时组件内部不写，历史行为零回归。
+            if (tombstones != null) {
+                tombstones.markRemoved(key, event.occurredAt());
             }
             tagIndexService.remove(key);
         } else {

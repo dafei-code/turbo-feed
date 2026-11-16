@@ -97,6 +97,13 @@ turbofeed:
       # Feed 时间线事件 Topic 与消费组（append / remove 共用，靠 body.action 区分，保证同一 mediaId 顺序）
       topic: turbofeed-feed-timeline
       consumer-group: turbofeed-feed-timeline-group
+      # PR-D3 时间线墓碑防旧：拦截 DEAD 行 / DLQ 重投的陈旧 APPEND，避免已下架内容复活。
+      # 默认开启；零回归靠「存量事件 occurredAt=null 一律放行」保证，不靠默认关。
+      # 出问题时设为 false 即可整体回退（不读墓碑、不写墓碑、不拦截）。
+      tombstone-enabled: ${TURBOFEED_FEED_TIMELINE_TOMBSTONE_ENABLED:true}
+      # 墓碑保留天数：覆盖 DLQ/发件箱最长滞留窗口；过期后极迟到的 APPEND 重新可入流，
+      # 属已知边界（见 docs/ops/timeline-tombstone.md）。<=0 会回落到 30 天。
+      tombstone-ttl-days: ${TURBOFEED_FEED_TIMELINE_TOMBSTONE_TTL_DAYS:30}
     # 多路召回的每页槽位预算（均从单页 limit 里切，剩余归流量池）
     #   hot-recall-ratio      热点位：全站探索（人人相似）
     #   interest-recall-ratio 兴趣位：按用户兴趣标签召回（因人而异）

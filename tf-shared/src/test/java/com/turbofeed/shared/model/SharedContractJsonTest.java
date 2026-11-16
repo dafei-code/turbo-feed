@@ -124,6 +124,40 @@ class SharedContractJsonTest {
                 "timelineKey", "action", "poolLevel", "item", "occurredAt", "schemaVersion", "traceId");
     }
 
+    /**
+     * PR-D3：{@code withOccurredAt} 只改字段取值、不改契约结构，且必须能完整 JSON 往返。
+     *
+     * <p>这条最关键的是「DLQ 重放原样发回」：引擎 DLQ 服务把消息体原样重发，
+     * 只有 enqueue 时刻落在 {@code occurredAt} 字段里，重投的 APPEND 才会被墓碑拦住。
+     * 若这里往返丢值（例如误用 MQ 属性、或新增字段导致旧消费者解析失败），防线形同虚设。</p>
+     */
+    @Test
+    @DisplayName("PR-D3 withOccurredAt 不改字段结构，且 enqueue 时刻可完整往返")
+    void feedTimelineEvent_withOccurredAt_roundTripKeepsContract() throws Exception {
+        Instant enqueueAt = Instant.parse("2026-11-16T08:00:00Z");
+        FeedTimelineEvent event = FeedTimelineEvent.remove("post/1/x")
+                .withOccurredAt(enqueueAt)
+                .withTraceId("trace-replay");
+
+        assertThat(event.occurredAt()).isEqualTo(enqueueAt);
+        assertThat(event.schemaVersion()).isEqualTo(FeedTimelineEvent.SCHEMA_VERSION);
+        // 幽灵字段护栏：新增的 withXxx 是普通方法，绝不能被 Jackson 当成属性泄漏进消息体
+        assertThat(keysOf(event)).containsExactlyInAnyOrder(
+                "timelineKey", "action", "poolLevel", "item", "occurredAt", "schemaVersion", "traceId");
+        assertThat(MAPPER.readValue(MAPPER.writeValueAsString(event), FeedTimelineEvent.class))
+                .isEqualTo(event);
+    }
+
+    @Test
+    @DisplayName("PR-D3 存量消息缺 occurredAt 时反序列化为 null，引擎按放行处理")
+    void feedTimelineEvent_legacyWithoutOccurredAt_isTolerated() throws Exception {
+        FeedTimelineEvent legacy = MAPPER.readValue(
+                "{\"timelineKey\":\"post/1/x\",\"action\":\"APPEND\",\"poolLevel\":1,\"item\":null,"
+                        + "\"schemaVersion\":1}", FeedTimelineEvent.class);
+        assertThat(legacy.occurredAt()).isNull();
+        assertThat(legacy.schemaVersion()).isEqualTo(FeedTimelineEvent.SCHEMA_VERSION);
+    }
+
     // ---------------------------------------------------------------- 其余契约
 
     @Test

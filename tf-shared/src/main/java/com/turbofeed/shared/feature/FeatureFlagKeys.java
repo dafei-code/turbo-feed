@@ -22,6 +22,9 @@ public final class FeatureFlagKeys {
     /** RocketMQ starter 自带属性（无 turbofeed 前缀），缺省即 starter 自动配置不生效。 */
     public static final String ROCKETMQ_NAME_SERVER = "rocketmq.name-server";
 
+    // ===== PR-D3 时间线墓碑防旧（拦截 DEAD/DLQ 重投的陈旧 APPEND）=====
+    public static final String FEED_TIMELINE_TOMBSTONE_ENABLED = "turbofeed.feed.timeline.tombstone-enabled";
+
     // ===== 死信 replay（依赖 MQ）=====
     public static final String FEED_TIMELINE_DLQ_REPLAY_ENABLED = "turbofeed.feed.timeline.dlq-replay.enabled";
 
@@ -70,6 +73,11 @@ public final class FeatureFlagKeys {
     // ===== 发件箱补偿 / 指标 =====
     public static final String OUTBOX_RELAY_ENABLED = "turbofeed.outbox.relay-enabled";
     public static final String OUTBOX_BACKLOG_METRICS_ENABLED = "turbofeed.outbox.backlog-metrics-enabled";
+
+    // ===== 发件箱 PR-B/PR-D2/PR-D5：上传事件灰度 + 传输通道收口（默认关闭 / 留空跟随总闸）=====
+    public static final String OUTBOX_MEDIA_UPLOADED_ENABLED = "turbofeed.outbox.media-uploaded.enabled";
+    public static final String OUTBOX_CHANNEL_DEFAULT = "turbofeed.outbox.channel.default";
+    public static final String OUTBOX_CHANNEL_MEDIA_UPLOADED = "turbofeed.outbox.channel.media-uploaded";
 
     // ===== 搜索离线重建数据源 =====
     public static final String SEARCH_REBUILD_OFFLINE_DS0_URL = "turbofeed.search.rebuild.offline.ds0-url";

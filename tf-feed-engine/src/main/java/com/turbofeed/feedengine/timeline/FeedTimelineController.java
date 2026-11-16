@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -106,10 +107,13 @@ public class FeedTimelineController {
      */
     @PostMapping("/timeline/append")
     public Result<Void> append(@RequestParam(value = "poolLevel", defaultValue = "1") int poolLevel,
-                               @RequestBody FeedItemView item) {
+                               @RequestBody FeedItemView item,
+                               @RequestParam(value = "occurredAt", required = false) String occurredAt) {
         // R7：三件副作用（时间线写入 + 标签索引 + 缓存失效）统一由投递入口承担，
         // 本类不再逐个调用——否则新增通道时漏掉任何一条都是静默失效。
-        feedTimelineDelivery.apply(FeedTimelineEvent.append(item, poolLevel));
+        // PR-D3：把网关 enqueue 时刻覆写到事件上，供下游墓碑比对；缺参数/非法值按 null 放行。
+        feedTimelineDelivery.apply(FeedTimelineEvent.append(item, poolLevel)
+                .withOccurredAt(parseOccurredAt(occurredAt)));
         return Result.ok();
     }
 
@@ -119,10 +123,29 @@ public class FeedTimelineController {
      * @param mediaId 内容唯一标识；不存在时静默成功（幂等）
      */
     @PostMapping("/timeline/remove")
-    public Result<Void> remove(@RequestParam("mediaId") String mediaId) {
+    public Result<Void> remove(@RequestParam("mediaId") String mediaId,
+                               @RequestParam(value = "occurredAt", required = false) String occurredAt) {
         // 同上：副作用集合由投递入口统一保证（含"下架后缓存必须立刻失效"这条最容易漏的）。
-        feedTimelineDelivery.apply(FeedTimelineEvent.remove(mediaId));
+        // PR-D3：透传下架时刻，引擎侧据此写墓碑。
+        feedTimelineDelivery.apply(FeedTimelineEvent.remove(mediaId)
+                .withOccurredAt(parseOccurredAt(occurredAt)));
         return Result.ok();
+    }
+
+    /**
+     * 解析 ISO-8601 事件时刻。缺参数 / 非法格式一律返回 {@code null}（按存量事件放行）——
+     * 这是诊断与防旧用的<b>可选</b>字段，绝不能因为格式问题把整次入流/下架请求打成 400。
+     */
+    private static Instant parseOccurredAt(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return Instant.parse(raw);
+        } catch (Exception e) {
+            log.warn("occurredAt 非法，按存量事件放行（不参与墓碑防旧）: {}", raw);
+            return null;
+        }
     }
 
     /**

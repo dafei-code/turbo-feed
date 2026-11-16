@@ -239,6 +239,7 @@ class FeatureFlagGuardTest {
         assertEquals("turbofeed.comment.page-cache-enabled", FeatureFlagKeys.COMMENT_PAGE_CACHE_ENABLED);
         assertEquals("rocketmq.name-server", FeatureFlagKeys.ROCKETMQ_NAME_SERVER);
         assertEquals("turbofeed.feed.timeline.dlq-replay.enabled", FeatureFlagKeys.FEED_TIMELINE_DLQ_REPLAY_ENABLED);
+        assertEquals("turbofeed.feed.timeline.tombstone-enabled", FeatureFlagKeys.FEED_TIMELINE_TOMBSTONE_ENABLED);
         assertEquals("turbofeed.feed.recall.vector.mode", FeatureFlagKeys.VECTOR_MODE);
         assertEquals("turbofeed.feed.recall.vector.two-tower.enabled", FeatureFlagKeys.VECTOR_TWO_TOWER_ENABLED);
         // 关键：真实 Redis key 是连字符 cluster-nodes（非点号），否则 cluster 合法配置会被误杀
@@ -259,6 +260,9 @@ class FeatureFlagGuardTest {
         assertEquals("turbofeed.sentinel.nacos.enabled", FeatureFlagKeys.SENTINEL_NACOS_ENABLED);
         assertEquals("turbofeed.outbox.relay-enabled", FeatureFlagKeys.OUTBOX_RELAY_ENABLED);
         assertEquals("turbofeed.outbox.backlog-metrics-enabled", FeatureFlagKeys.OUTBOX_BACKLOG_METRICS_ENABLED);
+        assertEquals("turbofeed.outbox.media-uploaded.enabled", FeatureFlagKeys.OUTBOX_MEDIA_UPLOADED_ENABLED);
+        assertEquals("turbofeed.outbox.channel.default", FeatureFlagKeys.OUTBOX_CHANNEL_DEFAULT);
+        assertEquals("turbofeed.outbox.channel.media-uploaded", FeatureFlagKeys.OUTBOX_CHANNEL_MEDIA_UPLOADED);
         assertEquals("turbofeed.search.rebuild.offline.ds0-url", FeatureFlagKeys.SEARCH_REBUILD_OFFLINE_DS0_URL);
     }
 }
