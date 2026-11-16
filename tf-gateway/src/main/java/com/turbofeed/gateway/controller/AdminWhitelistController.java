@@ -2,6 +2,7 @@ package com.turbofeed.gateway.controller;
 
 import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
+import com.turbofeed.gateway.service.moderation.ModerationEpochBroker;
 import com.turbofeed.gateway.service.moderation.WhitelistEntry;
 import com.turbofeed.gateway.service.moderation.WhitelistService;
 import com.turbofeed.gateway.web.ApiVersion;
@@ -28,8 +29,13 @@ import java.util.Map;
  * 给运营一个安全的自助豁免出口（只做减法，不会造成新的误杀）。后端
  * {@link WhitelistService} 已完整实现并热加载，本控制器仅把能力暴露给管理后台。</p>
  *
- * <p><b>热更新</b>：增 / 删 / 启停只写 DB 并触发后台异步重建（{@link WhitelistService#reload()}），
- * HTTP 立即返回，毫秒级生效（同词库控制器的单飞后台重建模型）。</p>
+ * <p><b>热更新</b>：增 / 删 / 启停只写 DB 并触发<b>后台异步单飞</b>重建
+ * （{@link WhitelistService#triggerReload()}），HTTP 立即返回，毫秒级生效——
+ * 与词库控制器同一套单飞后台重建模型。</p>
+ *
+ * <p><b>跨实例生效（阶段 B2）</b>：写端点在 DB 写入成功后推进全局 epoch 并广播，
+ * 让其它实例立即重建；开关关闭或 Redis 故障时静默退化为 30s 指纹刷新，不影响写请求。
+ * {@code /reload} 只刷当前实例，刻意不广播。</p>
  */
 @RestController
 @RequestMapping(ApiVersion.V1 + "/admin/moderation/whitelist")
@@ -37,6 +43,7 @@ import java.util.Map;
 public class AdminWhitelistController {
 
     private final WhitelistService whitelistService;
+    private final ModerationEpochBroker epochBroker;
 
     /**
      * 列出白名单条目（分页，含禁用）。返回列表 + DB 总条数 + 内存已加载条数。
@@ -71,7 +78,9 @@ public class AdminWhitelistController {
             @RequestParam(value = "scope", required = false) String scope,
             @RequestParam(value = "ownerId", defaultValue = "0") long ownerId,
             @RequestParam(value = "reason", required = false) String reason) {
-        return Result.ok(whitelistService.add(word, scene, scope, ownerId, reason));
+        WhitelistEntry saved = whitelistService.add(word, scene, scope, ownerId, reason);
+        epochBroker.bump(ModerationEpochBroker.Kind.WHITELIST); // DB 写入已提交，才通知其它实例
+        return Result.ok(saved);
     }
 
     /** 禁用（软删除，保留审计）。 */
@@ -79,6 +88,7 @@ public class AdminWhitelistController {
     @RequirePermission(Permission.SYSTEM_CONFIG)
     public Result<Void> disable(@RequestParam("id") long id) {
         whitelistService.disable(id);
+        epochBroker.bump(ModerationEpochBroker.Kind.WHITELIST);
         return Result.ok();
     }
 
@@ -87,6 +97,7 @@ public class AdminWhitelistController {
     @RequirePermission(Permission.SYSTEM_CONFIG)
     public Result<Void> enable(@RequestParam("id") long id) {
         whitelistService.enable(id);
+        epochBroker.bump(ModerationEpochBroker.Kind.WHITELIST);
         return Result.ok();
     }
 
@@ -95,10 +106,11 @@ public class AdminWhitelistController {
     @RequirePermission(Permission.SYSTEM_CONFIG)
     public Result<Void> delete(@RequestParam("id") long id) {
         whitelistService.delete(id);
+        epochBroker.bump(ModerationEpochBroker.Kind.WHITELIST);
         return Result.ok();
     }
 
-    /** 强制刷新内存索引（不等 30s 定时）。 */
+    /** 强制刷新内存索引（不等 30s 定时），只作用于当前实例。 */
     @PostMapping("/reload")
     @RequirePermission(Permission.SYSTEM_CONFIG)
     public Result<Integer> reload() {

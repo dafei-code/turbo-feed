@@ -52,6 +52,9 @@ public final class FeatureFlagKeys {
     // ===== 缓存失效广播 =====
     public static final String STATE_CACHE_BROADCAST_ENABLED = "turbofeed.state-cache.broadcast-enabled";
 
+    // ===== 内容安全词库 / 白名单跨实例 epoch 广播（阶段 B2，默认关闭）=====
+    public static final String MODERATION_EPOCH_BROADCAST_ENABLED = "turbofeed.content-security.epoch-broadcast-enabled";
+
     // ===== Snowflake ID 生成器（lease / 单机）=====
     public static final String SNOWFLAKE_LEASE_ENABLED = "turbofeed.snowflake.lease-enabled";
 

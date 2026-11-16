@@ -1,6 +1,7 @@
 package com.turbofeed.gateway.config;
 
 import com.turbofeed.gateway.service.state.AccountStateCache;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -91,7 +92,7 @@ public class RedisCacheInvalidationConfig {
      */
     @Bean
     public SmartLifecycle accountStateCacheInvalidationStarter(
-            RedisMessageListenerContainer accountStateCacheInvalidationContainer) {
+            @Qualifier("accountStateCacheInvalidationContainer") RedisMessageListenerContainer accountStateCacheInvalidationContainer) {
         return new SmartLifecycle() {
             private final AtomicBoolean running = new AtomicBoolean(false);
             private final ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor(r -> {

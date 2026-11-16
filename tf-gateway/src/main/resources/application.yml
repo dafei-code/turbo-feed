@@ -269,6 +269,11 @@ turbofeed:
     # 取值：PASS / LIMIT（放行+标降权，当前等同 PASS）/ REVIEW（转人审，当前等同 BLOCK）/ BLOCK
     category-actions: {}
     default-action: BLOCK
+    # 词库 / 白名单跨实例 epoch 广播（阶段 B2）：默认关闭，开启后 admin 变更会推进
+    # 全局 epoch 并 pub/sub 通知其它网关实例立即重建，不再各自等 30s 定时刷新。
+    # 关闭时完全走改造前的「各实例 30s (COUNT, MAX(updated_at)) 指纹刷新」，零回归。
+    # ⚠️ compose 的 environment: 是白名单，prod 必须在 gateway 段显式转发本变量才生效。
+    epoch-broadcast-enabled: ${TURBOFEED_CONTENT_SECURITY_EPOCH_BROADCAST_ENABLED:false}
   # MQ（RocketMQ）事件总线：默认关闭，未部署 RocketMQ 时也能「克隆即跑」。
   # 开启方式见 application-mq.yml（--spring.profiles.active=mq），NameServer 地址可用
   # TURBOFEED_ROCKETMQ_NAME_SERVER 覆盖。

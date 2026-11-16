@@ -69,14 +69,20 @@ public class WhitelistRepository {
 
     /**
      * 变更指纹：{@code (count, maxUpdatedAt)}。空表返回 {@code (0, 1970-01-01)}，与首启动一致。
+     *
+     * <p><b>阶段 B2：单条 SQL 原子取值</b>，与 {@link SensitiveWordRepository#checkSum()} 对齐。
+     * 改造前是两条独立查询，并发写入时 COUNT 可能取到「导入前」、MAX 取到「导入后」，
+     * 指纹看起来变了但方向不确定；白名单对齐异步单飞追平模型后，这个混合快照会让
+     * 「追平 3 轮」多绕一轮或漏一轮。合并后两个值落在同一事务快照内。</p>
      */
     public CheckSum checkSum() {
-        Long cnt = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM sensitive_whitelist", Long.class);
-        Timestamp maxTs = jdbcTemplate.queryForObject(
-                "SELECT COALESCE(MAX(updated_at), '1970-01-01 00:00:00') FROM sensitive_whitelist",
-                Timestamp.class);
-        return new CheckSum(cnt == null ? 0L : cnt,
-                maxTs == null ? Instant.EPOCH : maxTs.toInstant());
+        var row = jdbcTemplate.queryForMap(
+                "SELECT COUNT(*) AS cnt, COALESCE(MAX(updated_at), '1970-01-01 00:00:00') AS max_ts "
+                        + "FROM sensitive_whitelist");
+        long cnt = ((Number) row.get("cnt")).longValue();
+        Object maxTsObj = row.get("max_ts");
+        Instant maxTs = maxTsObj instanceof Timestamp t ? t.toInstant() : Instant.EPOCH;
+        return new CheckSum(cnt, maxTs);
     }
 
     /**

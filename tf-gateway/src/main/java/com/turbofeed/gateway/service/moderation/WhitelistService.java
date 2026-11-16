@@ -3,6 +3,7 @@ package com.turbofeed.gateway.service.moderation;
 import com.turbofeed.gateway.exception.BizException;
 import com.turbofeed.shared.result.ErrorCode;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -13,16 +14,26 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 白名单服务（误杀治理出口）—— 与 {@link SensitiveWordService} 同构的热更新模型。
+ * 白名单服务（误杀治理出口）—— 与 {@link SensitiveWordService} <b>同构</b>的热更新模型。
  *
  * <h3>为什么与词库用同一套机制而不是各写一套</h3>
  * 两者形状完全一致：<b>数据量小、写少读多、读在写路径上、变更必须秒级生效</b>。
  * 因此同样采用「不可变快照 + {@link AtomicReference} 整体切换 + 零锁读」，
- * 同样用 {@code (COUNT, MAX(updated_at))} 指纹做 30s 变更检测，admin 写操作同步
- * {@link #reload()} 立即生效。<b>同一套心智模型，运营不需要记两套规则。</b></p>
+ * 同样用 {@code (COUNT, MAX(updated_at))} 指纹做 30s 变更检测。
+ * <b>同一套心智模型，运营不需要记两套规则。</b>
+ *
+ * <p><b>阶段 B2 起与词库完全对齐异步单飞模型</b>：改造前 admin 写路径与定时路径都是
+ * 同步 {@link #reload()}，两条路径并发时后写的那次可能把「读到较早 DB 快照」的索引盖回去
+ * （与词库在 changelog 0080 修过的窗口一模一样）；跨实例广播到达时若直接在 Redis 订阅线程里
+ * 全量重建，还会堵住订阅线程。现在所有自动重建统一走 {@link #triggerReload()}：
+ * 单线程后台执行、单飞 CAS 合并重复触发、完成后比对指纹最多追平 3 轮。
+ * {@code /reload} 同步入口保留给运维强制刷新（低频、单线程手动调用）。</p>
  *
  * <h3>与词库的关键差异</h3>
  * <ul>
@@ -61,6 +72,17 @@ public class WhitelistService {
     /** 上次加载成功的时刻（排障用：判断快照是否陈旧）。 */
     private volatile Instant lastLoadedAt = Instant.EPOCH;
 
+    /** 后台重建线程池：与词库同样单线程串行，避免并发全量重建相互踩踏。 */
+    private final ExecutorService reloadExecutor =
+            Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "whitelist-reloader");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /** 单飞标志：重建进行中时后续触发只置脏，由进行中的那次重建追平。 */
+    private final AtomicBoolean reloadInFlight = new AtomicBoolean(false);
+
     /** 启动时同步加载一次；失败仅告警（空集合 = 无豁免 = 回到改造前行为，安全）。 */
     @PostConstruct
     public void init() {
@@ -71,7 +93,14 @@ public class WhitelistService {
         }
     }
 
-    /** 30s 定时检测：指纹变化才重建索引。异常仅记日志、保留旧索引。 */
+    /**
+     * 30s 定时检测：指纹变化才触发后台重建。
+     *
+     * <p>必须走 {@link #triggerReload()} 而不是直接 {@code doReload(current)}：
+     * 定时路径与 admin / 跨实例广播触发的后台重建并发时，两次 {@code indexRef.set(...)}
+     * 存在「读到较早 DB 快照的那次后写、把新豁免集合回退」的窗口。共用单飞入口后
+     * 所有自动重建串行发生，且重建完成再取最新指纹，不会用旧指纹覆盖。</p>
+     */
     @Scheduled(fixedDelay = 30_000, initialDelay = 30_000)
     public void scheduledReload() {
         try {
@@ -79,14 +108,14 @@ public class WhitelistService {
             if (current.equals(lastCheckSum)) {
                 return;
             }
-            int size = doReload(current);
-            log.info("白名单定时刷新: count={}, entries={}", current.count(), size);
+            log.info("白名单定时检测到变更，触发后台重建: count={}", current.count());
+            triggerReload();
         } catch (Exception e) {
             log.warn("白名单定时刷新失败（保留旧索引）: {}", e.getMessage());
         }
     }
 
-    /** 全量重建索引（admin 增删后立即调用）。返回加载的条目数。 */
+    /** 全量重建索引（运维强制刷新入口，同步执行）。返回加载的条目数。 */
     public int reload() {
         return doReload(null);
     }
@@ -183,23 +212,23 @@ public class WhitelistService {
         }
         long owner = WhitelistEntry.SCOPE_USER.equals(sc) ? ownerId : 0L;
         WhitelistEntry saved = repository.upsert(word.trim(), s, sc, owner, reason);
-        reload();
+        triggerReload(); // 后台异步重建，与词库一致；HTTP 线程不阻塞
         return saved;
     }
 
     public void disable(long id) {
         repository.disable(id);
-        reload();
+        triggerReload();
     }
 
     public void enable(long id) {
         repository.enable(id);
-        reload();
+        triggerReload();
     }
 
     public void delete(long id) {
         repository.delete(id);
-        reload();
+        triggerReload();
     }
 
     public List<WhitelistEntry> list(int limit, long offset) {
@@ -208,5 +237,37 @@ public class WhitelistService {
 
     public long count() {
         return repository.count();
+    }
+
+    /**
+     * 后台异步重建（单飞）：admin 变更、定时检测、跨实例 epoch 失效广播统一走这里。
+     *
+     * <p><b>单飞语义</b>：重建进行中时后续触发直接返回，由进行中的那次重建读最新 DB 并
+     * 比对指纹追平（最多 3 轮），保证「最后写的那条豁免」一定进入下一个生效快照，
+     * 既不漏也不重复全量重建。异常仅记日志、保留旧索引——旧豁免集合总比空集合安全。</p>
+     */
+    public void triggerReload() {
+        if (!reloadInFlight.compareAndSet(false, true)) {
+            return; // 已在飞行中，本轮变更会被进行中的重建追平
+        }
+        reloadExecutor.submit(() -> {
+            try {
+                int guard = 0;
+                do {
+                    doReload(null);
+                    guard++;
+                } while (guard < 3 && !repository.checkSum().equals(lastCheckSum));
+            } catch (Exception e) {
+                log.warn("白名单后台刷新失败（保留旧索引）: {}", e.getMessage());
+            } finally {
+                reloadInFlight.set(false);
+            }
+        });
+    }
+
+    /** Spring 上下文销毁时关闭后台重建线程池，避免线程泄漏。 */
+    @PreDestroy
+    public void shutdown() {
+        reloadExecutor.shutdown();
     }
 }

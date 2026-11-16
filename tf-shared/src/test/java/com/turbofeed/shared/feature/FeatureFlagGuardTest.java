@@ -252,6 +252,7 @@ class FeatureFlagGuardTest {
         assertEquals("turbofeed.counter.service.topic", FeatureFlagKeys.COUNTER_SERVICE_TOPIC);
         assertEquals("turbofeed.media.storage", FeatureFlagKeys.MEDIA_STORAGE);
         assertEquals("turbofeed.state-cache.broadcast-enabled", FeatureFlagKeys.STATE_CACHE_BROADCAST_ENABLED);
+        assertEquals("turbofeed.content-security.epoch-broadcast-enabled", FeatureFlagKeys.MODERATION_EPOCH_BROADCAST_ENABLED);
         assertEquals("turbofeed.snowflake.lease-enabled", FeatureFlagKeys.SNOWFLAKE_LEASE_ENABLED);
         assertEquals("turbofeed.sentinel.nacos.enabled", FeatureFlagKeys.SENTINEL_NACOS_ENABLED);
         assertEquals("turbofeed.outbox.relay-enabled", FeatureFlagKeys.OUTBOX_RELAY_ENABLED);

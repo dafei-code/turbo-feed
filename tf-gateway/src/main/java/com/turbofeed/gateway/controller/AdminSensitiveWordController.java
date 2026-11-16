@@ -2,6 +2,7 @@ package com.turbofeed.gateway.controller;
 
 import com.turbofeed.gateway.security.Permission;
 import com.turbofeed.gateway.security.RequirePermission;
+import com.turbofeed.gateway.service.moderation.ModerationEpochBroker;
 import com.turbofeed.gateway.service.moderation.SensitiveWord;
 import com.turbofeed.gateway.service.moderation.SensitiveWordService;
 import com.turbofeed.gateway.web.ApiVersion;
@@ -24,10 +25,16 @@ import java.util.Map;
  * 拦截；方法级 {@link RequirePermission} 声明所需权限为 {@link Permission#SYSTEM_CONFIG}，
  * 仅有 ADMIN 角色持有该权限——审核员(REVIEWER)与普通用户(USER)一律 {@code 40301}。</p>
  *
- * <p><b>热更新</b>：增/删/启停只写 DB 并触发<b>后台异步</b>重建（{@link SensitiveWordService#triggerReload()}），
- * HTTP 请求立即返回，不受词库大小影响（1M 词全量重建 ~1.2s 也不会卡 admin 线程）。
- * 重建在单飞后台线程完成、原子切换生效；下次定时刷新（30s）即便没人为触发，
- * {@code (COUNT, MAX(updated_at))} 指纹变化也会重建——双保险。批量导入见 {@code POST /batch}。</p>
+ * <p><b>热更新</b>：增/删/启停只写 DB 并触发<b>本实例后台异步</b>重建
+ * （{@link SensitiveWordService#triggerReload()}），HTTP 请求立即返回，不受词库大小影响
+ * （1M 词全量重建 ~1.2s 也不会卡 admin 线程）。重建在单飞后台线程完成、原子切换生效；
+ * 下次定时刷新（30s）即便没人为触发，{@code (COUNT, MAX(updated_at))} 指纹变化也会重建。</p>
+ *
+ * <p><b>跨实例生效（阶段 B2）</b>：每个写端点在 DB 写入成功后额外调
+ * {@link ModerationEpochBroker#bump(ModerationEpochBroker.Kind)} 推进全局 epoch 并广播，
+ * 让其它实例立即重建，而不是各自等 30s。该调用是 fail-open：Redis 故障或开关关闭时
+ * 只记日志 / 直接跳过，绝不影响本次 admin 写请求。{@code /reload} 是单实例强制刷新入口，
+ * <b>刻意不广播</b>（运维想修哪个节点就修哪个节点）。</p>
  *
  * <p><b>为什么不用 {@code /words/{id} 路径变量</b>：保持与
  * {@link AdminMediaController} 一致的 query 风格（admin 模块已习惯 query 传参），
@@ -39,6 +46,7 @@ import java.util.Map;
 public class AdminSensitiveWordController {
 
     private final SensitiveWordService sensitiveWordService;
+    private final ModerationEpochBroker epochBroker;
 
     /**
      * 列出敏感词（分页，含禁用）。返回列表 + 当前 AC 已加载条数 + DB 总条数。
@@ -63,7 +71,9 @@ public class AdminSensitiveWordController {
     public Result<SensitiveWord> add(
             @RequestParam("word") String word,
             @RequestParam(value = "category", defaultValue = "DEFAULT") String category) {
-        return Result.ok(sensitiveWordService.add(word, category));
+        SensitiveWord saved = sensitiveWordService.add(word, category);
+        epochBroker.bump(ModerationEpochBroker.Kind.DICT); // DB 写入已提交，才通知其它实例
+        return Result.ok(saved);
     }
 
     /**
@@ -79,6 +89,9 @@ public class AdminSensitiveWordController {
             @RequestBody List<String> words,
             @RequestParam(value = "category", defaultValue = "DEFAULT") String category) {
         int added = sensitiveWordService.batchAdd(words, category);
+        if (added > 0) {
+            epochBroker.bump(ModerationEpochBroker.Kind.DICT);
+        }
         return Result.ok(Map.of("added", added));
     }
 
@@ -87,6 +100,7 @@ public class AdminSensitiveWordController {
     @RequirePermission(Permission.SYSTEM_CONFIG)
     public Result<Void> disable(@RequestParam("id") long id) {
         sensitiveWordService.disable(id);
+        epochBroker.bump(ModerationEpochBroker.Kind.DICT);
         return Result.ok();
     }
 
@@ -95,6 +109,7 @@ public class AdminSensitiveWordController {
     @RequirePermission(Permission.SYSTEM_CONFIG)
     public Result<Void> enable(@RequestParam("id") long id) {
         sensitiveWordService.enable(id);
+        epochBroker.bump(ModerationEpochBroker.Kind.DICT);
         return Result.ok();
     }
 
@@ -103,11 +118,13 @@ public class AdminSensitiveWordController {
     @RequirePermission(Permission.SYSTEM_CONFIG)
     public Result<Void> delete(@RequestParam("id") long id) {
         sensitiveWordService.delete(id);
+        epochBroker.bump(ModerationEpochBroker.Kind.DICT);
         return Result.ok();
     }
 
     /**
      * 强制刷新 AC 自动机（不等 30s 定时）。词库已变更但怀疑节点没生效时用。
+     * 只作用于当前实例；需要全实例生效请用任一写端点或一个 epoch bump。
      */
     @PostMapping("/reload")
     @RequirePermission(Permission.SYSTEM_CONFIG)
