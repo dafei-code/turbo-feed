@@ -1,0 +1,87 @@
+{
+  "uid": "turbofeed-logs",
+  "title": "turbo-feed 应用日志",
+  "tags": ["turbo-feed", "logs"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "editable": false,
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "服务正则",
+        "type": "textbox",
+        "query": "tf-.*",
+        "current": { "text": "tf-.*", "value": "tf-.*" },
+        "options": [],
+        "hide": 0
+      },
+      {
+        "name": "traceId",
+        "label": "traceId（粘贴 X-Trace-Id 查全链路）",
+        "type": "textbox",
+        "query": "",
+        "current": { "text": "", "value": "" },
+        "options": [],
+        "hide": 0
+      }
+    ]
+  },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "按服务 / 级别的日志速率",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum by (service, level) (count_over_time({service=~\"$service\"} [5m]))",
+          "queryType": "range",
+          "editorMode": "code"
+        }
+      ],
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } }
+    },
+    {
+      "id": 2,
+      "type": "logs",
+      "title": "按 traceId 串全链路",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{service=~\"$service\"} | json | traceId=\"$traceId\"",
+          "queryType": "range",
+          "editorMode": "code"
+        }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Ascending" }
+    },
+    {
+      "id": 3,
+      "type": "logs",
+      "title": "全量日志（含中间件兜底查询入口）",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 18 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{service=~\"$service\"}",
+          "queryType": "range",
+          "editorMode": "code"
+        }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" }
+    }
+  ]
+}

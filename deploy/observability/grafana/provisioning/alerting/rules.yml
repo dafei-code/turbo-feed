@@ -1,0 +1,124 @@
+# =============================================================================
+# Grafana 统一告警（文件 provisioning，要求 Grafana >= 10.1）。
+# 只定义规则与阈值，不绑定通知渠道：contact point / notification policy 由部署方在
+# UI 或另一份 provisioning 里接。若 Grafana 版本不支持文件 provisioning，按
+# docs/ops/observability.md 里的两条 LogQL 在 UI 手工建同样规则即可。
+# =============================================================================
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: turbo-feed-logs
+    folder: turbo-feed
+    interval: 1m
+    rules:
+      - uid: turbofeed-error-burst
+        title: 应用 ERROR 日志突增
+        condition: B
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+        annotations:
+          summary: 5 分钟内 ERROR 日志数超过 20 条
+          runbook_url: docs/ops/observability.md
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: 'sum(count_over_time({service=~"tf-.*"} | json | level="ERROR" [5m]))'
+              queryType: range
+              refId: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [20]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: threshold
+
+      # 这条比「traceId 缺失率」更该先有：service label 缺失说明 JSON 结构化日志
+      # 解析失败或 prod profile 没生效 —— 即「日志系统自己悄悄失效」，正是项目里
+      # 反复强调要先让它可见的那类故障。定时任务日志本就无 traceId，不适合做该判据。
+      - uid: turbofeed-log-format-broken
+        title: 结构化日志失效（service 标签缺失）
+        condition: B
+        for: 5m
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+        annotations:
+          summary: 出现无 service 标签的应用日志，检查 prod profile 与 Fluent Bit 二次解析
+          runbook_url: docs/ops/observability.md
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: loki
+            model:
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: 'sum(count_over_time({job="turbofeed",service=""} [5m]))'
+              queryType: range
+              refId: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [50]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: threshold

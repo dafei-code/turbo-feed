@@ -1,0 +1,50 @@
+# Loki 3.x 单机 filesystem 后端。仅用于「把分散的容器日志聚起来能按 traceId 查」，
+# 不是高可用日志集群；多机房/多副本场景需换对象存储 + 分布式部署。
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # 与 behavior-log 的本地保留期对齐（168h = 7 天）。真正的删除由 compactor 执行。
+  retention_period: 168h
+  allow_structured_metadata: true
+  max_query_series: 10000
+  ingestion_rate_mb: 8
+  ingestion_burst_size_mb: 16
+  max_streams_per_user: 5000
+  # 只把低基数字段做成 label（见 fluent-bit.conf 的 Label_Keys），
+  # traceId / userId 一律走结构化元数据 + `| json` 过滤，避免序列爆炸。
+  max_label_names_per_series: 12
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 2
+  delete_request_store: filesystem

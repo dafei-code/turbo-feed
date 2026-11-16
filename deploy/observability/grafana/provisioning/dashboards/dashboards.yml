@@ -1,0 +1,14 @@
+apiVersion: 1
+
+providers:
+  - name: turbo-feed
+    orgId: 1
+    folder: turbo-feed
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      # 与 docker-compose.observability.yml 的挂载一致：整个 provisioning 目录挂到
+      # /etc/grafana/provisioning，dashboard JSON 与本文件同目录。
+      path: /etc/grafana/provisioning/dashboards

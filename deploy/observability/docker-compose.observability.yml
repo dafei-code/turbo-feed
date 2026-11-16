@@ -1,0 +1,86 @@
+# =============================================================================
+# turbo-feed 集中日志（阶段 A）：Loki + Fluent Bit + Grafana
+#
+# 设计约束（改动前先读）：
+#   1. **零侵入**：不修改 docker-compose.prod.yml / 根 compose / 任何 Java 代码。
+#      应用继续把 JSON 打到 stdout，由 Docker json-file 落盘；本编排只读那些文件。
+#      —— 日志系统不能成为应用启动或发布的依赖（与项目 fail-open 取向一致）。
+#   2. **独立编排**：单独 `name`，不与 turbo-feed 应用共用网络。Fluent Bit 通过宿主
+#      文件读日志，不需要跟应用容器互通；回滚 = down + 删本目录。
+#   3. **单机形态**：Loki filesystem 单副本，不是高可用日志集群。多副本/多机房时
+#      应换成对象存储后端 + 分布式 Loki，见 docs/ops/observability.md 的边界说明。
+#
+# 用法（Linux 宿主）：
+#   export TURBOFEED_GRAFANA_ADMIN_PASSWORD='<强口令>'
+#   docker compose -f deploy/observability/docker-compose.observability.yml up -d
+#   curl -fsS http://localhost:3100/ready
+#   # Grafana: http://localhost:3000  (admin / 上面导出的口令)
+#
+# ⚠️ macOS Docker Desktop 没有宿主机 /var/lib/docker/containers（容器日志在 VM 内），
+#    挂载后采集器读不到应用日志。本机只能验证 Loki / Grafana 与 HTTP 注入样本，
+#    真实 stdout 自动采集必须在 Linux 宿主验证。可用 TURBOFEED_DOCKER_CONTAINERS_DIR
+#    指向一个含 *-json.log 的目录做离线验证。
+# =============================================================================
+name: turbo-feed-observability
+
+services:
+  loki:
+    image: grafana/loki:3.3.2
+    container_name: tf-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    ports:
+      - "${TURBOFEED_LOKI_HOST_PORT:-3100}:3100"
+    # 不写 healthcheck：Loki 镜像内不保证有 wget/curl，写错会让整个编排起不来。
+    # 就绪判断交给启动后的 `curl http://localhost:3100/ready`（见文件头与运维文档）。
+    logging: &obs-logging
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  fluent-bit:
+    image: fluent/fluent-bit:3.2.4
+    container_name: tf-fluent-bit
+    restart: unless-stopped
+    # Docker json-file 属 root 所有；显式以 root 读，避免权限不足导致「静默一条都收不到」。
+    user: "0:0"
+    volumes:
+      - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+      - ${TURBOFEED_DOCKER_CONTAINERS_DIR:-/var/lib/docker/containers}:/var/lib/docker/containers:ro
+      - fluentbit-state:/var/lib/fluent-bit
+    ports:
+      - "${TURBOFEED_FLUENTBIT_HTTP_PORT:-2020}:2020"
+    depends_on:
+      - loki
+    # 自身不写 json-file：否则采集器会把自己的 stdout 再采一遍，形成自采集环路。
+    logging:
+      driver: none
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: tf-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${TURBOFEED_GRAFANA_ADMIN_USER:-admin}
+      # 强制外部注入，仓库默认配置里不放任何口令（含占位值）。
+      GF_SECURITY_ADMIN_PASSWORD: ${TURBOFEED_GRAFANA_ADMIN_PASSWORD:?请 export TURBOFEED_GRAFANA_ADMIN_PASSWORD 后再启动}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${TURBOFEED_GRAFANA_HOST_PORT:-3000}:3000"
+    depends_on:
+      - loki
+    logging: *obs-logging
+
+volumes:
+  loki-data:
+  fluentbit-state:
+  grafana-data:
