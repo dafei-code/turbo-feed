@@ -176,6 +176,12 @@ services:
       # 不显式转发则 application.yml 的占位符永远取默认值，设了也不生效。
       TURBOFEED_COMMENT_PAGE_CACHE_ENABLED: ${TURBOFEED_COMMENT_PAGE_CACHE_ENABLED:-false}
       TURBOFEED_COMMENT_PAGE_CACHE_TTL_MS: ${TURBOFEED_COMMENT_PAGE_CACHE_TTL_MS:-2000}
+      # PR-B/PR-D2：上传链路 MEDIA_UPLOADED 走发件箱（默认关，关时仍走原直发路径）。
+      # PR-D5：发件箱传输通道；留空 = 跟随 TURBOFEED_MQ_ENABLED，显式 local / mq 才覆盖。
+      # compose environment 是白名单，未转发则 application.yml 占位符永远取默认值。
+      TURBOFEED_OUTBOX_MEDIA_UPLOADED_ENABLED: ${TURBOFEED_OUTBOX_MEDIA_UPLOADED_ENABLED:-false}
+      TURBOFEED_OUTBOX_CHANNEL_DEFAULT: ${TURBOFEED_OUTBOX_CHANNEL_DEFAULT:-}
+      TURBOFEED_OUTBOX_CHANNEL_MEDIA_UPLOADED: ${TURBOFEED_OUTBOX_CHANNEL_MEDIA_UPLOADED:-}
     ports:
       # 唯一对宿主发布的端口。裸 HTTP——生产必须在前面放 TLS 终结（Nginx/Traefik/云 LB）。
       - "${TURBOFEED_GATEWAY_HOST_PORT:-8080}:8080"
@@ -240,6 +246,11 @@ services:
       TURBOFEED_BEHAVIOR_LOG_ARCHIVE_LOCAL_RETENTION_HOURS: ${TURBOFEED_BEHAVIOR_LOG_ARCHIVE_LOCAL_RETENTION_HOURS:-168}
       # 阶段 B1：Redisson 客户端开关（与网关 / counter 同一 tf-redis 装配口径）
       TURBOFEED_REDIS_REDISSON_ENABLED: ${TURBOFEED_REDIS_REDISSON_ENABLED:-false}
+      # PR-D3：时间线墓碑防旧（引擎侧）。默认 true —— 存量事件无 occurredAt 天然放行，
+      # 零回归不靠默认关；只有显式设 false 才整体回退。compose environment 是白名单，
+      # 不转发则 yaml 占位符永远取默认值，回退开关会静默失效。
+      TURBOFEED_FEED_TIMELINE_TOMBSTONE_ENABLED: ${TURBOFEED_FEED_TIMELINE_TOMBSTONE_ENABLED:-true}
+      TURBOFEED_FEED_TIMELINE_TOMBSTONE_TTL_DAYS: ${TURBOFEED_FEED_TIMELINE_TOMBSTONE_TTL_DAYS:-30}
     # 不发布端口：只在内部网络被网关调用。需要直连排障时临时用 `docker compose exec`。
     volumes:
       - behavior-logs:/app/logs
