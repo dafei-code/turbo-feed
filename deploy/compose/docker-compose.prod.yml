@@ -124,7 +124,7 @@ services:
     restart: unless-stopped
     environment:
       SERVER_PORT: "8080"
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: ${TURBOFEED_SPRING_PROFILES:-prod}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: "6379"
       # 生产默认走集群（compose 的默认值是 single，那是给本地开发用的）。
@@ -134,8 +134,13 @@ services:
       TURBOFEED_REDIS_PASSWORD: ${TURBOFEED_REDIS_PASSWORD:?请在 deploy/env/.env 中设置 TURBOFEED_REDIS_PASSWORD}
       TURBOFEED_DB_0_URL: jdbc:mysql://mysql:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
       TURBOFEED_DB_1_URL: jdbc:mysql://mysql:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
-      TURBOFEED_REPLICA_DB_0_URL: jdbc:mysql://mysql:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
-      TURBOFEED_REPLICA_DB_1_URL: jdbc:mysql://mysql:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      # 评审优化项④：读写分离副本地址参数化。规则本身早已在
+      # shardingsphere-config-128.yaml 里配好（!READWRITE_SPLITTING），缺的是部署侧真实副本 URL。
+      # 默认仍回落主库 mysql:3306：未部署副本时读路径照常可用（等价于「读写分离规则存在但读主」），
+      # 不会像直配 3307 那样因副本不存在而全量读失败（见 docs/changelog/0051）。
+      # 有真实只读副本时在 deploy/env/.env 里显式覆盖这两个变量即可，无需改镜像。
+      TURBOFEED_REPLICA_DB_0_URL: ${TURBOFEED_REPLICA_DB_0_URL:-jdbc:mysql://mysql:3306/turbo_feed_1?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+      TURBOFEED_REPLICA_DB_1_URL: ${TURBOFEED_REPLICA_DB_1_URL:-jdbc:mysql://mysql:3306/turbo_feed_2?useUnicode=true&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
       TURBOFEED_DB_USERNAME: ${TURBOFEED_DB_USERNAME:?请在 deploy/env/.env 中设置 TURBOFEED_DB_USERNAME}
       TURBOFEED_DB_PASSWORD: ${TURBOFEED_DB_PASSWORD:?请在 deploy/env/.env 中设置 TURBOFEED_DB_PASSWORD}
       # prod profile 要求 JWT_SECRET 至少 32 字符（HS256 密钥强度），缺失则启动失败
@@ -150,6 +155,12 @@ services:
       # 网关与引擎必须同值；prod profile 无默认值，缺失直接启动失败（fail-fast）
       TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN:?请在 deploy/env/.env 中设置 TURBOFEED_INTERNAL_TOKEN}
       TURBOFEED_MQ_ENABLED: ${TURBOFEED_MQ_ENABLED:-false}
+      # 突发档（prod,mq）专用：compose environment 是白名单，不显式转发则
+      # application-mq.yml 的 ${TURBOFEED_ROCKETMQ_NAME_SERVER} 永远取默认值。
+      TURBOFEED_ROCKETMQ_NAME_SERVER: ${TURBOFEED_ROCKETMQ_NAME_SERVER:-127.0.0.1:9876}
+      # MQ 发送失败时的 HTTP 直投兜底目标：容器内必须指向 tf-counter 服务名，
+      # 否则会落到 yml 默认 localhost:8081（网关容器自己），兜底永远失败。
+      TURBOFEED_COUNTER_BASE_URL: ${TURBOFEED_COUNTER_BASE_URL:-http://tf-counter:8081}
       # ── 阶段 B1 多副本开关（默认全关，注入才生效）─────────────────────────
       # compose 的 environment: 是白名单，未显式列出的变量进不了容器（历史坑：
       # TURBOFEED_BEHAVIOR_LOG_ENABLED 设了却静默按默认值走）。
@@ -158,6 +169,13 @@ services:
       TURBOFEED_COUNTER_ENABLED: ${TURBOFEED_COUNTER_ENABLED:-false}
       # 阶段 B2：词库/白名单跨实例 epoch 广播（默认关；不注入时各实例走 30s 指纹刷新）
       TURBOFEED_CONTENT_SECURITY_EPOCH_BROADCAST_ENABLED: ${TURBOFEED_CONTENT_SECURITY_EPOCH_BROADCAST_ENABLED:-false}
+      # 评审优化项③：热点计数 Key 分槽（默认关；开启前务必读 docs/ops/hotspot-count-sharding.md
+      # 的读放大与回退步骤，compose environment 是白名单，未转发则设了也不生效）
+      TURBOFEED_LIKE_COUNT_SHARDING_ENABLED: ${TURBOFEED_LIKE_COUNT_SHARDING_ENABLED:-false}
+      # 评审优化项④：评论列表页短 TTL 缓存（默认关）。compose environment 是白名单，
+      # 不显式转发则 application.yml 的占位符永远取默认值，设了也不生效。
+      TURBOFEED_COMMENT_PAGE_CACHE_ENABLED: ${TURBOFEED_COMMENT_PAGE_CACHE_ENABLED:-false}
+      TURBOFEED_COMMENT_PAGE_CACHE_TTL_MS: ${TURBOFEED_COMMENT_PAGE_CACHE_TTL_MS:-2000}
     ports:
       # 唯一对宿主发布的端口。裸 HTTP——生产必须在前面放 TLS 终结（Nginx/Traefik/云 LB）。
       - "${TURBOFEED_GATEWAY_HOST_PORT:-8080}:8080"
@@ -192,7 +210,7 @@ services:
     restart: unless-stopped
     environment:
       SERVER_PORT: "8083"
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: ${TURBOFEED_SPRING_PROFILES:-prod}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: "6379"
       TURBOFEED_REDIS_MODE: ${TURBOFEED_REDIS_MODE:-cluster}
@@ -201,6 +219,8 @@ services:
       TURBOFEED_GATEWAY_BASE_URL: http://tf-gateway:8080
       TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN:?请在 deploy/env/.env 中设置 TURBOFEED_INTERNAL_TOKEN}
       TURBOFEED_MQ_ENABLED: ${TURBOFEED_MQ_ENABLED:-false}
+      # 突发档（prod,mq）专用：engine 的 application-mq.yml 同样读这个变量名
+      TURBOFEED_ROCKETMQ_NAME_SERVER: ${TURBOFEED_ROCKETMQ_NAME_SERVER:-127.0.0.1:9876}
       # ── 行为明细（推荐训练样本）───────────────────────────────────────
       # ⚠️ 变量名必须带 FEED：不是 Spring 不认（yaml 里还有 ${TURBOFEED_BEHAVIOR_LOG_ENABLED} 兜底），
       #    而是**本文件只把带 FEED 的这个名字转发进容器**——不带 FEED 的变量进不去，
@@ -250,7 +270,7 @@ services:
     restart: unless-stopped
     environment:
       SERVER_PORT: "8081"
-      SPRING_PROFILES_ACTIVE: prod
+      SPRING_PROFILES_ACTIVE: ${TURBOFEED_SPRING_PROFILES:-prod}
       # ── 阶段 B1：共享 MySQL（application-prod.yml）+ Redis 集群 ──────────────
       # 原先本段只有上面两行：prod profile 形同虚设，counter 仍连 127.0.0.1:6379
       # 与 H2 内存库，多副本下 ShedLock 锁 / 计数 / 去重表都不共享。
@@ -263,6 +283,11 @@ services:
       TURBOFEED_REDIS_REDISSON_ENABLED: ${TURBOFEED_REDIS_REDISSON_ENABLED:-false}
       TURBOFEED_COUNTER_REDIS_ENABLED: ${TURBOFEED_COUNTER_REDIS_ENABLED:-false}
       TURBOFEED_COUNTER_REDIS_BUFFER_ENABLED: ${TURBOFEED_COUNTER_REDIS_BUFFER_ENABLED:-false}
+      # ── 突发档（prod,mq）：计数消费者必须与网关同时开 MQ ────────────────────
+      # 原先本段完全没有 MQ 变量，CounterMqConsumer 因缺 name-server 静默不注册，
+      # 表现为「网关发了 MQ，tf-counter 却一直在等 HTTP」。
+      TURBOFEED_MQ_ENABLED: ${TURBOFEED_MQ_ENABLED:-false}
+      TURBOFEED_ROCKETMQ_NAME_SERVER: ${TURBOFEED_ROCKETMQ_NAME_SERVER:-127.0.0.1:9876}
     # 共享库必须先就绪，否则 HikariCP 初始化即失败
     depends_on:
       mysql:
