@@ -109,8 +109,18 @@ TURBOFEED_COUNTER_REDIS_BUFFER_ENABLED: ${TURBOFEED_COUNTER_REDIS_BUFFER_ENABLED
 - counter 数据源改动需单独回滚（切回 H2 会丢内存库计数，仅在开发环境这么做）。
 - 删除本模板与文档不影响任何运行时行为。
 
-## 7. 与 B2 的边界
+## 7. B2 状态（词库 / 白名单跨实例 epoch 广播）
 
-B1 只打开**代码里已存在**的 opt-in 能力，不改 Java 语义。B2（词库 / 白名单跨实例 epoch + 广播失效）要动 `SensitiveWordService` / `WhitelistService` 的 `triggerReload()` 单飞 CAS 与「追平 3 轮」路径，属于另一个量级，单独给方案再确认。
+**代码与编排已落地，运行时开关默认关闭；双实例真启动验证仍待 Docker 就绪。** 完整设计与验证口径见 `docs/ops/moderation-epoch-broadcast.md`。
 
-§3.1 的共享数据源改动已随 B1 落地（新增 profile + 迁移脚本 + compose 接线），不属于 B2 范围；B2 只处理词库/白名单的 epoch 与广播失效。
+> **事实纠正**：本节在 B1 阶段曾写「B2 要动 `SensitiveWordService` / `WhitelistService` 的 `triggerReload()` 单飞 CAS 与追平 3 轮路径」，与源码不符——`WhitelistService` 改造前**没有** `triggerReload()` / 单飞 CAS / 追平逻辑，只有同步 `reload()`；`AdminWhitelistController` 的旧注释也误称「后台异步单飞」。B2 读码后已把白名单对齐到词库模型，`SensitiveWordService` 本身未改，只多了广播接收端的调用入口。以当前源码与 `moderation-epoch-broadcast.md` 为准。
+
+| 项 | 值 |
+| --- | --- |
+| 开关 | `TURBOFEED_CONTENT_SECURITY_EPOCH_BROADCAST_ENABLED`，默认 `false` |
+| 属性键 | `FeatureFlagKeys.MODERATION_EPOCH_BROADCAST_ENABLED` = `turbofeed.content-security.epoch-broadcast-enabled` |
+| 编排 | prod compose 的 gateway 段已补 `:-false` 转发；`.env.multinode.example` 写目标态 `true` |
+| 代码 | 新增 `ModerationEpochBroker` / `ModerationEpochConfig`；两个 admin Controller 共 9 个写端点在数据写入后 `bump`；`WhitelistService` 对齐异步单飞 + 追平；`WhitelistRepository.checkSum()` 合并为单条 SQL |
+| 验证 | 编译 + 全量单测 378 个 0 失败（含新增 19 个）+ `ApplicationContextRunner` 装配测试 + 编排静态校验通过；双实例收敛、广播丢失、Redis 故障三项真启动验证待执行 |
+
+B1 与 B2 互不影响，可分别灰度、分别回滚：B1 全部是「打开代码里已存在的 opt-in 能力」，B2 新增的是词库 / 白名单的版本语义与广播链路。

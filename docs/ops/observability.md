@@ -146,4 +146,4 @@ rm -rf deploy/observability            # 应用侧完全没被改过，无需恢
 | 采集器故障 | Fluent Bit 开了磁盘缓冲 + `Retry_Limit False`，Loki 短暂不可用不应丢日志；但采集器自身 `logging: none` 避免自采集环路，其排障日志需从 `docker inspect` / 进程 stdout 另取 |
 | 未验证项 | 镜像 tag、真实 stdout 采集、Grafana provisioning 版本兼容性、告警规则实际评估，均需一次端到端运行 |
 
-下一阶段（阶段 B）处理多副本状态一致性：词库 / 白名单跨实例 epoch 与广播失效、counter 共享缓冲与 ShedLock、workerId 租约全开、热点榜广播。**先有集中日志，B 上线后的收敛行为才可验证**——这也是先做 A 的原因。
+阶段 B 已推进：**B1**（counter 共享数据源、prod 变量转发、多副本开关清单）与 **B2**（词库 / 白名单跨实例 epoch + 广播失效，默认关闭）的代码与编排均已落地，分别见 `multinode-switches.md` 与 `moderation-epoch-broadcast.md`；workerId 租约、counter 共享缓冲等运行时开关仍默认全关，热点榜广播按设计保持关闭。**先有集中日志，B 上线后的收敛行为才可验证**（按 `instanceId` / `traceId` 串多实例日志）——这也是先做 A 的原因。本轮 B 的双实例真启动验证因本机 Docker 未运行仍待执行。
