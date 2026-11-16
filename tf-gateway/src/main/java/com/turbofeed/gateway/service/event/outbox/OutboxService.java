@@ -1,12 +1,14 @@
 package com.turbofeed.gateway.service.event.outbox;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.gateway.repository.OutboxEventRepository;
-import com.turbofeed.gateway.service.feed.FeedTimelinePublisher;
 import com.turbofeed.gateway.trace.TraceContext;
 import com.turbofeed.gateway.util.SnowflakeIdGenerator;
 import com.turbofeed.shared.trace.TraceIds;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,18 +29,23 @@ import java.util.Map;
  *       （{@link #deliverAfterCommit} 注册 {@code afterCommit}）。绝大多数请求在这一步就完成，
  *       用户感知不到发件箱的存在。</li>
  *   <li><b>补偿路径（保可靠）</b>：直投失败或进程崩溃时，事件行仍在库里（状态 PENDING/FAILED/卡死的 SENDING），
- *       由 {@code OutboxRelay} 轮询取出并调用同一个 {@link #tryDeliver}。</li>
+ *       由 {@link OutboxRelay} 轮询取出并调用同一个 {@link #tryDeliver}。</li>
  * </ol>
  * 二者共用 {@link #tryDeliver} 是刻意的：<b>补偿路径必须与正常路径走完全相同的代码</b>，
  * 否则补偿逻辑会因为长期不被执行而腐化，等真正需要它时已经不可用。</p>
+ *
+ * <p><b>分发走注册表（PR-C3）</b>：{@link #dispatch} 不再用 switch 语句按类型硬编码，
+ * 而是向 {@link OutboxHandlerRegistry} 取 Handler。注册表在启动期校验
+ * 「每个 {@link OutboxEventType} 都有且只有一个处理器」，缺一个就拒绝启动——
+ * 原 switch 语句漏分支时编译照过、事件静默停在 PENDING 直到判死。</p>
  *
  * <p><b>为什么快路径失败不抛异常</b>：此时事务已提交（内容已可见），抛异常既撤不回事务、
  * 又会把「可补偿的失败」变成「用户可见的 500」。正确动作是记日志 + 留行待补偿。</p>
  *
  * <p><b>判死即告警</b>：{@link #tryDeliver} 捕获到投递异常后，{@link OutboxEventRepository#markFailed}
  * 会据尝试次数决定退避重试还是判死（DEAD）；一旦判死立即通过 {@link DeadLetterAlert} 告警
- * （{@code TIMELINE_REMOVE} 比 {@code TIMELINE_APPEND} 严重）。DEAD 行的后续重投由
- * {@code OutboxDeadLetterSweeper} 负责，本类不重复投递逻辑。</p>
+ * 并给 {@code tf_outbox_dead_total{type}} 计数（PR-D4）。DEAD 行的后续重投由
+ * {@link OutboxDeadLetterSweeper} 负责，本类不重复投递逻辑。</p>
  */
 @Service
 public class OutboxService {
@@ -46,25 +53,28 @@ public class OutboxService {
     private static final Logger log = LoggerFactory.getLogger(OutboxService.class);
 
     private final OutboxEventRepository repository;
-    private final FeedTimelinePublisher feedTimelinePublisher;
+    private final OutboxHandlerRegistry registry;
     private final ObjectMapper objectMapper;
     private final SnowflakeIdGenerator snowflakeIdGenerator;
     private final DeadLetterAlert deadLetterAlert;
+    private final MeterRegistry meterRegistry;
     private final int maxAttempts;
     private final int backoffSeconds;
 
     public OutboxService(OutboxEventRepository repository,
-                         FeedTimelinePublisher feedTimelinePublisher,
+                         OutboxHandlerRegistry registry,
                          ObjectMapper objectMapper,
                          SnowflakeIdGenerator snowflakeIdGenerator,
                          DeadLetterAlert deadLetterAlert,
+                         MeterRegistry meterRegistry,
                          @Value("${turbofeed.outbox.max-attempts:5}") int maxAttempts,
                          @Value("${turbofeed.outbox.backoff-seconds:5}") int backoffSeconds) {
         this.repository = repository;
-        this.feedTimelinePublisher = feedTimelinePublisher;
+        this.registry = registry;
         this.objectMapper = objectMapper;
         this.snowflakeIdGenerator = snowflakeIdGenerator;
         this.deadLetterAlert = deadLetterAlert;
+        this.meterRegistry = meterRegistry;
         this.maxAttempts = maxAttempts;
         this.backoffSeconds = backoffSeconds;
     }
@@ -127,7 +137,9 @@ public class OutboxService {
             return false;
         }
         try {
-            dispatch(event);
+            // traceId 恢复统一放在这里（PR-C3）：快路径 afterCommit 与中继重投都经过本方法，
+            // Handler 不再各自处理。存量 payload 无该字段时沿用当前线程上下文，零退化。
+            withPayloadTrace(payloadTraceId(event.payload()), () -> dispatch(event));
             repository.markSent(eventId, Instant.now());
             log.info("发件箱投递成功: id={}, type={}, aggregateId={}", eventId, event.eventType(), event.aggregateId());
             return true;
@@ -141,32 +153,49 @@ public class OutboxService {
             if (dead) {
                 // 彻底失败且重投耗尽：立刻告警（REMOVE 类高严重度），后续重投由 OutboxDeadLetterSweeper 负责。
                 deadLetterAlert.onDead(fresh, e);
+                Counter.builder("tf_outbox_dead_total")
+                        .description("发件箱事件判死累计数（按事件类型分标签）")
+                        .tag("type", event.eventType() == null ? "UNKNOWN" : event.eventType())
+                        .register(meterRegistry)
+                        .increment();
             }
             return false;
         }
     }
 
-    /** 按事件类型分发投递。新增类型必须在这里补分支，否则 {@code switch} 穷尽性检查会编译报错。 */
-    private void dispatch(OutboxEventRepository.OutboxEvent event) throws IOException {
-        switch (OutboxEventType.valueOf(event.eventType())) {
-            case TIMELINE_APPEND -> {
-                TimelineAppendPayload payload = objectMapper.readValue(event.payload(), TimelineAppendPayload.class);
-                withPayloadTrace(payload.traceId(),
-                        () -> feedTimelinePublisher.append(payload.item(), payload.poolLevel()));
-            }
-            case TIMELINE_REMOVE -> {
-                TimelineRemovePayload payload = objectMapper.readValue(event.payload(), TimelineRemovePayload.class);
-                withPayloadTrace(payload.traceId(),
-                        () -> feedTimelinePublisher.remove(payload.timelineKey()));
-            }
+    /** 按事件类型从注册表取 Handler 并投递；未知类型名（脏数据）按失败处理，绝不静默跳过。 */
+    private void dispatch(OutboxEventRepository.OutboxEvent event) throws Exception {
+        OutboxEventType type;
+        try {
+            type = OutboxEventType.valueOf(event.eventType());
+        } catch (IllegalArgumentException | NullPointerException e) {
+            throw new IOException("发件箱事件类型无法识别（既不投递也不丢弃，留待人工对账）: "
+                    + event.eventType(), e);
+        }
+        registry.require(type).handle(event.payload());
+    }
+
+    /** 从 payload JSON 顶层取 traceId；缺字段 / 坏 JSON 一律返回 null（沿用当前线程上下文）。 */
+    private String payloadTraceId(String payloadJson) {
+        if (payloadJson == null || payloadJson.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(payloadJson);
+            JsonNode trace = root == null ? null : root.get("traceId");
+            return trace == null || trace.isNull() ? null : trace.asText();
+        } catch (Exception e) {
+            // 这里不能因为诊断字段影响投递：Handler 会自己再解析一次 payload，坏 JSON 由它报错重试。
+            log.warn("发件箱 payload 预读 traceId 失败（沿用当前线程上下文）: {}", e.getMessage());
+            return null;
         }
     }
 
     /**
-     * 投递前恢复<b>事件行里保存的</b> traceId（M4）。
+     * 投递前恢复<b>事件行里保存的</b> traceId（M4，PR-C3 上移到 {@link #tryDeliver} 统一调用）。
      *
      * <p><b>为什么必须有这一步</b>：补偿路径（{@link OutboxRelay}）不在原请求线程上，
-     * 它从库里读出 payload JSON 再重新构造 {@code FeedTimelineEvent}——不是把原事件对象原样重发。
+     * 它从库里读出 payload JSON 再重新构造事件——不是把原事件对象原样重发。
      * 若 payload 不落 traceId、投递前也不恢复 MDC，中继重投的那一跳必然丢链路，
      * 而「重投」恰恰是最需要 traceId 的场景（要回答这条迟到事件最初由哪次请求产生）。</p>
      *
@@ -174,7 +203,7 @@ public class OutboxService {
      * {@code afterCommit} 跑在原请求线程上，MDC 里已经有正确的 id，此时若生成一个新 id
      * 覆盖上去反而是回归。缺字段就沿用当前线程上下文，是零退化写法。</p>
      */
-    private void withPayloadTrace(String rawTraceId, Runnable delivery) {
+    private void withPayloadTrace(String rawTraceId, DeliveryAction delivery) throws Exception {
         String safe = TraceIds.sanitize(rawTraceId);
         if (safe == null) {
             delivery.run();
@@ -186,5 +215,11 @@ public class OutboxService {
         } finally {
             TraceContext.end(previous);
         }
+    }
+
+    /** 允许抛检查异常的投递动作（Handler 内部会做 JSON 反序列化）。 */
+    @FunctionalInterface
+    private interface DeliveryAction {
+        void run() throws Exception;
     }
 }

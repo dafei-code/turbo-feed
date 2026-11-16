@@ -293,6 +293,16 @@ turbofeed:
     initial-delay-ms: 10000    # 启动后延迟开始，避开启动期的连接池/依赖未就绪
     stuck-timeout-seconds: 60  # SENDING 超过此时间未落地视为投递进程崩溃，回收重投
     relay-enabled: true        # 排障时可临时关掉（不影响落库与快路径直投，只是失去补偿）
+    # PR-B / PR-D2：上传链路 Outbox 灰度。默认 false = 保持原「落库后直发 MediaUploadedEvent」，
+    # 只对 batchInsert 加事务包裹；开启后「media 行 + MEDIA_UPLOADED 事件行」同事务，且不再直发。
+    # ⚠️ 开启后禁止再打开旧直发路径（双跑 = 两套可靠性语义），回退只需把本开关改回 false。
+    media-uploaded:
+      enabled: ${TURBOFEED_OUTBOX_MEDIA_UPLOADED_ENABLED:false}
+    # PR-D5：发件箱事件的传输通道决策。留空 = 跟随 turbofeed.mq.enabled（false→local / true→mq）；
+    # 显式 local / mq 可覆盖全局，单类型键只覆盖该事件（灰度 / 排障用）。非法值启动即失败。
+    channel:
+      default: ${TURBOFEED_OUTBOX_CHANNEL_DEFAULT:}
+      media-uploaded: ${TURBOFEED_OUTBOX_CHANNEL_MEDIA_UPLOADED:}
   # Redis 拓扑（changelog 0038）：
   #   single   = 单机（默认）。此时 RedisTopologyConfig 一个 Bean 都不注册，完全交给 Boot 自动装配，
   #              与改造前逐字节一致，保证「克隆即跑」。

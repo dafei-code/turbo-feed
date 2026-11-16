@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -125,8 +126,12 @@ public class ReviewTimelineDelivery {
 
     /** 入流：同事务落发件箱事件 + 提交后直投（失败留行，由 OutboxRelay 补偿重投）。 */
     void publishAppend(String mediaId, long userId, MediaItem post, int poolLevel) {
+        // PR-D3：事件产生时刻必须在这里固化进 payload，不能在投递时重取 Instant.now()。
+        // DEAD 行重投会重新构造 FeedTimelineEvent，若时间戳被刷新为「重投时刻」，
+        // 它会晚于同一帖后续的 REMOVE，引擎侧墓碑比对必然漏判、已下架内容被复活。
+        Instant occurredAt = Instant.now();
         long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_APPEND, mediaId, userId,
-                new TimelineAppendPayload(post, poolLevel, TraceContext.current()));
+                new TimelineAppendPayload(post, poolLevel, occurredAt, TraceContext.current()));
         outboxService.deliverAfterCommit(eventId);
         // 内容标签冷存同步写入：键用 post.timelineKey()（= Redis tf:media:tags 同源），
         // 标签由 caption 解析、随 post 透传，避免二次解析分叉。best-effort：冷存写入失败
@@ -136,8 +141,9 @@ public class ReviewTimelineDelivery {
 
     /** 移出公域：同上，走 TIMELINE_REMOVE。 */
     private void publishRemove(String mediaId, long userId, String timelineKey) {
+        // 同上：下架时刻固化进 payload，引擎侧据此写墓碑（PR-D3）。
         long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_REMOVE, mediaId, userId,
-                new TimelineRemovePayload(timelineKey, TraceContext.current()));
+                new TimelineRemovePayload(timelineKey, Instant.now(), TraceContext.current()));
         outboxService.deliverAfterCommit(eventId);
     }
 

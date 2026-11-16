@@ -260,6 +260,18 @@ public class FeedEngineClient {
      *         <b>调用方请务必看这个返回值</b>——忽略它就会出现"补投报告说成功、实际一条没进"的假象。
      */
     public boolean append(MediaItem item, int poolLevel) {
+        return append(item, poolLevel, null);
+    }
+
+    /**
+     * PR-D3 带时刻重载：把事件产生时刻作为 {@code occurredAt} query 参数透传给引擎，
+     * 引擎据此写墓碑 / 比对陈旧 APPEND。{@code null} 时不带该参数（存量事件、补投），
+     * 引擎按「时刻未知」放行，历史行为零回归。
+     *
+     * <p><b>为什么不用 MQ 属性 / header</b>：发件箱补偿重投与 DLQ 重放只保留消息体，
+     * 属性会丢；HTTP 通道里时刻同样必须是可重复读取的业务参数，不能依赖请求上下文。</p>
+     */
+    public boolean append(MediaItem item, int poolLevel, java.time.Instant occurredAt) {
         if (item == null) {
             return false;
         }
@@ -267,6 +279,8 @@ public class FeedEngineClient {
             restClient.post()
                     .uri(uri -> uri.path(PATH_TIMELINE_APPEND)
                             .queryParam("poolLevel", poolLevel)
+                            .queryParamIfPresent("occurredAt",
+                                    java.util.Optional.ofNullable(occurredAt).map(java.time.Instant::toString))
                             .build())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(FeedItemMapper.toContract(item))
@@ -291,6 +305,11 @@ public class FeedEngineClient {
      * @return true = 请求送达引擎；false = 投递失败（该内容可能仍在发现流展示）
      */
     public boolean remove(String mediaId) {
+        return remove(mediaId, null);
+    }
+
+    /** PR-D3 带时刻重载：下架时刻透传给引擎写墓碑。{@code null} = 存量事件，不写墓碑。 */
+    public boolean remove(String mediaId, java.time.Instant occurredAt) {
         if (mediaId == null) {
             return false;
         }
@@ -298,6 +317,8 @@ public class FeedEngineClient {
             restClient.post()
                     .uri(uri -> uri.path(PATH_TIMELINE_REMOVE)
                             .queryParam("mediaId", mediaId)
+                            .queryParamIfPresent("occurredAt",
+                                    java.util.Optional.ofNullable(occurredAt).map(java.time.Instant::toString))
                             .build())
                     .retrieve()
                     .toBodilessEntity();

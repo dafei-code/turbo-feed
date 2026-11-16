@@ -12,12 +12,19 @@ import com.turbofeed.gateway.service.health.AccountHealthService;
 import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.service.signal.ModerationSignalService;
 import com.turbofeed.gateway.service.behavior.BehaviorLogService;
+import com.turbofeed.gateway.service.event.outbox.OutboxEventType;
+import com.turbofeed.gateway.service.event.outbox.OutboxService;
+import com.turbofeed.gateway.service.event.outbox.StorageDeletePayload;
+import com.turbofeed.gateway.trace.TraceContext;
 import com.turbofeed.gateway.storage.MediaStorageClient;
 import com.turbofeed.shared.redis.RedisKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+
+import java.time.Instant;
 
 /**
  * 梯度处置子服务（#310 从 {@link MediaReviewService} 拆出）：把「确认违规」统一收敛到
@@ -47,6 +54,17 @@ public class ViolationDispositionService {
     private final MediaProperties properties;
     private final MediaStorageClient storageClient;
     private final ReviewTimelineDelivery delivery;
+
+    /**
+     * 发件箱（PR-C1/C2）：下架后的物理删除改走 {@code STORAGE_DELETE} 事件。
+     *
+     * <p><b>刻意用字段注入而非构造器注入</b>：本服务被多个单测按既有 11 参构造器手动
+     * {@code new}（见 {@code ViolationDispositionServiceTest}），加一个构造参数会让所有
+     * 测试编译断裂。字段注入在服务脱离 Spring 时为 {@code null}，此时降级回旧的同步
+     * {@code storageClient.delete}（仅测试/直调场景，生产由 Spring 保证装配）。</p>
+     */
+    @Autowired(required = false)
+    private OutboxService outboxService;
 
     public ViolationDispositionService(MediaJdbcRepository mediaRepository,
                                        StringRedisTemplate redisTemplate,
@@ -277,9 +295,23 @@ public class ViolationDispositionService {
             // penalty 集成缝：确认违规 → 落处罚（与信用扣分同触发点，CAS 保证单次）。
             penaltyService.recordViolation(authorId, ViolationCategory.OTHER, severity,
                     source, mediaId, operator, reason);
-            // P0-3：下架同步物理删除对象（minio 私有桶下杜绝直链残留；本地/占位不删，保留申诉恢复可能）
+            // PR-C1/C2：下架后的物理删除改走发件箱 STORAGE_DELETE。
+            // 旧实现内联调 storageClient.delete，而 MinioStorageClient.delete 吞异常仅 WARN：
+            // MinIO 抖动时 DB 已翻 TAKEN_DOWN、对象却永久残留（私有桶下无人能察觉的孤儿对象）。
+            // 现在「状态翻转 + 事件行」同事务，afterCommit 快路径直投、失败留行由 Relay 重投，
+            // 删除失败不再阻断处置、也不会静默丢失。本地/占位存储仍不删，保留申诉恢复可能。
             if ("minio".equals(properties.getStorage())) {
-                storageClient.delete(mediaId);
+                if (outboxService == null) {
+                    // 仅可能出现在脱离 Spring 的直调 / 单测：降级旧路径，行为不变。
+                    log.warn("Outbox 未装配，STORAGE_DELETE 降级同步删除（仅测试/直调应出现）: mediaId={}", mediaId);
+                    storageClient.delete(mediaId);
+                } else {
+                    long eventId = outboxService.enqueue(OutboxEventType.STORAGE_DELETE, mediaId, authorId,
+                            new StorageDeletePayload(mediaId, "minio", Instant.now(), TraceContext.current()));
+                    // ⚠️ 必须在本方法所在的事务内调用，否则退化成无 afterCommit 屏障的立即投递。
+                    // 本服务的调用方（MediaReviewService 各入口 / ReviewEscalationService）均已 @Transactional。
+                    outboxService.deliverAfterCommit(eventId);
+                }
             }
         }
         return rows;

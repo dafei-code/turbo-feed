@@ -3,6 +3,8 @@ package com.turbofeed.gateway.service.feed;
 import com.turbofeed.gateway.client.FeedEngineClient;
 import com.turbofeed.gateway.service.query.MediaItem;
 import lombok.RequiredArgsConstructor;
+
+import java.time.Instant;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -30,5 +32,17 @@ public class HttpFeedTimelinePublisher implements FeedTimelinePublisher {
     @Override
     public boolean remove(String timelineKey) {
         return feedEngineClient.remove(timelineKey);
+    }
+
+    /** PR-D3：把 enqueue 时刻作为 query 参数透传给引擎，由引擎写墓碑 / 比对陈旧 APPEND。 */
+    @Override
+    public boolean append(MediaItem item, int poolLevel, Instant occurredAt) {
+        return feedEngineClient.append(item, poolLevel, occurredAt);
+    }
+
+    /** PR-D3：同上，REMOVE 侧透传。{@code null} 时不带参数，引擎按存量事件放行。 */
+    @Override
+    public boolean remove(String timelineKey, Instant occurredAt) {
+        return feedEngineClient.remove(timelineKey, occurredAt);
     }
 }

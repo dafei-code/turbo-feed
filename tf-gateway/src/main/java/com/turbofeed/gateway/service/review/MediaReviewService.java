@@ -284,8 +284,9 @@ public class MediaReviewService {
                 MediaItem post = delivery.asTimelinePost(mediaRepository.findMedia(mediaId, userId), userId);
                 if (post != null) {
                     CreditLevel level = accountCreditService.ensure(userId);
+                    // PR-D3：enqueue 时刻固化，DEAD 行重投时不得刷新为「重投时刻」
                     long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_APPEND, mediaId, userId,
-                            new TimelineAppendPayload(post, level.poolLevel(), TraceContext.current()));
+                            new TimelineAppendPayload(post, level.poolLevel(), Instant.now(), TraceContext.current()));
                     outboxService.deliverAfterCommit(eventId);
                 }
                 // 人工通过计数：新人观察期据此解除。只统计人工路径——先发后审的自动通过不计入。

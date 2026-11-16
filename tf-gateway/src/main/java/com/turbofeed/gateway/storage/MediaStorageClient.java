@@ -35,6 +35,24 @@ public interface MediaStorageClient {
      */
     void delete(String mediaId);
 
+    /**
+     * <b>严格</b>物理删除（PR-C1）：失败必须抛异常，供发件箱 {@code STORAGE_DELETE} 事件退避重试。
+     *
+     * <p><b>为什么与 {@link #delete} 并存而不直接改它</b>：{@code delete} 的「吞异常、继续逻辑删除」
+     * 语义对启动清理 / 孤儿回收 / 补偿清理这类 best-effort 路径是恰当的，改严格会让一次对象存储
+     * 抖动把整条清理流程打断。真正需要「删不掉就必须重试」的只有<b>下架处置</b>，
+     * 因此新增严格入口，默认实现桥接到旧 {@code delete}（本地磁盘 / 占位实现天然幂等不抛），
+     * 只有对象存储实现覆盖为不吞异常的版本。</p>
+     *
+     * <p><b>not-found 必须视为成功</b>：at-least-once 重放会多次删同一个对象。</p>
+     *
+     * @param mediaId 对象名（即存储 key）
+     * @throws Exception 删除失败（调用方负责重试，不得吞掉）
+     */
+    default void deleteOrThrow(String mediaId) throws Exception {
+        delete(mediaId);
+    }
+
     // ==================== 预签名直传扩展点（抖音式客户端直传对象存储） ====================
     //
     // 仅对象存储实现（MinioStorageClient）真正支持；本地磁盘 / 占位实现继承下面的 default，

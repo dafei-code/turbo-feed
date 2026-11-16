@@ -48,6 +48,7 @@ import com.turbofeed.shared.redis.RedisKeys;
 import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -133,6 +134,16 @@ public class MediaUploadService {
     private final ModerationDownstreamRouter moderationDownstreamRouter;
     /** 审核域配置（{@code turbofeed.media.review}）：与上传/存储配置分离，见 {@link ReviewProperties}。 */
     private final ReviewProperties reviewProperties;
+
+    /**
+     * PR-B 上传事务收口（落库 + MEDIA_UPLOADED 事件行同事务）。
+     *
+     * <p>字段注入而非构造器注入：本类构造器已有 23 个参数，改动会让所有手动 {@code new} 的
+     * 调用点 / 测试编译断裂；生产由 Spring 保证装配，脱离 Spring 的直调为 {@code null} 时
+     * 自动退回旧的「无事务 batchInsert + 直发事件」路径，零回归。</p>
+     */
+    @Autowired(required = false)
+    private MediaUploadTransaction uploadTransaction;
 
     /**
      * 构造器注入（原为 {@code @RequiredArgsConstructor}）。
@@ -303,6 +314,8 @@ public class MediaUploadService {
         List<String> urls = new ArrayList<>(files.length);
         List<MediaJdbcRepository.MediaRowSpec> rows = new ArrayList<>(files.length);
         String markJson = captionMark.markJson();
+        // 事件在 try 外声明：灰度关闭时仍由原 MediaEventPublisher 在全部成功后直发。
+        MediaUploadedEvent uploadedEvent = null;
         try {
             context = validationChain.validate(userId, files);
             for (int seq = 0; seq < files.length; seq++) {
@@ -313,10 +326,9 @@ public class MediaUploadService {
                         postId, stored.mediaId(), Long.parseLong(userId), stored.url(),
                         MediaStatus.PENDING, rawCaption, markJson, seq, createdAt, null));
             }
-            // 整帖落库：N 张图一次 batch（同 user_id 落同片，rewriteBatchedStatements 合并为单批）
-            mediaRepository.batchInsert(rows);
             // #8 三档风险机审：内容安全（caption）已在 requireClean 通过，再依账号信号算风险分，
             // 达 MED/HIGH 送人工复审队列（RISK_TIERED）。fail-open 不阻断上传受理。
+            // 这些步骤都不读刚落的 media 行，故可前移到事务收口之前（原因见下）。
             riskRoute(uid, mediaIds.get(0), rawCaption);
             // P1：敏感词 REVIEW 裁定 → 建人审任务（内容已 PENDING 受理，REVIEWER 需复核描述）
             if (captionVerdict.action() == ModerationAction.REVIEW) {
@@ -332,6 +344,20 @@ public class MediaUploadService {
             // REVIEW 已建人审任务（上面），判无违规时由 MediaReviewService 解除 MONITOR；
             // LIMIT 无任务，改描述裁定 PASS 时解除 DEMOTE。信号 fail-open，不影响受理。
             moderationDownstreamRouter.routeContentVerdict(postId, captionVerdict);
+
+            // ★ PR-B：事务收口必须是 try 内最后一步（见 MediaUploadTransaction 类注释）。
+            // 事务提交会触发 afterCommit 投递；若其后还有步骤抛异常，catch 的 cleanupPartialPost
+            // 会删掉 media 行，而事件已经发出去 → 审核侧兜底落库会「复活」已作废的帖子。
+            uploadedEvent = new MediaUploadedEvent(
+                    postId, List.copyOf(mediaIds), List.copyOf(urls), userId,
+                    rawCaption, captionMark.markJson(), requestId, createdAt);
+            if (uploadTransaction != null) {
+                // 整帖落库（N 张图一次 batch）+ 灰度打开时同事务写 MEDIA_UPLOADED 事件行。
+                uploadTransaction.persist(rows, uploadedEvent);
+            } else {
+                // 脱离 Spring 的直调 / 单测：保持旧的无事务 batchInsert，零回归。
+                mediaRepository.batchInsert(rows);
+            }
         } catch (RuntimeException e) {
             // 中途失败：清掉本批已落库的残行与已上传的对象，绝不留半成品帖（见类注释）
             cleanupPartialPost(uid, postId, mediaIds);
@@ -344,10 +370,11 @@ public class MediaUploadService {
             }
         }
 
-        // 整帖已全部落库 → 发**一条帖级事件**（审核按帖一次跑：机审一次、状态一次翻转、公域一次投递）
-        eventPublisher.publish(new MediaUploadedEvent(
-                postId, List.copyOf(mediaIds), List.copyOf(urls), userId,
-                rawCaption, captionMark.markJson(), requestId, createdAt));
+        // 灰度关闭（或事务收口未装配）→ 仍走原直发路径，零回归；
+        // 灰度打开 → 事件行已在事务内落库并由 afterCommit 投递，此处绝不双跑。
+        if (uploadTransaction == null || !uploadTransaction.isOutboxEnabled()) {
+            eventPublisher.publish(uploadedEvent);
+        }
 
         // 第 10 个参数 = 内容标签（caption 里的 #话题）；受理阶段就要带上，
         // 否则后续入库/投递的帖视图缺标签，兴趣画像与召回拿不到信号。
@@ -762,8 +789,9 @@ public class MediaUploadService {
         // 3) 清理公域时间线：键与投递时一致（有 postId 用 postId，历史数据回退 mediaId）。
         //    改走发件箱：事件行与本方法的逻辑删除在同一事务里——删了就一定有一条待投递的 remove。
         //    改造前是「提交后直接调引擎、失败仅告警」= fail-open：内容已删，公域却还在展示。
+        // PR-D3：下架时刻固化进 payload，引擎侧据此写墓碑拦截迟到的 APPEND 重投
         long eventId = outboxService.enqueue(OutboxEventType.TIMELINE_REMOVE, mediaId, uid,
-                new TimelineRemovePayload(legacySingle ? mediaId : postId, TraceContext.current()));
+                new TimelineRemovePayload(legacySingle ? mediaId : postId, Instant.now(), TraceContext.current()));
         outboxService.deliverAfterCommit(eventId);
         // 4) 失效整帖状态缓存（旁路缓存 fail-open）：状态是整帖的，只清代表行会让其余图在 TTL 内返回旧状态
         try {

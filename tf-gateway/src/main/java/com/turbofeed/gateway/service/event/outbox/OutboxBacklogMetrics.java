@@ -2,6 +2,7 @@ package com.turbofeed.gateway.service.event.outbox;
 
 import com.turbofeed.gateway.repository.OutboxEventRepository;
 import com.turbofeed.gateway.trace.TraceContext;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
@@ -44,8 +45,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>统计是纯粹的观测行为，DB 查不到不该影响发件箱投递（本类只在独立调度线程里跑，
  * 与投递链路无耦合）。但也不能静默：查失败时<b>保留上一轮的值</b>并告警日志，
  * 因为「指标停在旧值」比「指标掉到 0」更接近事实——掉 0 会让人误以为积压消化完了。
- * 首次刷新就失败时值为 0，与「真的没有积压」不可区分，这是本方案已知的局限
- * （唯一解法是加一个 {@code tf_outbox_backlog_refresh_failed_total} 计数器，见下）。</p>
+ * <b>PR-D4 已补齐上述局限</b>：新增 {@code tf_outbox_backlog_refresh_failed_total} 计数器。
+ * 查询失败时「保留上一轮值 + 告警日志」只能靠人看日志，而水位停在旧值在 Grafana 上
+ * 与「真的没变化」一模一样——这个计数器把「指标本身不可信」变成可告警的时序。
+ * 首次刷新就失败时 Gauge 的 0 仍与真实空积压不可区分，但配合该计数器的非零值即可区分。</p>
  *
  * <p><b>可关</b>：{@code turbofeed.outbox.backlog-metrics-enabled=false}。</p>
  */
@@ -55,6 +58,11 @@ import java.util.concurrent.atomic.AtomicLong;
 public class OutboxBacklogMetrics {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxBacklogMetrics.class);
+
+    /** PR-D4：把「水位刷新失败、Gauge 停在旧值」变成可告警时序。 */
+    static final String METRIC_REFRESH_FAILED = "tf_outbox_backlog_refresh_failed_total";
+
+    private final MeterRegistry registry;
 
     /**
      * 被跟踪的四个非终态，顺序固定（{@code SENT} 是终态、只增不减，统计它没有意义）。
@@ -72,6 +80,7 @@ public class OutboxBacklogMetrics {
 
     public OutboxBacklogMetrics(OutboxEventRepository repository, MeterRegistry registry) {
         this.repository = repository;
+        this.registry = registry;
         for (String status : TRACKED_STATUSES) {
             // 必须先把 AtomicLong 存进字段（强引用），再注册 Gauge（弱引用）——见类注释。
             AtomicLong count = new AtomicLong(0);
@@ -110,6 +119,11 @@ public class OutboxBacklogMetrics {
             rows = repository.backlog();
         } catch (Exception e) {
             // 保留上一轮的值（不置 0）：指标停在旧值比掉到 0 更接近事实。
+            // PR-D4：同时把「这一轮读数不可信」计数，否则 Grafana 上「停住」和「没变化」无法区分。
+            Counter.builder(METRIC_REFRESH_FAILED)
+                    .description("发件箱积压水位刷新失败累计数（读数停在旧值，需人工确认）")
+                    .register(registry)
+                    .increment();
             log.warn("发件箱积压统计失败，沿用上一轮水位: {}", e.getMessage());
             return;
         }

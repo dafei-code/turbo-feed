@@ -21,6 +21,7 @@ import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.storage.MediaStorageClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -72,6 +73,16 @@ public class MediaUploadFinalizer {
     private final ReviewProperties reviewProperties;
 
     /**
+     * PR-B 上传事务收口：把「batchInsert + MEDIA_UPLOADED 事件行」收进同一本地事务。
+     *
+     * <p>字段注入（不改显式构造器）：本类被 {@code @Async} 代理，且已有 13 参构造器；
+     * 独立 Bean + {@code TransactionTemplate} 可避开同类自调用导致的事务代理失效。
+     * 脱离 Spring 时为 {@code null}，退回旧路径零回归。</p>
+     */
+    @Autowired(required = false)
+    private MediaUploadTransaction uploadTransaction;
+
+    /**
      * 显式构造器（不用 {@code @RequiredArgsConstructor} / {@code @Slf4j}）：本机构建环境 Lombok
      * 对「重新编译的文件」处理不可靠，改为显式声明与日志字段（与 MediaUploadService 同口径）。
      */
@@ -115,10 +126,10 @@ public class MediaUploadFinalizer {
             List<String> urls = mediaIds.stream()
                     .map(this::accessUrl)
                     .toList();
-            mediaRepository.batchInsert(buildRows(reservation, urls));
 
             // #6 去重记账：complete 路径对象已由客户端直传到位，无法「跳过存储」，
             // 故仅下载字节算指纹、记表供未来上传复用（命中不重插、fail-open）。
+            // 与 #8 一起前移到事务收口之前：它们不读刚落的 media 行，顺序前移无语义差。
             recordDedup(reservation);
 
             // #8 三档风险机审：内容安全（caption）已在 presign 通过，再依账号信号算风险分，
@@ -126,17 +137,38 @@ public class MediaUploadFinalizer {
             riskRoute(Long.parseLong(reservation.userId()), mediaIds.get(0), reservation.caption());
 
             // 整帖一条事件：与「整帖一审」配套，审核侧一次跑完，不做 N 张图的齐备性判断
-            eventPublisher.publish(new MediaUploadedEvent(
+            MediaUploadedEvent event = new MediaUploadedEvent(
                     postId, List.copyOf(mediaIds), List.copyOf(urls), reservation.userId(),
                     reservation.caption(), reservation.captionMark(),
-                    reservation.requestId(), reservation.createdAt()));
+                    reservation.requestId(), reservation.createdAt());
 
             // 第 10 个参数 = 内容标签（#话题），与 MediaUploadService 同口径
             MediaItem post = new MediaItem(postId, mediaIds.get(0), urls.get(0), List.copyOf(urls), 0,
                     MediaStatus.PENDING, reservation.createdAt(),
                     reservation.caption(), reservation.captionMark(),
                     CaptionTagParser.parse(reservation.caption()), 0L, 0L, false);
-            idempotency.store(reservation.userId(), reservation.requestId(), post);
+
+            // ★ PR-B：事务收口（batchInsert + 灰度时 MEDIA_UPLOADED 事件行）必须是 try 内
+            // 最后一组会写 DB 的动作。它提交后会触发 afterCommit 投递；若其后还有步骤抛异常，
+            // catch 的 cleanup 会删掉 media 行，而事件已发出 → 审核侧兜底落库「复活」作废帖。
+            if (uploadTransaction != null) {
+                uploadTransaction.persist(buildRows(reservation, urls), event);
+            } else {
+                mediaRepository.batchInsert(buildRows(reservation, urls));
+            }
+            // 灰度关闭（或事务收口未装配）→ 原直发路径；打开后只由 Outbox 投递，绝不双跑。
+            if (uploadTransaction == null || !uploadTransaction.isOutboxEnabled()) {
+                eventPublisher.publish(event);
+            }
+
+            // 幂等结果缓存是旁路数据：写失败不该让整帖作废，更不能在事件已投出后触发 cleanup。
+            // 故显式 fail-open（原实现让它冒泡进 catch → cleanup，与 Outbox 化后的顺序约束冲突）。
+            try {
+                idempotency.store(reservation.userId(), reservation.requestId(), post);
+            } catch (Exception e) {
+                log.warn("预签名上传幂等结果回写失败（fail-open，不影响收尾）: postId={}, {}",
+                        postId, e.getMessage());
+            }
 
             log.info("预签名上传收尾完成: postId={}, images={}, userId={}",
                     postId, mediaIds.size(), reservation.userId());

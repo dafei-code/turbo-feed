@@ -2,11 +2,19 @@ package com.turbofeed.gateway.service.feed;
 
 import com.turbofeed.gateway.service.query.MediaItem;
 
+import java.time.Instant;
+
 /**
  * Feed 时间线投递端口（防腐层出口）。
  *
  * <p>统一收网关自己的 {@link MediaItem}，对调用方屏蔽"投递到底用同步 HTTP 还是 RocketMQ"——
  * 由 {@code turbofeed.mq.enabled} 在 HTTP 兜底实现与 MQ 实现间二选一，业务层零改动。</p>
+ *
+ * <p><b>PR-D3 带时刻重载</b>：{@link #append(MediaItem, int, Instant)} /
+ * {@link #remove(String, Instant)} 供发件箱 Handler 透传<b>事件产生（enqueue）时刻</b>，
+ * 引擎据此做时间线墓碑防旧。用 {@code default} 委托到无时刻重载，是为了让
+ * {@code FeedBackfillService} 等既有调用点与所有 Mock 实现<b>零改动</b>；
+ * 两个真实实现必须覆盖这两个重载，否则时刻会静默丢失（见各自实现）。</p>
  */
 public interface FeedTimelinePublisher {
 
@@ -39,4 +47,21 @@ public interface FeedTimelinePublisher {
      * @return true = 投递成功送达；false = 投递失败
      */
     boolean remove(String timelineKey);
+
+    /**
+     * 带事件产生时刻的入流（PR-D3）。{@code occurredAt} 为 {@code null} 表示存量事件，
+     * 引擎侧按「时刻未知」放行、不参与防旧比对。
+     *
+     * <p><b>为什么不能用 {@code Instant.now()}</b>：DEAD 行被 Sweeper 重投时此刻才生成
+     * 时间戳，会比同一帖后续 REMOVE 更晚，墓碑比对必然漏判、已下架内容复活。
+     * 时刻必须在 enqueue 时固化进发件箱 payload。</p>
+     */
+    default boolean append(MediaItem item, int poolLevel, Instant occurredAt) {
+        return append(item, poolLevel);
+    }
+
+    /** 带事件产生时刻的下架（PR-D3）；引擎据此写墓碑。{@code null} = 存量事件，不写墓碑。 */
+    default boolean remove(String timelineKey, Instant occurredAt) {
+        return remove(timelineKey);
+    }
 }

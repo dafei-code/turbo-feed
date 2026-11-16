@@ -12,6 +12,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
+
 /**
  * Feed 时间线投递的 <b>RocketMQ 顺序消息</b>实现（{@code turbofeed.mq.enabled=true} 时激活）。
  *
@@ -40,6 +42,16 @@ public class RocketMqFeedTimelinePublisher implements FeedTimelinePublisher {
 
     @Override
     public boolean append(MediaItem item, int poolLevel) {
+        return sendAppend(item, poolLevel, null);
+    }
+
+    /** PR-D3：透传 enqueue 时刻；{@code null}（存量 / 补投）保留工厂的投递时刻，引擎侧按未知放行。 */
+    @Override
+    public boolean append(MediaItem item, int poolLevel, Instant occurredAt) {
+        return sendAppend(item, poolLevel, occurredAt);
+    }
+
+    private boolean sendAppend(MediaItem item, int poolLevel, Instant occurredAt) {
         if (item == null) {
             return false;
         }
@@ -47,6 +59,10 @@ public class RocketMqFeedTimelinePublisher implements FeedTimelinePublisher {
         // traceId 落消息体：Outbox 重投 / DLQ 重放只保留消息体，MQ 属性会丢
         FeedTimelineEvent event = FeedTimelineEvent.append(view, poolLevel)
                 .withTraceId(TraceContext.current());
+        // 事件产生时刻同样必须落消息体：DLQ 重放原样发回，只有消息体能把 enqueue 时刻带回来
+        if (occurredAt != null) {
+            event = event.withOccurredAt(occurredAt);
+        }
         // hashKey 必须与 remove 用同一个键（view.timelineKey()：有 postId 用 postId，历史数据回退 mediaId），
         // 否则同一帖的 append 与 remove 会落不同队列、失去顺序保证，
         // 出现「remove 先执行、append 后执行 → 已下架内容重新出现」的内容安全事故。
@@ -58,11 +74,24 @@ public class RocketMqFeedTimelinePublisher implements FeedTimelinePublisher {
 
     @Override
     public boolean remove(String timelineKey) {
+        return sendRemove(timelineKey, null);
+    }
+
+    /** PR-D3：透传下架时刻，引擎据此写墓碑。 */
+    @Override
+    public boolean remove(String timelineKey, Instant occurredAt) {
+        return sendRemove(timelineKey, occurredAt);
+    }
+
+    private boolean sendRemove(String timelineKey, Instant occurredAt) {
         if (timelineKey == null) {
             return false;
         }
         FeedTimelineEvent event = FeedTimelineEvent.remove(timelineKey)
                 .withTraceId(TraceContext.current());
+        if (occurredAt != null) {
+            event = event.withOccurredAt(occurredAt);
+        }
         // 与 append 同键，保证同一帖严格有序
         rocketMQTemplate.syncSendOrderly(topic, event, timelineKey);
         return true;

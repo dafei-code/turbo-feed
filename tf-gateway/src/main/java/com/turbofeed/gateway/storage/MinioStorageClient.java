@@ -14,6 +14,7 @@ import io.minio.GetObjectArgs;
 import io.minio.GetPresignedObjectUrlArgs;
 import io.minio.SetBucketPolicyArgs;
 import io.minio.StatObjectArgs;
+import io.minio.errors.ErrorResponseException;
 import io.minio.http.Method;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.InitializingBean;
@@ -201,24 +202,73 @@ public class MinioStorageClient implements MediaStorageClient, InitializingBean 
     }
 
     /**
-     * 物理删除对象（用户删除内容时调用）。
+     * 底层删除动作（PR-C1 抽出）：两个语义不同的入口共用同一段 IO，避免逻辑分叉。
+     *
+     * <p>声明为 {@code protected} 而非 {@code private} 是刻意的：严格删除的失败分支
+     * （not-found 幂等 / 其它异常上抛）必须能被纯单测覆盖，而测 MinIO 客户端不该起真 MinIO。</p>
+     */
+    protected void removeObject(String mediaId) throws Exception {
+        client().removeObject(RemoveObjectArgs.builder()
+                .bucket(properties.getMinio().getBucket())
+                .object(mediaId)
+                .build());
+    }
+
+    /**
+     * 物理删除对象（用户删除内容时调用，<b>best-effort 口径</b>）。
      *
      * <p>mediaId 即对象名（{@code media/{userId}/{uuid}.{ext}}）。删除失败（对象已不存在等）
-     * 仅告警不抛，由调用方决定后续逻辑删除是否继续——避免物理层异常阻断用户的删除操作。</p>
+     * 仅告警不抛，由调用方决定后续逻辑删除是否继续——避免物理层异常阻断用户的删除操作。
+     * 保留给启动清理 / 孤儿回收 / 补偿清理这类本就允许失败的路径。</p>
+     *
+     * <p><b>下架处置不要调这个方法</b>：它吞异常会留下永久孤儿对象。
+     * 处置链路已改走发件箱 {@code STORAGE_DELETE}，最终落到 {@link #deleteOrThrow}。</p>
      *
      * @param mediaId 对象名（即存储 key）
      */
     @Override
     public void delete(String mediaId) {
         try {
-            client().removeObject(RemoveObjectArgs.builder()
-                    .bucket(properties.getMinio().getBucket())
-                    .object(mediaId)
-                    .build());
+            removeObject(mediaId);
             log.info("MinIO 对象已物理删除: {}", mediaId);
         } catch (Exception e) {
             log.warn("MinIO 对象删除失败（可能已不存在，继续逻辑删除）: mediaId={}, {}", mediaId, e.getMessage());
         }
+    }
+
+    /**
+     * <b>严格</b>物理删除（PR-C1）：除 not-found 外任何异常原样上抛。
+     *
+     * <p><b>为什么 not-found 必须当成功</b>：发件箱是 at-least-once，同一条
+     * {@code STORAGE_DELETE} 可能被快路径直投、中继重投、Sweeper 死信重投各删一次；
+     * 若把「对象已不存在」当失败，事件会在重试耗尽后判死告警，制造无意义的死信。</p>
+     *
+     * <p>S3 / MinIO 的 {@code removeObject} 对不存在的 key 通常直接成功，这里额外认
+     * {@code NoSuchKey} 是为了兼容返回该错误码的其它 S3 兼容实现。</p>
+     */
+    @Override
+    public void deleteOrThrow(String mediaId) throws Exception {
+        try {
+            removeObject(mediaId);
+            log.info("MinIO 对象已严格物理删除: {}", mediaId);
+        } catch (Exception e) {
+            if (isNotFound(e)) {
+                log.info("MinIO 对象已不存在，按幂等成功处理: {}", mediaId);
+                return;
+            }
+            // 其余异常（网络 / 凭据 / 超时）不接：交给 STORAGE_DELETE 发件箱事件退避重试。
+            throw e;
+        }
+    }
+
+    /**
+     * not-found 判定单独成 {@code protected} 方法：既避免在删除主流程里嵌套 SDK 类型判断，
+     * 也让「重放幂等」这条分支能被不依赖 MinIO SDK 异常构造器的纯单测覆盖。
+     */
+    protected boolean isNotFound(Exception e) {
+        return e instanceof ErrorResponseException ere
+                && ere.errorResponse() != null
+                && "NoSuchKey".equals(ere.errorResponse().code());
     }
 
     // ==================== 预签名直传（客户端直传，网关不收字节流） ====================

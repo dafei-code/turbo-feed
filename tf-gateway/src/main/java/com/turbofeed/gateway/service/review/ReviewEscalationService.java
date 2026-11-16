@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.util.HashMap;
@@ -165,7 +166,16 @@ public class ReviewEscalationService {
      *
      * <p><b>fail-open</b>：本方法绝不阻断晋级主流程——任何异常仅记日志返回，引擎侧的晋级已独立完成。
      * 机审复扫命中下架后不再建人审任务（避免重复处置同一内容）。</p>
+     *
+     * <p><b>PR-B 补事务边界（重新评审漏查的真实无事务入口）</b>：复扫命中违规会经
+     * {@link ViolationDispositionService#applyDisposition} → {@code takeDownAndPenalize} →
+     * {@code ReviewTimelineDelivery#removeFromTimeline} 写发件箱事件，以及 PR-C1/C2 新增的
+     * {@code STORAGE_DELETE} 事件。{@code MediaReviewService} 的其余调用点都在
+     * {@code @Transactional} 方法内，唯独本方法（引擎回调入口）缺事务 → 事件行与状态翻转
+     * 不在同一事务，且 {@code deliverAfterCommit} 会走「无事务退化 WARN」分支。
+     * 补上事务后，事件行与 DB 状态同生共死；方法内的 try/catch 仍保持 fail-open 语义。</p>
      */
+    @Transactional(rollbackFor = Exception.class)
     public void onPoolPromoted(String postId, int from, int to) {
         if (postId == null || postId.isBlank()) {
             return;
