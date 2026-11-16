@@ -21,6 +21,7 @@ import com.turbofeed.shared.result.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -28,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import java.nio.charset.StandardCharsets;
 
@@ -53,7 +55,11 @@ import java.nio.charset.StandardCharsets;
  *   <li><b>落库异步化 / 削峰</b>：主 INSERT 经 {@link CommentEventPublisher} 解耦——默认走进程内
  *       {@code interactionExecutor} 异步刷盘（零回归），启用 MQ（{@code --spring.profiles.active=mq}）
  *       后改发 RocketMQ 顺序事件、由 {@code CommentPersistConsumer} 幂等落库，把瞬时写峰值削平。
- *       Redis 为权威，落库仅灾备；fail-open：落库异常只告警，不影响主流程。</li>
+ *       ⚠️ 评论列表 / 回复父评论校验直接读 comment 表，落库失败是用户可见的数据丢失，一律
+ *       ERROR 留痕；publish 主链路仍 fail-open，不把 DB 异常抛回请求（详见 publish 内注释）。</li>
+ *   <li><b>读路径短 TTL 页缓存（opt-in）</b>：{@link CommentPageCache} 默认关闭；开启后只缓存
+ *       「算 items」的 DB 行快照（2s TTL），点赞数 / 评论总数仍实时读 Redis，且落库成功后
+ *       按 generation 失效该 mediaId 的全部页，避免异步落库完成前把旧列表重新冻住。</li>
  * </ul>
  */
 @Service
@@ -94,6 +100,15 @@ public class CommentService {
     private final CommentEventPublisher commentEventPublisher;
     /** 通知生成器（ADR-0009，fail-open 单点生成）：评论/回复通知。 */
     private final NotificationGenerator notificationGenerator;
+
+    /**
+     * 评论列表页短 TTL 缓存（评审优化项④，默认关闭）。
+     *
+     * <p>刻意用可选字段注入而非构造器参数：缓存是纯读侧增强，不影响本类既有构造契约；
+     * Bean 缺失（裁剪部署 / 单测直接 new）时读路径按原样回源 DB，零回归。</p>
+     */
+    @Autowired(required = false)
+    private CommentPageCache pageCache;
 
     /**
      * 发布评论（顶层或回复）。
@@ -150,8 +165,10 @@ public class CommentService {
                 commentId, mediaId, userId, rootId, parentId, content,
                 status, 0, Instant.now());
         // ③ 评论落库异步化：经 CommentEventPublisher 解耦（默认进程内 interactionExecutor 异步落库，
-        // 启用 MQ 后改发 RocketMQ 顺序事件、由 CommentPersistConsumer 幂等落库），主链路不阻塞 DB 写；
-        // Redis 计数为权威，落库仅为灾备重建用；fail-open：落库异常只告警，不影响评论发布主流程。
+        // 启用 MQ 后改发 RocketMQ 顺序事件、由 CommentPersistConsumer 严格幂等落库），主链路不阻塞 DB 写。
+        // ⚠️ 不能把 DB 落库理解成「仅灾备重建用」：评论列表 / 回复父评论校验都直接读 comment 表，
+        // Redis 只承担总数与热头。落库失败会造成列表静默缺条、总数与列表不一致、回复父评论 404，
+        // 因此落库异常一律 ERROR 可见；MQ 分支发送失败另有本地幂等兜底，消费失败上抛触发重试 / DLQ。
         commentEventPublisher.publish(c);
         // 评论/回复通知（ADR-0009，fail-open 单点生成，绝不阻塞评论发布主流程）
         notifyComment(mediaId, userId, parentId, commentId);
@@ -233,24 +250,23 @@ public class CommentService {
      */
     public CommentPage listTopLevel(String mediaId, int size, String cursor, String mode) {
         int limit = size <= 0 ? 20 : Math.min(size, 100);
-        List<Comment> items;
-        if ("hot".equalsIgnoreCase(mode)) {
-            // 最热 tab：tf:comment:hot ZSET 取最热 N 条（score=likeCount）
-            items = fetchOrdered(mediaId, commentHotService.hotHead(mediaId, limit));
-        } else {
+        String sortMode = "hot".equalsIgnoreCase(mode) ? "hot" : "newest";
+        // 优化项④：只把「算 items」的 DB 读包进短 TTL 页缓存；点赞数 / 总数仍在缓存外实时读 Redis。
+        List<Comment> items = loadPage(mediaId, 0L, limit, cursor, sortMode, () -> {
+            if ("hot".equals(sortMode)) {
+                // 最热 tab：tf:comment:hot ZSET 取最热 N 条（score=likeCount）
+                return fetchOrdered(mediaId, commentHotService.hotHead(mediaId, limit));
+            }
             if (cursor == null || cursor.isBlank()) {
                 // 最新首页：热头 ZSET 优先（O(log N) 不扫大表），冷/空回退 DB 有序索引
                 List<Long> ids = commentHotService.recentHead(mediaId, limit);
-                items = fetchOrdered(mediaId, ids);
-                if (items.isEmpty()) {
-                    items = commentRepository.listTopLevelFresh(mediaId, limit);
-                }
-            } else {
-                // 更深页：keyset 游标桥接 DB，(created_at, comment_id) 严格早于游标，倒序
-                Cursor cur = decode(cursor);
-                items = commentRepository.listTopLevelKeyset(mediaId, limit, cur.createdAt(), cur.commentId());
+                List<Comment> head = fetchOrdered(mediaId, ids);
+                return head.isEmpty() ? commentRepository.listTopLevelFresh(mediaId, limit) : head;
             }
-        }
+            // 更深页：keyset 游标桥接 DB，(created_at, comment_id) 严格早于游标，倒序
+            Cursor cur = decode(cursor);
+            return commentRepository.listTopLevelKeyset(mediaId, limit, cur.createdAt(), cur.commentId());
+        });
         enrichLikeCounts(items);
         long total = commentCountService.getCount(mediaId);
         boolean hasMore = items.size() == limit;
@@ -266,13 +282,13 @@ public class CommentService {
             return new CommentPage(List.of(), "", 0, false);
         }
         int limit = size <= 0 ? 50 : Math.min(size, 200);
-        List<Comment> items;
-        if (cursor == null || cursor.isBlank()) {
-            items = commentRepository.listRepliesFresh(mediaId, rootId, limit);
-        } else {
+        List<Comment> items = loadPage(mediaId, rootId, limit, cursor, "replies", () -> {
+            if (cursor == null || cursor.isBlank()) {
+                return commentRepository.listRepliesFresh(mediaId, rootId, limit);
+            }
             Cursor cur = decode(cursor);
-            items = commentRepository.listRepliesKeyset(mediaId, rootId, limit, cur.createdAt(), cur.commentId());
-        }
+            return commentRepository.listRepliesKeyset(mediaId, rootId, limit, cur.createdAt(), cur.commentId());
+        });
         enrichLikeCounts(items);
         boolean hasMore = items.size() == limit;
         String next = hasMore && !items.isEmpty() ? encode(items.get(items.size() - 1)) : "";
@@ -293,6 +309,20 @@ public class CommentService {
         // 最热头分数随点赞状态变化实时调整
         commentHotService.onLike(commentId, mediaId, nowLiked ? 1 : -1);
         return nowLiked;
+    }
+
+    /**
+     * 读路径统一入口：缓存 Bean 缺失或开关关闭时原样回源 DB（零回归）。
+     *
+     * <p>缓存失效不在这里做——见 {@link CommentPageCache} 的 freshness 说明：失效必须挂在
+     * 落库成功之后，否则异步落库完成前的第一次回源会把「缺新评论」的旧列表重新冻住一个 TTL。</p>
+     */
+    private List<Comment> loadPage(String mediaId, long rootId, int limit, String cursor, String mode,
+                                   Supplier<List<Comment>> loader) {
+        if (pageCache == null) {
+            return loader.get();
+        }
+        return pageCache.load(mediaId, rootId, limit, cursor, mode, loader);
     }
 
     /** 按热头顺序（ZSET 返回顺序）用 {@code WHERE media_id=? AND comment_id IN(...)} 单分片取正文并重排。 */

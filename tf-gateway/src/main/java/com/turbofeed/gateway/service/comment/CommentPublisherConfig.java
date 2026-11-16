@@ -17,6 +17,9 @@ import java.util.concurrent.Executor;
  *
  * <p>条件组合用「嵌套 static @Configuration」实现 AND（{@code @ConditionalOnProperty} 本身不可重复
  * 叠两个，会编译报错）。</p>
+ *
+ * <p>两条分支都把 {@link CommentPageCache} 传进去，用于「落库成功后失效评论页缓存」（优化项④）；
+ * 缓存开关默认关闭，组件内部 evict 是 no-op，不影响既有落库语义。</p>
  */
 @Configuration
 public class CommentPublisherConfig {
@@ -28,18 +31,24 @@ public class CommentPublisherConfig {
         @Bean
         public LocalCommentEventPublisher localCommentEventPublisher(
                 CommentJdbcRepository commentRepository,
-                @Qualifier("interactionExecutor") Executor interactionExecutor) {
-            return new LocalCommentEventPublisher(commentRepository, interactionExecutor);
+                @Qualifier("interactionExecutor") Executor interactionExecutor,
+                CommentPageCache pageCache) {
+            return new LocalCommentEventPublisher(commentRepository, interactionExecutor, pageCache);
         }
     }
 
-    /** opt-in 分支：MQ 开启 → 顺序键 mediaId 投递削峰。 */
+    /** opt-in 分支：MQ 开启 → 顺序键 mediaId 投递削峰；发送失败走本地幂等兜底。 */
     @Configuration
     @ConditionalOnProperty(name = "turbofeed.mq.enabled", havingValue = "true")
     static class MqBranch {
         @Bean
-        public RocketMqCommentEventPublisher rocketMqCommentEventPublisher(RocketMQTemplate rocketMQTemplate) {
-            return new RocketMqCommentEventPublisher(rocketMQTemplate);
+        public RocketMqCommentEventPublisher rocketMqCommentEventPublisher(
+                RocketMQTemplate rocketMQTemplate,
+                CommentJdbcRepository commentRepository,
+                @Qualifier("interactionExecutor") Executor interactionExecutor,
+                CommentPageCache pageCache) {
+            return new RocketMqCommentEventPublisher(rocketMQTemplate, commentRepository,
+                    interactionExecutor, pageCache);
         }
     }
 }

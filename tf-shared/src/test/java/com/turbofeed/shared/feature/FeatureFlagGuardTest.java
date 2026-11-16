@@ -235,6 +235,8 @@ class FeatureFlagGuardTest {
     @Test
     void featureFlagKeys_matchExpected() {
         assertEquals("turbofeed.mq.enabled", FeatureFlagKeys.MQ_ENABLED);
+        assertEquals("turbofeed.like.count-sharding-enabled", FeatureFlagKeys.LIKE_COUNT_SHARDING_ENABLED);
+        assertEquals("turbofeed.comment.page-cache-enabled", FeatureFlagKeys.COMMENT_PAGE_CACHE_ENABLED);
         assertEquals("rocketmq.name-server", FeatureFlagKeys.ROCKETMQ_NAME_SERVER);
         assertEquals("turbofeed.feed.timeline.dlq-replay.enabled", FeatureFlagKeys.FEED_TIMELINE_DLQ_REPLAY_ENABLED);
         assertEquals("turbofeed.feed.recall.vector.mode", FeatureFlagKeys.VECTOR_MODE);

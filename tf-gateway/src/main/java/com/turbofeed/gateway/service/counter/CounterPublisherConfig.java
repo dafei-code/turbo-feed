@@ -37,14 +37,22 @@ public class CounterPublisherConfig {
             }
         }
 
-        /** opt-in 分支：MQ 开启 → 顺序键 postId 投递削峰。 */
+        /** opt-in 分支：MQ 开启 → 顺序键 postId 投递削峰；发送失败走 HTTP 直投 + 本地重试队列。 */
         @Configuration
         @ConditionalOnProperty(name = com.turbofeed.shared.feature.FeatureFlagKeys.MQ_ENABLED, havingValue = "true")
         static class MqBranch {
             @Bean
-            public RocketMqCounterEventPublisher rocketMqCounterEventPublisher(RocketMQTemplate rocketMQTemplate,
+            public RocketMqCounterEventPublisher rocketMqCounterEventPublisher(
+                    RocketMQTemplate rocketMQTemplate,
+                    CounterProperties props,
+                    @Qualifier("directRestClientBuilder") RestClient.Builder restClientBuilder,
+                    @Value("${turbofeed.internal.token:}") String internalToken,
                     @Value("${" + com.turbofeed.shared.feature.FeatureFlagKeys.COUNTER_SERVICE_TOPIC + ":turbofeed-counter-incr}") String topic) {
-                return new RocketMqCounterEventPublisher(rocketMQTemplate, topic);
+                // 注意：这里直接 new 而不声明为 Bean —— MQ 分支下若再注册一个
+                // CounterEventPublisher 实现，会造成按类型注入的 Bean 歧义。
+                HttpCounterEventPublisher fallback =
+                        new HttpCounterEventPublisher(props, restClientBuilder, internalToken);
+                return new RocketMqCounterEventPublisher(rocketMQTemplate, topic, fallback);
             }
         }
     }

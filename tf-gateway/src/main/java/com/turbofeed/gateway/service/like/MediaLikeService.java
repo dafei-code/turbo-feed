@@ -15,6 +15,7 @@ import com.turbofeed.shared.result.ErrorCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.RedisStringCommands;
@@ -49,7 +50,9 @@ import java.util.concurrent.Executor;
  *       <b>为什么计数 Key 不打散</b>：64 槽是为解决 Set <b>元素膨胀</b>导致的写热键（百万赞 =
  *       百万元素挤在一个 Key，SADD/SREM/带宽集中单节点）；而计数 Key 只存一个整数，
  *       {@code INCR} 恒为 O(1)、无膨胀，打散它只会把「读一次点赞数」放大成 64 次
- *       {@code SCARD}（改造前列表页 20 条 = 1280 个 Redis 命令），纯属负收益。</li>
+ *       {@code SCARD}（改造前列表页 20 条 = 1280 个 Redis 命令），纯属负收益。
+ *       <b>但爆款单帖的热点 slot CPU 是另一种瓶颈</b>：评审优化项③ 因此补了 opt-in 分槽形态
+ *       {@link ShardedLikeCountStore}，默认仍关闭，开启前须评估约 64 倍读放大。</li>
  *   <li><b>平滑迁移与对账</b>：计数 Key 缺失（历史数据 / Key 过期 / Redis 重建）时，
  *       {@link #likeCount(String)} 回退 64 槽 {@code SCARD} 求和并写回预热；
  *       {@link #recountFromSlots(String)} 提供显式对账入口，用去重集合（幂等权威）校正
@@ -146,6 +149,14 @@ public class MediaLikeService {
         this.notificationGenerator = notificationGenerator;
     }
 
+    /** 评审优化项③：热点计数分槽（opt-in，默认关）。单测直接 new 本类时为 null，按关闭处理。 */
+    @Autowired(required = false)
+    private ShardedLikeCountStore shardedCountStore;
+
+    private boolean isShardingEnabled() {
+        return shardedCountStore != null && shardedCountStore.isEnabled();
+    }
+
     /** 用户归属的槽号（与分片/计数桶同套散列，保证同一用户始终映射到同一槽）。 */
     private static int slotOf(long userId) {
         return Math.floorMod(Long.hashCode(userId), SLOT_COUNT);
@@ -206,7 +217,7 @@ public class MediaLikeService {
                         return true;
                     }
                     // A1：与去重集合同步维护计数 Key（读权威）；fail-open，失败仅告警
-                    bumpCount(postId, 1);
+                    bumpCount(postId, userId, 1);
                     publish(postId, userId, "LIKE");
                     // ① 通知内容作者（ADR-0009，fail-open 单点生成，绝不阻塞点赞主流程）
                     notifyLike(postId, userId);
@@ -228,7 +239,7 @@ public class MediaLikeService {
                 Long removed = redisTemplate.opsForSet().remove(key, uid);
                 if (removed != null && removed == 1L) {
                     // A1：与去重集合同步维护计数 Key（读权威）；fail-open，失败仅告警
-                    bumpCount(postId, -1);
+                    bumpCount(postId, userId, -1);
                     publish(postId, userId, "UNLIKE");
                     // ② 持久聚合底座（P1-2，opt-in）：实际取消赞才发 -1 增量
                     notifyCounter(postId, -1);
@@ -310,6 +321,10 @@ public class MediaLikeService {
      */
     public long likeCount(String postId) {
         try {
+            if (isShardingEnabled()) {
+                Long sharded = shardedCountStore.read(COUNT_KEY_PREFIX, postId);
+                return sharded == null ? 0L : sharded;
+            }
             String v = redisTemplate.opsForValue().get(countKey(postId));
             touchSlotTtls(postId);
             if (v != null) {
@@ -346,6 +361,10 @@ public class MediaLikeService {
         }
         List<String> ids = new ArrayList<>(postIds);
         try {
+            if (isShardingEnabled()) {
+                result.putAll(shardedCountStore.readMany(COUNT_KEY_PREFIX, ids));
+                return result;
+            }
             List<String> countKeys = new ArrayList<>(ids.size());
             for (String id : ids) {
                 countKeys.add(countKey(id));
@@ -422,6 +441,10 @@ public class MediaLikeService {
     public long recountFromSlots(String postId) {
         long slots = sumSlotCardinalities(postId);
         try {
+            if (isShardingEnabled()) {
+                shardedCountStore.recount(COUNT_KEY_PREFIX, postId, slots);
+                return slots;
+            }
             redisTemplate.opsForValue().set(countKey(postId), String.valueOf(slots), COUNT_TTL);
         } catch (Exception e) {
             log.warn("点赞计数对账写回失败: postId={}, {}", postId, e.getMessage());
@@ -452,7 +475,17 @@ public class MediaLikeService {
      * 因此 64 槽基数之和<b>就是</b>校正后的正确总数。写回用 {@code SETNX} 语义
      * （{@link #trySetCount}）：并发下若别的线程已初始化，则改为在其之上补一次 delta，不覆盖不丢增量。</p>
      */
-    private void bumpCount(String postId, int delta) {
+    private void bumpCount(String postId, long userId, int delta) {
+        if (isShardingEnabled()) {
+            try {
+                shardedCountStore.bump(COUNT_KEY_PREFIX, postId, userId, delta);
+                return;
+            } catch (Exception e) {
+                // 不退回单 Key：读路径走分槽，往旧单 Key 补一刀只会让两套增量叠加、回退时算错。
+                log.error("分槽点赞计数写失败（保留旧值，需对账）: postId={}, delta={}", postId, delta, e);
+                return;
+            }
+        }
         String key = countKey(postId);
         try {
             Long v = redisTemplate.execute(LikeCountScript.COUNT_BUMP, List.of(key),
@@ -529,7 +562,11 @@ public class MediaLikeService {
         if (userIds.isEmpty()) {
             // DB 无记录：清空 Redis 侧残留，避免"已取消的赞"因集合残留而复活
             try {
-                redisTemplate.delete(countKey(postId));
+                if (isShardingEnabled()) {
+                    shardedCountStore.recount(COUNT_KEY_PREFIX, postId, 0L);
+                } else {
+                    redisTemplate.delete(countKey(postId));
+                }
             } catch (Exception ignore) {
                 // 清理失败不影响返回
             }
@@ -549,7 +586,11 @@ public class MediaLikeService {
         }
         long count = userIds.size();
         try {
-            redisTemplate.opsForValue().set(countKey(postId), String.valueOf(count), COUNT_TTL);
+            if (isShardingEnabled()) {
+                shardedCountStore.recount(COUNT_KEY_PREFIX, postId, count);
+            } else {
+                redisTemplate.opsForValue().set(countKey(postId), String.valueOf(count), COUNT_TTL);
+            }
         } catch (Exception e) {
             log.warn("点赞计数 Key 重建写回失败: postId={}, {}", postId, e.getMessage());
         }

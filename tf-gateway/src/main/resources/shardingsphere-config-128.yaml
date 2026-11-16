@@ -91,6 +91,9 @@ dataSources:
 rules:
   # ===== 读写分离：逻辑 ds_0/ds_1 = 写主 + 读副本 =====
   # 部署侧需提供副本地址（TURBOFEED_REPLICA_DB_0_URL / _1_URL）；未提供则回落本机 3307 默认值。
+  # 评审优化项④：规则本身早已启用，生产「看起来没生效」的原因是部署侧没给真实副本 URL——
+  # deploy/compose/docker-compose.prod.yml 已把这两个变量参数化，默认值刻意指回主库 mysql:3306
+  # （读主、零回归），只有显式设置才分流到只读副本；见 docs/ops/comment-read-scaling.md。
   # transactional-read-query-strategy=PRIMARY：事务内读走主库，规避写后读复制延迟。
   - !READWRITE_SPLITTING
     # 5.5.3 正确写法：YamlReadwriteSplittingRuleConfiguration 认 dataSourceGroups（javap 实证，无 dataSources 字段）；

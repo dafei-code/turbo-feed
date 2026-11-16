@@ -95,6 +95,11 @@ public class OutboxService {
     public void deliverAfterCommit(long eventId) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             // 无事务（如测试直调）：退化成立即投递，保持语义可用。
+            // ⚠️ 但这条路径没有 afterCommit 屏障：若调用方本应在事务内却漏了 @Transactional，
+            // 事件会先于业务数据提交发出（幽灵消息），且投递失败后没有同事务的事件行兜底。
+            // PR-A：必须 WARN 且带 eventId，才能从日志反查是哪一次调用脱离了事务。
+            log.warn("发件箱无事务退化（立即投递，缺少 afterCommit 屏障，请核查调用方是否漏加 @Transactional）: eventId={}",
+                    eventId);
             tryDeliver(eventId);
             return;
         }

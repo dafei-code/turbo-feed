@@ -334,6 +334,17 @@ turbofeed:
       connect-timeout: 500ms
       read-timeout: 500ms
       topic: turbofeed-counter-incr                 # MQ 削峰 Topic（与 tf-counter CounterMqConsumer 共用）
+  # 评审优化项③：爆款帖计数 Key 分槽（默认关）。
+  # 打开后点赞/评论点赞的计数写按 userId 散到 64 个 Key，读用一次 pipeline 聚合；
+  # 代价是列表页命令数放大约 64 倍，仅热点 slot CPU 成为瓶颈时才开，见 docs/ops/hotspot-count-sharding.md。
+  like:
+    count-sharding-enabled: ${TURBOFEED_LIKE_COUNT_SHARDING_ENABLED:false}
+  # 评审优化项④：评论列表页短 TTL 缓存（默认关）。
+  # 只缓存 DB 行快照；点赞数/评论总数仍实时读 Redis，落库成功后按 generation 失效全部页。
+  # 发布 QPS 高的爆款帖会频繁推进 generation、拉低命中率，见 docs/ops/comment-read-scaling.md。
+  comment:
+    page-cache-enabled: ${TURBOFEED_COMMENT_PAGE_CACHE_ENABLED:false}
+    page-cache-ttl-ms: ${TURBOFEED_COMMENT_PAGE_CACHE_TTL_MS:2000}
   hotspot:
     window-seconds: 10          # 滑动窗口长度
     hot-threshold: 1000         # 热 Key 判定阈值（窗口内访问次数）

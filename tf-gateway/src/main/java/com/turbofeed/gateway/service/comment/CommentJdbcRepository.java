@@ -57,14 +57,32 @@ public class CommentJdbcRepository {
     }
 
     /**
-     * 幂等落库（MQ 消费者用）：{@code comment_id} 为主键，重复事件 {@code INSERT IGNORE} 静默跳过，
-     * 保证 RocketMQ at-least-once 投递下（网络重投/消费重试）同评论只落一次，不报错。
+     * 幂等落库（严格语义，评论落库唯一入口）：先按主键查存在 → 存在则跳过；不存在则普通 {@code INSERT}。
+     *
+     * <p><b>为什么废弃 INSERT IGNORE</b>：MySQL 的 {@code INSERT IGNORE} 会把超长 content、
+     * 非空约束、类型错误等<b>所有</b> SQL 错误一并降级成 warning，消费端即使上抛也拿不到异常，
+     * 表现为「评论计数 +1 但正文静默消失」。评论列表直接读 DB，缺行会导致列表缺条、
+     * Redis 总数与列表不一致、回复父评论 404，因此非主键错误必须可见。</p>
+     *
+     * <p><b>并发窗口</b>：两条重投事件同时查不到时都会 insert，其中一个抛
+     * {@link org.springframework.dao.DuplicateKeyException}——该异常是「已被并发写入」的确定性信号，
+     * 按已存在处理；其它异常一律上抛，交给 MQ 重试 / DLQ 或本地告警，绝不吞。</p>
+     *
+     * @return true = 本次真正插入；false = 已存在（重投 / 并发写入），无需重复写
      */
-    public void insertIgnore(Comment c) {
-        jdbcTemplate.update(
-                "INSERT IGNORE INTO comment (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                c.commentId(), c.mediaId(), c.userId(), c.rootId(), c.parentId(),
-                c.content(), c.status().code(), c.likeCount(), Timestamp.from(c.createdAt()));
+    public boolean insertIfAbsent(Comment c) {
+        List<Integer> existing = jdbcTemplate.query(
+                "SELECT 1 FROM comment WHERE comment_id = ? AND media_id = ? LIMIT 1",
+                (rs, rn) -> rs.getInt(1), c.commentId(), c.mediaId());
+        if (!existing.isEmpty()) {
+            return false;
+        }
+        try {
+            insert(c);
+            return true;
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            return false;
+        }
     }
 
     /**

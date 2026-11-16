@@ -112,6 +112,13 @@ public class CommentLikeService {
     @Autowired
     @Qualifier("interactionExecutor")
     private Executor interactionExecutor;
+    /** 评审优化项③：热点计数分槽（opt-in，默认关）。单测直接 new 本类时为 null，按关闭处理。 */
+    @Autowired(required = false)
+    private com.turbofeed.gateway.service.like.ShardedLikeCountStore shardedCountStore;
+
+    private boolean isShardingEnabled() {
+        return shardedCountStore != null && shardedCountStore.isEnabled();
+    }
 
     public CommentLikeService(StringRedisTemplate redisTemplate, CommentLikeJdbcRepository likeRepository,
                               SnowflakeIdGenerator snowflakeIdGenerator,
@@ -175,7 +182,7 @@ public class CommentLikeService {
                     return true;
                 }
                 // A2：与去重集合同步维护计数 Key（读权威）；fail-open，失败仅告警
-                bumpCount(String.valueOf(commentId), 1);
+                bumpCount(String.valueOf(commentId), userId, 1);
                 // 实际新增赞：通知 tf-counter 聚合底座（opt-in，fail-open）
                 notifyCounter(String.valueOf(commentId), 1);
                 // 异步落库（灾备），主链路不阻塞 DB 写
@@ -193,7 +200,7 @@ public class CommentLikeService {
             Long removed = redisTemplate.opsForSet().remove(key, uid);
             if (removed != null && removed == 1L) {
                 // A2：与去重集合同步维护计数 Key（读权威）；fail-open，失败仅告警
-                bumpCount(String.valueOf(commentId), -1);
+                bumpCount(String.valueOf(commentId), userId, -1);
                 notifyCounter(String.valueOf(commentId), -1);
                 interactionExecutor.execute(() -> {
                     try {
@@ -231,6 +238,10 @@ public class CommentLikeService {
      */
     public long likeCount(String commentId) {
         try {
+            if (isShardingEnabled()) {
+                Long sharded = shardedCountStore.read(COUNT_KEY_PREFIX, commentId);
+                return sharded == null ? 0L : sharded;
+            }
             String v = redisTemplate.opsForValue().get(countKey(commentId));
             touchSlotTtls(commentId);
             if (v != null) {
@@ -268,6 +279,18 @@ public class CommentLikeService {
         }
         List<Long> ids = new ArrayList<>(commentIds);
         try {
+            if (isShardingEnabled()) {
+                List<String> strIds = new ArrayList<>(ids.size());
+                for (Long cid : ids) {
+                    strIds.add(String.valueOf(cid));
+                }
+                Map<String, Long> sharded = shardedCountStore.readMany(COUNT_KEY_PREFIX, strIds);
+                for (Long cid : ids) {
+                    Long v = sharded.get(String.valueOf(cid));
+                    result.put(cid, v == null ? 0L : v);
+                }
+                return result;
+            }
             List<String> countKeys = new ArrayList<>(ids.size());
             for (Long cid : ids) {
                 countKeys.add(countKey(String.valueOf(cid)));
@@ -341,6 +364,10 @@ public class CommentLikeService {
     public long recountFromSlots(String commentId) {
         long slots = sumSlotCardinalities(commentId);
         try {
+            if (isShardingEnabled()) {
+                shardedCountStore.recount(COUNT_KEY_PREFIX, commentId, slots);
+                return slots;
+            }
             redisTemplate.opsForValue().set(countKey(commentId), String.valueOf(slots), COUNT_TTL);
         } catch (Exception e) {
             log.warn("评论点赞计数对账写回失败: commentId={}, {}", commentId, e.getMessage());
@@ -365,7 +392,11 @@ public class CommentLikeService {
         if (userIds.isEmpty()) {
             // DB 无记录：清掉计数 Key，避免"已取消的赞"因残留而虚高
             try {
-                redisTemplate.delete(countKey(cid));
+                if (isShardingEnabled()) {
+                    shardedCountStore.recount(COUNT_KEY_PREFIX, cid, 0L);
+                } else {
+                    redisTemplate.delete(countKey(cid));
+                }
             } catch (Exception ignore) {
                 // 清理失败不影响返回
             }
@@ -385,7 +416,11 @@ public class CommentLikeService {
         }
         long count = userIds.size();
         try {
-            redisTemplate.opsForValue().set(countKey(cid), String.valueOf(count), COUNT_TTL);
+            if (isShardingEnabled()) {
+                shardedCountStore.recount(COUNT_KEY_PREFIX, cid, count);
+            } else {
+                redisTemplate.opsForValue().set(countKey(cid), String.valueOf(count), COUNT_TTL);
+            }
         } catch (Exception e) {
             log.warn("评论点赞计数 Key 重建写回失败: commentId={}, {}", commentId, e.getMessage());
         }
@@ -410,7 +445,16 @@ public class CommentLikeService {
      * 脚本内 {@code EXISTS} + {@code INCRBY} 原子执行，精确区分「Key 原本不存在」与
      * 「计数恰好等于 delta」，避免用免脚本写法（返回值 == delta）误报而白跑一次 64 槽聚合。</p>
      */
-    private void bumpCount(String commentId, int delta) {
+    private void bumpCount(String commentId, long userId, int delta) {
+        if (isShardingEnabled()) {
+            try {
+                shardedCountStore.bump(COUNT_KEY_PREFIX, commentId, userId, delta);
+                return;
+            } catch (Exception e) {
+                log.error("分槽评论点赞计数写失败（保留旧值，需对账）: commentId={}, delta={}", commentId, delta, e);
+                return;
+            }
+        }
         String key = countKey(commentId);
         try {
             Long v = redisTemplate.execute(LikeCountScript.COUNT_BUMP, List.of(key),

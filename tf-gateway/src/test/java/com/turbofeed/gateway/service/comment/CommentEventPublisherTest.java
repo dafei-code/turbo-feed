@@ -8,6 +8,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 
 import java.time.Instant;
@@ -19,19 +20,22 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * 评论落库发布器单元测（纯 Mockito，无 MQ / Redis / Spring 上下文依赖）。
  *
  * <ul>
- *   <li>{@link LocalCommentEventPublisher}：默认分支，经 interactionExecutor 异步刷盘。</li>
- *   <li>{@link RocketMqCommentEventPublisher}：opt-in 分支，顺序投递；发送异常 fail-open 不向上抛。</li>
- *   <li>{@link CommentPersistConsumer}：消费端幂等落库（INSERT IGNORE）。</li>
+ *   <li>{@link LocalCommentEventPublisher}：默认分支，经 interactionExecutor 走严格幂等落库。</li>
+ *   <li>{@link RocketMqCommentEventPublisher}：opt-in 分支顺序投递；发送异常不丢正文，转本地幂等兜底。</li>
+ *   <li>{@link CommentPersistConsumer}：消费端严格幂等落库；DB 失败上抛以触发 MQ 重试 / DLQ。</li>
  *   <li>{@link CommentCreatedEvent}：from/toComment 双向无损（避开 Instant 序列化坑）。</li>
  * </ul>
  */
@@ -42,21 +46,36 @@ class CommentEventPublisherTest {
     CommentJdbcRepository commentRepository;
     @Mock
     RocketMQTemplate rocketMQTemplate;
+    @Mock
+    CommentPageCache pageCache;
 
     /** 同步执行器：让 Local 分支的 fire-and-forget 变为可立即断言。 */
     private final Executor syncExecutor = Runnable::run;
 
+    private RocketMqCommentEventPublisher mqPublisher() {
+        return new RocketMqCommentEventPublisher(rocketMQTemplate, commentRepository, syncExecutor);
+    }
+
     @Test
-    void localPublisher_insertsViaExecutor() {
+    void localPublisher_insertsViaIdempotentPath() {
         LocalCommentEventPublisher publisher = new LocalCommentEventPublisher(commentRepository, syncExecutor);
         Comment c = sample();
         publisher.publish(c);
-        verify(commentRepository).insert(c);
+        verify(commentRepository).insertIfAbsent(c);
+    }
+
+    @Test
+    void localPublisher_swallowsDbFailureButKeepsPublishingFlow() {
+        when(commentRepository.insertIfAbsent(any(Comment.class)))
+                .thenThrow(new DataAccessResourceFailureException("db down"));
+        LocalCommentEventPublisher publisher = new LocalCommentEventPublisher(commentRepository, syncExecutor);
+        // 主流程 fail-open 仍成立（不能把 500 抛回发布请求），但日志已升级为 ERROR，见实现类
+        assertDoesNotThrow(() -> publisher.publish(sample()));
     }
 
     @Test
     void mqPublisher_sendsOrderlyWithMediaIdShardingKey() {
-        RocketMqCommentEventPublisher publisher = new RocketMqCommentEventPublisher(rocketMQTemplate);
+        RocketMqCommentEventPublisher publisher = mqPublisher();
         Comment c = sample();
         AtomicReference<CommentCreatedEvent> captured = new AtomicReference<>();
         // any(CommentCreatedEvent.class) 显式绑定 T=CommentCreatedEvent（具体类型），唯一命中
@@ -74,25 +93,105 @@ class CommentEventPublisherTest {
     }
 
     @Test
-    void mqPublisher_failOpen_onSendException() {
-        // RocketMQTemplate 抛异常时 publish 必须吞掉，不向上抛（保证发布主流程不受影响）
+    void mqPublisher_fallsBackToLocalIdempotentPersist_onSendException() {
+        // 发送失败不再只 WARN 就丢：broker 抖动/超时时正文必须仍有机会进 DB
         doThrow(new RuntimeException("broker down"))
                 .when(rocketMQTemplate).syncSendOrderly(anyString(), any(CommentCreatedEvent.class), anyString());
-        RocketMqCommentEventPublisher publisher = new RocketMqCommentEventPublisher(rocketMQTemplate);
-        assertDoesNotThrow(() -> publisher.publish(sample()));
+        Comment c = sample();
+        assertDoesNotThrow(() -> mqPublisher().publish(c));
+        verify(commentRepository).insertIfAbsent(c);
     }
 
     @Test
-    void consumer_insertsIgnoreEvent() {
+    void mqPublisher_doesNotPersistLocally_whenSendSucceeds() {
+        doAnswer(inv -> null)
+                .when(rocketMQTemplate).syncSendOrderly(anyString(), any(CommentCreatedEvent.class), anyString());
+        mqPublisher().publish(sample());
+        verify(commentRepository, never()).insertIfAbsent(any(Comment.class));
+    }
+
+    @Test
+    void consumer_insertsViaIdempotentPath() {
         CommentPersistConsumer consumer = new CommentPersistConsumer(commentRepository);
         Comment c = sample();
         consumer.onMessage(CommentCreatedEvent.from(c));
         ArgumentCaptor<Comment> cap = ArgumentCaptor.forClass(Comment.class);
-        verify(commentRepository).insertIgnore(cap.capture());
+        verify(commentRepository).insertIfAbsent(cap.capture());
         Comment persisted = cap.getValue();
         assertEquals(c.commentId(), persisted.commentId());
         assertEquals(c.mediaId(), persisted.mediaId());
         assertEquals(c.status(), persisted.status());
+    }
+
+    @Test
+    void consumer_rethrowsOnDbFailure_toTriggerMqRetry() {
+        // strict 消费：异常必须上抛，spring-rocketmq 才会返回 RECONSUME_LATER；吞掉就等于 ack 丢消息
+        when(commentRepository.insertIfAbsent(any(Comment.class)))
+                .thenThrow(new DataAccessResourceFailureException("db down"));
+        CommentPersistConsumer consumer = new CommentPersistConsumer(commentRepository);
+        assertThrows(IllegalStateException.class,
+                () -> consumer.onMessage(CommentCreatedEvent.from(sample())));
+    }
+
+    @Test
+    void consumer_rejectsNullEvent() {
+        CommentPersistConsumer consumer = new CommentPersistConsumer(commentRepository);
+        assertThrows(IllegalStateException.class, () -> consumer.onMessage(null));
+    }
+
+    // ===== 优化项④：失效必须挂在「落库成功之后」，且绝不影响 ack 语义 =====
+
+    @Test
+    void localPublisher_evictsPageCache_onlyAfterSuccessfulInsert() {
+        when(commentRepository.insertIfAbsent(any(Comment.class))).thenReturn(true);
+        LocalCommentEventPublisher publisher =
+                new LocalCommentEventPublisher(commentRepository, syncExecutor, pageCache);
+        publisher.publish(sample());
+        verify(pageCache).evict("m1");
+    }
+
+    @Test
+    void localPublisher_doesNotEvict_onDuplicateOrDbFailure() {
+        LocalCommentEventPublisher publisher =
+                new LocalCommentEventPublisher(commentRepository, syncExecutor, pageCache);
+        when(commentRepository.insertIfAbsent(any(Comment.class))).thenReturn(false);
+        publisher.publish(sample());
+        when(commentRepository.insertIfAbsent(any(Comment.class)))
+                .thenThrow(new DataAccessResourceFailureException("db down"));
+        assertDoesNotThrow(() -> publisher.publish(sample()));
+        verify(pageCache, never()).evict(anyString());
+    }
+
+    @Test
+    void mqPublisher_fallbackPersist_evictsPageCacheAfterInsert() {
+        doThrow(new RuntimeException("broker down"))
+                .when(rocketMQTemplate).syncSendOrderly(anyString(), any(CommentCreatedEvent.class), anyString());
+        when(commentRepository.insertIfAbsent(any(Comment.class))).thenReturn(true);
+        RocketMqCommentEventPublisher publisher = new RocketMqCommentEventPublisher(
+                rocketMQTemplate, commentRepository, syncExecutor, pageCache);
+        publisher.publish(sample());
+        verify(pageCache).evict("m1");
+    }
+
+    @Test
+    void consumer_evictsPageCacheAfterInsert_butNotOnDuplicate() {
+        CommentPersistConsumer consumer = new CommentPersistConsumer(commentRepository, pageCache);
+        when(commentRepository.insertIfAbsent(any(Comment.class))).thenReturn(true);
+        consumer.onMessage(CommentCreatedEvent.from(sample()));
+        verify(pageCache).evict("m1");
+
+        when(commentRepository.insertIfAbsent(any(Comment.class))).thenReturn(false);
+        consumer.onMessage(CommentCreatedEvent.from(sample()));
+        verify(pageCache, org.mockito.Mockito.times(1)).evict(anyString());
+    }
+
+    @Test
+    void consumer_cacheEvictFailure_neverTriggersMqRetry() {
+        when(commentRepository.insertIfAbsent(any(Comment.class))).thenReturn(true);
+        doThrow(new RuntimeException("redis down")).when(pageCache).evict(anyString());
+        CommentPersistConsumer consumer = new CommentPersistConsumer(commentRepository, pageCache);
+        // 缓存是旁路增强：即使 evict 抛异常，也不能上抛成 RECONSUME_LATER 造成重复落库
+        assertDoesNotThrow(() -> consumer.onMessage(CommentCreatedEvent.from(sample())));
     }
 
     @Test

@@ -46,6 +46,12 @@ public final class FeatureFlagKeys {
     public static final String COUNTER_SERVICE_ENABLED = "turbofeed.counter.service.enabled";
     public static final String COUNTER_SERVICE_TOPIC = "turbofeed.counter.service.topic";
 
+    // ===== 热点帖计数 Key 分槽（评审优化项③，默认关闭；开启后读放大 64 倍）=====
+    public static final String LIKE_COUNT_SHARDING_ENABLED = "turbofeed.like.count-sharding-enabled";
+
+    // ===== 评论列表页短 TTL 缓存（评审优化项④，默认关闭；落库成功后按 generation 失效）=====
+    public static final String COMMENT_PAGE_CACHE_ENABLED = "turbofeed.comment.page-cache-enabled";
+
     // ===== 媒资存储（minio / local / placeholder）=====
     public static final String MEDIA_STORAGE = "turbofeed.media.storage";
 
