@@ -211,8 +211,41 @@ class RecommendedFeedServiceTest {
         FeedRecommendedPage page = service().recommendedPage(0, 20, "1001", null);
 
         assertEquals("", page.nextCursor(), "页码模式不产出游标");
-        assertFalse(page.hasMore(), "1 条 < limit 20 → 无更多");
-        // 页码模式的缓存 Key 不应混入 :cursor: 维度（与游标模式隔离）
-        verify(valueOps).set(argThat(k -> !k.contains(":cursor:")), anyString(), any());
+        assertFalse(page.hasMore(), "下一页无新内容 → 无更多（本页不满也可能有更多，见新增用例）");
+        // 页码模式的缓存 Key 不应混入 :cursor: 维度（与游标模式隔离）；
+        // hasMore 探测会用 recommended(page+1) 再写一次缓存，故这里是 2 次。
+        verify(valueOps, times(2)).set(argThat(k -> !k.contains(":cursor:")), anyString(), any());
+    }
+
+    // ===== G9 封顶后的 hasMore：本页不满不等于无更多 =====
+
+    @Test
+    void recommendedPage_pageMode_hasMoreWhenNextPageHasDistinctContent() {
+        stubValueOps();
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(valueOps.get("tf:feed:rec:version")).thenReturn("12");
+        when(feedTimelineStore.readPage(eq("1001"), eq(0), eq(20)))
+                .thenReturn(List.of(rec(item("post/1/a"))));
+        when(feedTimelineStore.readPage(eq("1001"), eq(1), eq(20)))
+                .thenReturn(List.of(rec(item("post/1/b"))));
+
+        FeedRecommendedPage page = service().recommendedPage(0, 20, "1001", null);
+
+        assertTrue(page.hasMore(), "G9 把本页裁到 1 条但下一页有新内容时，hasMore 必须为 true");
+    }
+
+    @Test
+    void recommendedPage_pageMode_noMoreWhenNextPageOnlyRepeats() {
+        stubValueOps();
+        when(valueOps.get(anyString())).thenReturn(null);
+        when(valueOps.get("tf:feed:rec:version")).thenReturn("13");
+        when(feedTimelineStore.readPage(eq("1001"), eq(0), eq(20)))
+                .thenReturn(List.of(rec(item("post/1/a"))));
+        when(feedTimelineStore.readPage(eq("1001"), eq(1), eq(20)))
+                .thenReturn(List.of(rec(item("post/1/a"))));
+
+        FeedRecommendedPage page = service().recommendedPage(0, 20, "1001", null);
+
+        assertFalse(page.hasMore(), "下一页若只有本页已有内容，hasMore 必须为 false，避免前端无限续拉");
     }
 }

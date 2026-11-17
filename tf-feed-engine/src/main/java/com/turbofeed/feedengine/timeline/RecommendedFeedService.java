@@ -10,7 +10,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 公域推荐流读取服务：时间线读取 + 短 TTL 旁路缓存。
@@ -169,9 +171,11 @@ public class RecommendedFeedService {
     public FeedRecommendedPage recommendedPage(int page, int size, String userId, FeedCursor cursor) {
         int limit = size <= 0 ? 20 : size;
         if (cursor == null) {
-            // 页码模式：复用既有分页 + 缓存（键含页码），不产出游标
+            // 页码模式：复用既有分页 + 缓存（键含页码），不产出游标。
+            // hasMore 不能再用 items.size()==limit：G9 作者封顶会把整页裁到 3 条，
+            // 但后面仍有候选；改判「下一页是否出现本页没有的内容」，避免前端提前停止续拉。
             List<RecommendedItem> items = recommended(page, limit, userId);
-            return new FeedRecommendedPage(items, "", items.size() == limit, page);
+            return new FeedRecommendedPage(items, "", hasDistinctNextPage(page, limit, userId, items), page);
         }
         // 游标模式：本页绝对翻页序号由游标 depth 携带（首页 depth=0，逐页 +1），供曝光特征定位
         int depth = cursor.depth();
@@ -191,7 +195,7 @@ public class RecommendedFeedService {
             try {
                 String cached = redisTemplate.opsForValue().get(key);
                 if (cached != null) {
-                    return wrapWithCursor(ItemViewCodec.parseListRecommended(objectMapper, cached), limit, depth);
+                    return wrapWithCursor(ItemViewCodec.parseListRecommended(objectMapper, cached), limit, depth, userId);
                 }
             } catch (Exception e) {
                 log.warn("推荐流游标缓存读取失败，回落实时读: key={}, {}", key, e.getMessage());
@@ -205,11 +209,11 @@ public class RecommendedFeedService {
                 log.warn("推荐流游标缓存写入失败（不影响本次读取）: key={}, {}", key, e.getMessage());
             }
         }
-        return wrapWithCursor(fresh, limit, depth);
+        return wrapWithCursor(fresh, limit, depth, userId);
     }
 
     /** 包一页内容为 {@link FeedRecommendedPage}，并据末条的入流 score 计算 {@code nextCursor}（depth+1）。 */
-    private FeedRecommendedPage wrapWithCursor(List<RecommendedItem> items, int limit, int page) {
+    private FeedRecommendedPage wrapWithCursor(List<RecommendedItem> items, int limit, int page, String userId) {
         if (items == null) {
             items = List.of();
         }
@@ -222,8 +226,58 @@ public class RecommendedFeedService {
                 next = FeedCursor.of(s, last.item().timelineKey(), page + 1).encode();
             }
         }
-        boolean hasMore = items.size() == limit;
+        boolean hasMore = hasDistinctNextCursor(userId, limit, next, items);
         return new FeedRecommendedPage(items, next, hasMore, page);
+    }
+
+    /**
+     * 页码模式 hasMore：看下一页是否出现本页没有的内容，而非本页是否被 limit 填满。
+     *
+     * <p>G9 生态调控按作者封顶后，本页可能只有 3 条（limit=20），但下一页仍有不同候选；
+     * 仅用 {@code items.size()==limit} 会让前端提前停止续拉。这里复用 {@link #recommended} 的
+     * 缓存路径探测下一页，探测失败按「无更多」保守处理（fail-open 不阻断当前页）。</p>
+     */
+    private boolean hasDistinctNextPage(int page, int limit, String userId, List<RecommendedItem> current) {
+        try {
+            return hasDistinctItems(current, recommended(page + 1, limit, userId));
+        } catch (Exception e) {
+            log.warn("页码模式探测下一页失败，hasMore 置 false: page={}, {}", page, e.getMessage());
+            return false;
+        }
+    }
+
+    /** 游标模式 hasMore：用已算出的 nextCursor 读下一页，判断是否含本页没有的内容。 */
+    private boolean hasDistinctNextCursor(String userId, int limit, String nextCursor, List<RecommendedItem> current) {
+        if (nextCursor == null || nextCursor.isBlank()) {
+            return false;
+        }
+        try {
+            return hasDistinctItems(current,
+                    feedTimelineStore.readPage(userId, limit, FeedCursor.decode(nextCursor)));
+        } catch (Exception e) {
+            log.warn("游标模式探测下一页失败，hasMore 置 false: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /** 两页是否出现不同 timelineKey；空页 / 空 key 一律不计为「更多」。 */
+    private static boolean hasDistinctItems(List<RecommendedItem> current, List<RecommendedItem> next) {
+        if (current == null || current.isEmpty() || next == null || next.isEmpty()) {
+            return false;
+        }
+        Set<String> seen = new HashSet<>();
+        for (RecommendedItem it : current) {
+            if (it != null && it.item() != null && it.item().timelineKey() != null) {
+                seen.add(it.item().timelineKey());
+            }
+        }
+        for (RecommendedItem it : next) {
+            if (it != null && it.item() != null && it.item().timelineKey() != null
+                    && !seen.contains(it.item().timelineKey())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

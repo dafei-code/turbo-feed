@@ -60,6 +60,7 @@
     cursor: pointer;
     transition: .15s;
     position: relative;
+    text-decoration: none;
   }
   .nav-item:hover { background: rgba(255,255,255,.06); color: #fff; }
   .nav-item.active {
@@ -708,6 +709,12 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" data-page-node-id="lqbICZtJQIBDvCQB1yjqad"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" data-page-node-id="HIcvuH5BDApQO0g9pteCE9"/><circle cx="12" cy="7" r="4" data-page-node-id="SvpxNqsNqAN9SoHrjRiNvo"/></svg>
       我的
     </div>
+
+    <!-- 与创作者中心互跳：保留 feed 内置「我的」Tab，另外提供独立页面入口。 -->
+    <a href="user.html" class="nav-item" title="打开创作者中心">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+      创作者中心
+    </a>
   </aside>
 
   <!-- 主内容 -->
@@ -759,7 +766,7 @@
 
       <!-- 视频信息浮层 -->
       <div class="info-layer" id="infoLayer" data-page-node-id="EHW8vstHAzPqCTNpTH6Pyb">
-        <div class="author" data-page-node-id="uA45ks1QCC4dgNb5zZM42e">@<span id="infoAuthor" data-page-node-id="An6lqVZNmWry4uv0X5UdVk">forza_horizon</span> <span class="tag" data-page-node-id="UUDNFAwo8ACOovMMzROeaU">置顶</span></div>
+        <div class="author" data-page-node-id="uA45ks1QCC4dgNb5zZM42e">@<span id="infoAuthor" data-page-node-id="An6lqVZNmWry4uv0X5UdVk">forza_horizon</span> <span class="tag" id="infoPinned" data-page-node-id="UUDNFAwo8ACOovMMzROeaU" style="display:none">置顶</span></div>
         <div class="desc" id="infoDesc" data-page-node-id="mSuy1LwG3vWPuVz4oZu5B0">《极限竞速：地平线 6》实机首曝！这一代开放世界有多大？ #地平线6 #赛车游戏 #Xbox</div>
         <div class="music" data-page-node-id="fwyHxb51kP1LkqPozaaC1G">
           <div class="disc" data-page-node-id="evDtTGMHdjxcRUSM2kqcsQ"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" data-page-node-id="WcAM3uUAVGemsqm3dkR3a8"><circle cx="12" cy="12" r="6" data-page-node-id="lMH1t1EqiRTda545vTe731"/></svg></div>
@@ -827,11 +834,14 @@
   function mapItem(i) {
     var images = (i.images && i.images.length) ? i.images.slice() : (i.url ? [i.url] : []);
     var statusText = STATUS_TEXT[i.status] || '';
+    // 「我的」Tab 用当前登录手机号展示作者，不再从 mediaId 反推（那会得到发布者 uid 尾号，
+    // 切换账号/空列表残留时极易显示成「用户0000」这种误导文案）。
+    var mineUser = localStorage.getItem('turbofeed:user') || '我';
     return {
       postId: i.postId,
       mediaId: i.mediaId,                                  // 评论/点赞接口以 mediaId 为分片键，必须保留
       id: i.postId || i.mediaId,
-      author: (currentTab === 'mine') ? '我' : authorOf(i),
+      author: (currentTab === 'mine') ? mineUser : authorOf(i),
       statusText: statusText,
       title: (i.mediaId || '').split('/').pop(),
       desc: i.caption || '',
@@ -1095,6 +1105,8 @@
       feedList.innerHTML = mine
         ? '<div style="padding:40px;text-align:center;color:#8b98ab">你还没有上传过内容，去「上传」页发一条吧</div>'
         : '<div style="padding:40px;text-align:center;color:#8b98ab">公域暂无已通过审核的内容<br><span style="font-size:12px">（若库里已有 APPROVED 内容，多半是 feed-engine 未启动或时间线未补投）</span></div>';
+      // 空列表时隐藏上一屏残留的作者信息/互动栏，避免「说没内容但还显示旧帖」。
+      updateInfo(0);
       return;
     }
 
@@ -1170,6 +1182,19 @@
   // ========== 视图更新 ==========
   function updateInfo(idx) {
     const v = videos[idx];
+    const infoLayer = document.getElementById('infoLayer');
+    const actions = document.getElementById('actions');
+    const pinned = document.getElementById('infoPinned');
+    // 接口返回前 videos 还是空数组，底部初始化 / 空态重绘都会以 idx=0 调进来。
+    // 以前这里直接读 v.images 抛 TypeError，后续绑定全被中断；现在隐藏残留视图后安全返回。
+    if (!v) {
+      if (infoLayer) infoLayer.style.display = 'none';
+      if (actions) actions.style.display = 'none';
+      return;
+    }
+    if (infoLayer) infoLayer.style.display = '';
+    if (actions) actions.style.display = '';
+    if (pinned) pinned.style.display = 'none';  // 契约无 pinned 字段，静态「置顶」一律不展示
     const imageCount = (v.images && v.images.length) || 1;
     const desc = (v.desc && v.desc.trim()) ? v.desc : v.title;
     document.getElementById('infoAuthor').textContent = v.author;
@@ -1234,9 +1259,12 @@
 
   // ========== 滚动切换 ==========
   function gotoVideo(idx) {
+    if (!videos.length) return;   // 空列表时 ArrowDown/Up 不应继续操作不存在的卡片
     if (idx < 0) idx = 0;
     if (idx >= videos.length) idx = videos.length - 1;
-    feedList.children[idx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    var target = feedList.children[idx];
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     currentIdx = idx;
     updateInfo(idx);
     setPlay(idx, true);
@@ -1819,9 +1847,8 @@
     if (e.key === 'ArrowUp') { e.preventDefault(); gotoVideo(currentIdx - 1); }
   });
 
-  // 初始化
-  updateInfo(0);
-  setPlay(0, true);
+  // 初始化：接口尚未返回时 videos 为空，交由 renderFeed() 在拿到数据后统一初始化视图。
+  // 这里不再无条件 updateInfo(0)，否则会读 undefined.images 抛错并中断后续脚本。
 </script>
 
 </body>

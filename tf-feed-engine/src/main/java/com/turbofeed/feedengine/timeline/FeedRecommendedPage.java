@@ -15,6 +15,9 @@ import java.util.List;
  * {@link #page()} 为本页的<b>绝对翻页序号</b>（0 起，keyset 模式下由游标 depth 续传累加），
  * 供曝光特征（A1 训练样本）定位"第几页"——否则所有续拉页会被记成第 0 页。</p>
  *
+ * <p><b>{@link #hasMore()} 口径</b>：表示「下一页是否出现本页没有的内容」，不是「本页是否填满 limit」。
+ * G9 生态调控会把同作者内容裁到 3 条，若仍按条数判断会让前端提前停止续拉。</p>
+ *
  * <p><b>P0-1a 召回归因</b>：{@link #items()} 的元素是 {@link RecommendedItem}（{@code FeedItemView}
  * + {@code recallChannel} + {@code poolLevel}），而非裸 {@code FeedItemView}——归因只走引擎→网关响应，
  * 不进 Redis 时间线成员串（避免污染长存数据，见 {@code RecommendedItem} 类注释）。</p>
