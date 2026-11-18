@@ -723,8 +723,8 @@
       <div data-page-node-id="0QFRUwVRrNz3IYuQWHQn1s"></div>
       <div class="search" data-page-node-id="1iG7HLSrFmJEWeemiG0Mo2">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#888" stroke-width="2" data-page-node-id="PKeWldaWIFF5iD6Tu0ERTM"><circle cx="11" cy="11" r="8" data-page-node-id="CxCDs84wgznmgXxpzFSqa3"/><line x1="21" y1="21" x2="16.65" y2="16.65" data-page-node-id="cQnqlLfAOrZYxvbdvYMMeH"/></svg>
-        <input type="text" placeholder="搜索你感兴趣的内容" data-page-node-id="s5jhVkWHVULRCrQZKcLexm">
-        <button data-page-node-id="SipDxS3qrwHOcJDYqXrylY">搜索</button>
+        <input type="text" id="feedSearchInput" placeholder="搜索你感兴趣的内容" data-page-node-id="s5jhVkWHVULRCrQZKcLexm">
+        <button id="feedSearchBtn" data-page-node-id="SipDxS3qrwHOcJDYqXrylY">搜索</button>
       </div>
       <div class="header-right" data-page-node-id="nkPsMe2hcZDF0j4jMMEI9p">
         <div class="h-icon" id="btnNotify" style="position:relative;cursor:pointer" data-page-node-id="tEVVjK4KAxEFKgwt8iFzFL"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" data-page-node-id="fN3cPmexdm0J5QPzf6vbdp"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" data-page-node-id="12LF0SZGXY20lgmS6yOLxN"/><path d="M13.73 21a2 2 0 0 1-3.46 0" data-page-node-id="gp5IFcoYmum0yvcwd5bUfL"/></svg>通知<span class="badge" id="notifyBadge" style="display:none"></span></div>
@@ -824,6 +824,22 @@
 </ul>
 
 <script>
+  // ========== 搜索入口：跳到独立搜索页（search.html），带上当前输入词 ==========
+  // 之前搜索框是纯静态摆设（无 id、无事件），点按钮无任何反应；后端 /api/v1/search/*
+  // 五个接口早已落地（S1-S4），这里只补上前端入口。搜索页自己调真实接口。
+  (function bindSearchEntry() {
+    var input = document.getElementById('feedSearchInput');
+    var btn = document.getElementById('feedSearchBtn');
+    function go() {
+      var q = (input && input.value || '').trim();
+      location.href = 'search.html' + (q ? ('?q=' + encodeURIComponent(q)) : '');
+    }
+    if (btn) btn.addEventListener('click', go);
+    if (input) input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') go();
+    });
+  })();
+
   // ========== 真实内容数据（来自后端 /api/v1/feed/recommended，仅返回 APPROVED） ==========
   // 说明：P1.5 起公域推荐流与「个人中心 /api/v1/media/mine」解耦，feed 走独立接口；
   // 后端已只返回 APPROVED，前端无需再内存过滤。演示阶段推荐接口返回当前 APPROVED 内容。

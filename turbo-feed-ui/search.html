@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TurboFeed · 搜索</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #2d3646;
+    --text: #e6edf3;
+    --text-dim: #8b98ab;
+    --brand: #ff4d5e;
+    --brand-2: #ff7a45;
+    --accent: #3d7eff;
+  }
+  html, body { height: 100%; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow-y: auto;
+  }
+  /* ===== 顶部搜索栏（固定） ===== */
+  .topbar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: 12px;
+    height: 64px; padding: 0 24px;
+    background: rgba(13,17,23,.96);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(8px);
+  }
+  .back-btn {
+    display: flex; align-items: center; gap: 6px;
+    background: none; border: none; color: var(--text-dim);
+    font-size: 14px; cursor: pointer; padding: 8px;
+    border-radius: 8px; white-space: nowrap;
+  }
+  .back-btn:hover { background: rgba(255,255,255,.06); color: #fff; }
+  .search-wrap { position: relative; flex: 1; max-width: 640px; }
+  .search-box {
+    display: flex; align-items: center; gap: 10px;
+    height: 42px; padding: 0 16px;
+    background: rgba(255,255,255,.08);
+    border: 1px solid transparent;
+    border-radius: 22px; transition: .2s;
+  }
+  .search-box:focus-within {
+    background: rgba(255,255,255,.12);
+    border-color: var(--brand);
+  }
+  .search-box input {
+    flex: 1; background: none; border: none; outline: none;
+    color: #fff; font-size: 15px;
+  }
+  .search-box input::placeholder { color: #777; }
+  .search-box .clear {
+    background: none; border: none; color: #888; cursor: pointer;
+    font-size: 18px; line-height: 1; display: none;
+  }
+  .search-box .clear:hover { color: #fff; }
+  .search-btn {
+    height: 42px; padding: 0 22px;
+    background: linear-gradient(90deg, var(--brand), var(--brand-2));
+    color: #fff; border: none; border-radius: 22px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .search-btn:hover { filter: brightness(1.1); }
+  /* 联想下拉 */
+  .suggest {
+    position: absolute; top: 48px; left: 0; right: 0;
+    background: #1c2230; border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden; display: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  }
+  .suggest.open { display: block; }
+  .suggest-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 16px; cursor: pointer; font-size: 14px;
+    color: var(--text); border-bottom: 1px solid rgba(255,255,255,.04);
+  }
+  .suggest-item:last-child { border-bottom: none; }
+  .suggest-item:hover { background: rgba(255,255,255,.06); }
+  .suggest-item .type-tag {
+    font-size: 11px; color: var(--text-dim);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 1px 6px; flex-shrink: 0;
+  }
+  .suggest-empty { padding: 14px 16px; color: var(--text-dim); font-size: 13px; }
+  /* ===== 内容区 ===== */
+  .container { max-width: 1100px; margin: 0 auto; padding: 28px 24px 60px; }
+  .section-title {
+    font-size: 16px; font-weight: 700; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-title .flame { color: var(--brand-2); }
+  /* 热搜榜 */
+  .hot-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 40px; }
+  .hot-item {
+    display: flex; align-items: center; gap: 14px;
+    padding: 11px 10px; border-radius: 8px; cursor: pointer;
+    transition: background .15s;
+  }
+  .hot-item:hover { background: rgba(255,255,255,.05); }
+  .hot-rank {
+    width: 22px; text-align: center; font-weight: 800; font-size: 15px;
+    color: var(--text-dim); flex-shrink: 0;
+  }
+  .hot-rank.top { color: var(--brand); }
+  .hot-rank.top2 { color: var(--brand-2); }
+  .hot-word { flex: 1; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hot-heat { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+  .empty-hint {
+    color: var(--text-dim); font-size: 14px;
+    padding: 40px 0; text-align: center; line-height: 1.8;
+  }
+  /* 结果 Tab */
+  .tabs {
+    display: flex; gap: 28px; border-bottom: 1px solid var(--border);
+    margin-bottom: 22px;
+  }
+  .tab {
+    padding: 0 2px 12px; font-size: 15px; color: var(--text-dim);
+    cursor: pointer; position: relative; background: none; border: none;
+  }
+  .tab.active { color: #fff; font-weight: 700; }
+  .tab.active::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: -1px;
+    height: 3px; background: var(--brand); border-radius: 3px;
+  }
+  .result-meta { color: var(--text-dim); font-size: 13px; margin-bottom: 16px; }
+  /* 视频卡片网格 */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 18px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden; cursor: pointer;
+    transition: transform .15s, border-color .15s;
+  }
+  .card:hover { transform: translateY(-3px); border-color: var(--brand); }
+  .card-cover {
+    position: relative; width: 100%; aspect-ratio: 3/4;
+    background: #000; overflow: hidden;
+  }
+  .card-cover img {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+  }
+  .card-cover .no-img {
+    width: 100%; height: 100%; display: flex; align-items: center;
+    justify-content: center; color: #555; font-size: 13px;
+  }
+  .card-play {
+    position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; opacity: 0; transition: opacity .15s;
+    background: rgba(0,0,0,.25);
+  }
+  .card:hover .card-play { opacity: 1; }
+  .card-play svg { filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+  .card-body { padding: 12px; }
+  .card-desc {
+    font-size: 13px; line-height: 1.5; color: var(--text);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; min-height: 39px;
+  }
+  .card-tags { font-size: 11px; color: var(--accent); margin-top: 8px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card-author { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+  /* 用户结果 */
+  .user-list { display: flex; flex-direction: column; gap: 10px; }
+  .user-row {
+    display: flex; align-items: center; gap: 14px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 18px;
+  }
+  .user-avatar {
+    width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+    background: linear-gradient(135deg, var(--brand), var(--accent));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 700; color: #fff;
+  }
+  .user-name { flex: 1; font-size: 15px; }
+  .user-id { font-size: 12px; color: var(--text-dim); }
+  /* 加载更多 */
+  .load-more {
+    display: block; margin: 28px auto 0; padding: 10px 32px;
+    background: rgba(255,255,255,.08); color: var(--text);
+    border: 1px solid var(--border); border-radius: 20px;
+    font-size: 13px; cursor: pointer;
+  }
+  .load-more:hover { background: rgba(255,255,255,.14); }
+  /* 详情弹层 */
+  .detail {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(0,0,0,.9); display: none;
+    align-items: center; justify-content: center; padding: 24px;
+  }
+  .detail.open { display: flex; }
+  .detail-close {
+    position: absolute; top: 20px; right: 24px;
+    background: rgba(255,255,255,.1); border: none; color: #fff;
+    width: 38px; height: 38px; border-radius: 50%; cursor: pointer;
+    font-size: 24px; line-height: 1;
+  }
+  .detail-close:hover { background: rgba(255,255,255,.2); }
+  .detail-body {
+    display: flex; gap: 0; max-width: 900px; width: 100%; max-height: 90vh;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    overflow: hidden;
+  }
+  .detail-media {
+    flex: 0 0 60%; background: #000; position: relative;
+    display: flex; align-items: center; justify-content: center; min-height: 400px;
+  }
+  .detail-media img { width: 100%; height: 100%; object-fit: contain; max-height: 88vh; }
+  .detail-media .no-img { color: #555; }
+  .detail-nav {
+    position: absolute; bottom: 14px; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+  }
+  .detail-nav button {
+    background: rgba(0,0,0,.5); border: none; color: #fff;
+    width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 20px;
+  }
+  .detail-nav button:hover { background: rgba(0,0,0,.8); }
+  .detail-nav span { font-size: 12px; color: #ddd; min-width: 48px; text-align: center; }
+  .detail-info { flex: 1; padding: 28px 24px; display: flex; flex-direction: column; gap: 16px; }
+  .detail-caption { font-size: 15px; line-height: 1.7; }
+  .detail-tags { font-size: 13px; color: var(--accent); line-height: 1.8; }
+  .detail-author { font-size: 12px; color: var(--text-dim); margin-top: auto; }
+  @media (max-width: 640px) {
+    .detail-body { flex-direction: column; max-height: 92vh; overflow-y: auto; }
+    .detail-media { flex: none; min-height: 300px; max-height: 55vh; }
+    .detail-info { padding: 18px; }
+  }
+  .loading { text-align: center; color: var(--text-dim); padding: 30px; font-size: 13px; }
+  .hidden { display: none !important; }
+  @media (max-width: 640px) {
+    .topbar { padding: 0 12px; gap: 6px; }
+    .back-btn span { display: none; }
+    .search-btn { padding: 0 14px; }
+    .hot-list { grid-template-columns: 1fr; }
+    .container { padding: 20px 14px 50px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back-btn" onclick="goBack()" title="返回">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+    <span>返回</span>
+  </button>
+  <div class="search-wrap">
+    <div class="search-box">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="kw" placeholder="搜索你感兴趣的内容" autocomplete="off">
+      <button class="clear" id="clearBtn" title="清空">×</button>
+    </div>
+    <div class="suggest" id="suggest"></div>
+  </div>
+  <button class="search-btn" onclick="doSearch()">搜索</button>
+</div>
+
+<div class="container">
+  <!-- 默认视图：热搜榜 -->
+  <div id="defaultView">
+    <div class="section-title"><span class="flame">🔥</span> 抖音热榜</div>
+    <div class="hot-list" id="hotList">
+      <div class="loading">加载中…</div>
+    </div>
+  </div>
+
+  <!-- 结果视图 -->
+  <div id="resultView" class="hidden">
+    <div class="tabs">
+      <button class="tab active" id="tabAll" onclick="switchTab('all')">综合</button>
+      <button class="tab" id="tabUser" onclick="switchTab('user')">用户</button>
+    </div>
+    <div class="result-meta" id="resultMeta"></div>
+
+    <!-- 综合：话题内容 -->
+    <div id="panelAll">
+      <div class="grid" id="resultGrid"></div>
+      <div class="loading hidden" id="gridLoading">加载中…</div>
+      <button class="load-more hidden" id="loadMore" onclick="loadMore()">加载更多</button>
+    </div>
+
+    <!-- 用户 -->
+    <div id="panelUser" class="hidden">
+      <div class="user-list" id="userList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 内容详情弹层 -->
+<div class="detail" id="detail" onclick="if(event.target===this)closeDetail()">
+  <button class="detail-close" onclick="closeDetail()" title="关闭">×</button>
+  <div class="detail-body" id="detailBody"></div>
+</div>
+
+<script src="sanitize.js"></script>
+<script src="config.js"></script>
+<script src="api.js"></script>
+<script>
+'use strict';
+
+var kwInput = document.getElementById('kw');
+var clearBtn = document.getElementById('clearBtn');
+var suggestBox = document.getElementById('suggest');
+
+// 搜索状态
+var state = {
+  keyword: '',
+  tab: 'all',
+  cursor: '',
+  hasMore: false,
+  loading: false,
+  suggestTimer: null,
+  items: []          // 当前已加载的内容结果，供详情弹层按 index 取
+};
+
+// 进入页面优先读 URL 参数（feed 页跳转时可带词直接搜）
+(function init() {
+  var params = new URLSearchParams(location.search);
+  var q = params.get('q') || params.get('keyword') || '';
+  if (q) {
+    kwInput.value = q;
+    doSearch();
+  } else {
+    loadHot();
+  }
+  kwInput.focus();
+})();
+
+// 回车搜索
+kwInput.addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') { hideSuggest(); doSearch(); }
+});
+
+// 输入联想（防抖 250ms）
+kwInput.addEventListener('input', function () {
+  var v = kwInput.value.trim();
+  clearBtn.style.display = v ? 'block' : 'none';
+  clearTimeout(state.suggestTimer);
+  if (!v) { hideSuggest(); return; }
+  state.suggestTimer = setTimeout(function () { loadSuggest(v); }, 250);
+});
+
+clearBtn.addEventListener('click', function () {
+  kwInput.value = '';
+  clearBtn.style.display = 'none';
+  hideSuggest();
+  kwInput.focus();
+});
+
+// 点击空白关闭联想
+document.addEventListener('click', function (e) {
+  if (!e.target.closest('.search-wrap')) hideSuggest();
+});
+
+function hideSuggest() { suggestBox.classList.remove('open'); }
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function goBack() {
+  if (history.length > 1) history.back();
+  else location.href = 'feed.html';
+}
+
+/** 热搜榜（匿名可读）。 */
+function loadHot() {
+  TF.api('/api/v1/search/hot?limit=10', { auth: false, silent: true })
+    .then(function (data) {
+      var items = (data && data.items) || [];
+      var box = document.getElementById('hotList');
+      if (!items.length) {
+        box.innerHTML = '<div class="empty-hint">暂时没有热搜<br>成为第一个搜索的人吧</div>';
+        return;
+      }
+      box.innerHTML = items.map(function (it, i) {
+        var rankCls = i === 0 ? 'top' : (i < 3 ? 'top2' : '');
+        var heat = it.searches ? (Math.round(it.searches) + ' 搜') : '';
+        return '<div class="hot-item" onclick="searchWord(' + JSON.stringify(it.word) + ')">' +
+          '<span class="hot-rank ' + rankCls + '">' + (i + 1) + '</span>' +
+          '<span class="hot-word">' + esc(it.word) + '</span>' +
+          '<span class="hot-heat">' + esc(heat) + '</span></div>';
+      }).join('');
+    })
+    .catch(function () {
+      document.getElementById('hotList').innerHTML =
+        '<div class="empty-hint">热搜暂时不可用<br>直接输入关键词搜索吧</div>';
+    });
+}
+
+/** 联想（匿名可读）。 */
+function loadSuggest(q) {
+  TF.api('/api/v1/search/suggest?q=' + encodeURIComponent(q) + '&size=10',
+    { auth: false, silent: true })
+    .then(function (data) {
+      var items = (data && data.items) || [];
+      if (!items.length) { hideSuggest(); return; }
+      suggestBox.innerHTML = items.map(function (it) {
+        var label = it.type === 'user' ? '用户' : '话题';
+        return '<div class="suggest-item" onclick="searchWord(' + JSON.stringify(it.text) + ')">' +
+          '<span class="type-tag">' + label + '</span>' +
+          '<span>' + esc(it.text) + '</span></div>';
+      }).join('');
+      suggestBox.classList.add('open');
+    })
+    .catch(function () { hideSuggest(); });
+}
+
+/** 点热搜词 / 联想词 → 填入并搜索。 */
+function searchWord(word) {
+  kwInput.value = word;
+  clearBtn.style.display = 'block';
+  hideSuggest();
+  doSearch();
+}
+
+/** 发起搜索（首页）。 */
+function doSearch() {
+  var q = kwInput.value.trim();
+  if (!q) { kwInput.focus(); return; }
+  state.keyword = q;
+  state.cursor = '';
+  state.hasMore = false;
+  hideSuggest();
+  document.getElementById('defaultView').classList.add('hidden');
+  document.getElementById('resultView').classList.remove('hidden');
+  switchTab('all');
+  loadContent(true);
+  // 用户搜索也一并预取（综合 tab 只看内容，切到用户 tab 时无需再等）
+  loadUsers();
+}
+
+function switchTab(tab) {
+  state.tab = tab;
+  document.getElementById('tabAll').classList.toggle('active', tab === 'all');
+  document.getElementById('tabUser').classList.toggle('active', tab === 'user');
+  document.getElementById('panelAll').classList.toggle('hidden', tab !== 'all');
+  document.getElementById('panelUser').classList.toggle('hidden', tab !== 'user');
+}
+
+/** 话题内容搜索（游标翻页）。 */
+function loadContent(reset) {
+  if (state.loading) return;
+  state.loading = true;
+  var loading = document.getElementById('gridLoading');
+  loading.classList.remove('hidden');
+  var cursorParam = state.cursor ? '&cursor=' + encodeURIComponent(state.cursor) : '';
+  TF.api('/api/v1/search/tag?tag=' + encodeURIComponent(state.keyword) + '&size=20' + cursorParam,
+    { auth: false, silent: true })
+    .then(function (data) {
+      var items = (data && data.items) || [];
+      var grid = document.getElementById('resultGrid');
+      if (reset) { grid.innerHTML = ''; state.items = []; }
+      if (items.length) {
+        // 存全量条目供详情弹层使用（下标与卡片一致）
+        var base = state.items.length;
+        state.items = state.items.concat(items);
+        grid.insertAdjacentHTML('beforeend', items.map(function (it, i) {
+          return cardHtml(it, base + i);
+        }).join(''));
+      } else if (reset) {
+        grid.innerHTML = '<div class="empty-hint" style="grid-column:1/-1">没有找到相关内容<br>换个关键词试试</div>';
+      }
+      state.hasMore = !!(data && data.hasMore);
+      state.cursor = (data && data.nextCursor) || '';
+      document.getElementById('loadMore').classList.toggle('hidden', !state.hasMore);
+      document.getElementById('resultMeta').textContent =
+        '「' + state.keyword + '」约 ' + ((data && data.total) || items.length) + ' 条内容';
+    })
+    .catch(function () {
+      if (reset) document.getElementById('resultGrid').innerHTML =
+        '<div class="empty-hint" style="grid-column:1/-1">搜索暂时不可用，请稍后重试</div>';
+    })
+    .finally(function () {
+      state.loading = false;
+      loading.classList.add('hidden');
+    });
+}
+
+function loadMore() { if (state.hasMore && !state.loading) loadContent(false); }
+
+function cardHtml(it, idx) {
+  var cover = it.url || (it.images && it.images[0]) || '';
+  var img = cover
+    ? '<img src="' + esc(cover) + '" alt="" loading="lazy">'
+    : '<div class="no-img">暂无封面</div>';
+  var tags = (it.tags && it.tags.length)
+    ? '#' + it.tags.slice(0, 3).map(function (t) { return esc(t); }).join(' #') : '';
+  var author = it.authorId ? ('作者 ' + esc(it.authorId)) : '';
+  // 点击传下标，详情弹层从 state.items 取完整数据（含全部图片）
+  return '<div class="card" data-idx="' + idx + '" onclick="openResult(' + idx + ')">' +
+    '<div class="card-cover">' + img +
+      '<div class="card-play"><svg width="52" height="52" viewBox="0 0 24 24" fill="rgba(255,255,255,.9)"><polygon points="6 4 20 12 6 20 6 4"/></svg></div>' +
+    '</div>' +
+    '<div class="card-body">' +
+      '<div class="card-desc">' + esc(it.caption || '（暂无描述）') + '</div>' +
+      (tags ? '<div class="card-tags">' + tags + '</div>' : '') +
+      (author ? '<div class="card-author">' + author + '</div>' : '') +
+    '</div></div>';
+}
+
+/** 点进搜索结果：上报点击热度（fail-open），弹出详情层看内容。 */
+function openResult(idx) {
+  var it = state.items[idx];
+  if (!it) return;
+  TF.api('/api/v1/search/hit', {
+    method: 'POST', form: { tag: state.keyword }, auth: false, silent: true, keepalive: true
+  }).catch(function () {});
+  var images = (it.images && it.images.length) ? it.images : (it.url ? [it.url] : []);
+  var html = '';
+  if (images.length) {
+    html = '<div class="detail-media"><img id="detailImg" src="' + esc(images[0]) + '" alt="">' +
+      (images.length > 1
+        ? '<div class="detail-nav"><button onclick="detailStep(-1,' + images.length + ')">‹</button>' +
+          '<span id="detailCounter">1 / ' + images.length + '</span>' +
+          '<button onclick="detailStep(1,' + images.length + ')">›</button></div>'
+        : '') + '</div>';
+  } else {
+    html = '<div class="detail-media"><div class="no-img">暂无图片</div></div>';
+  }
+  state.detailImages = images;
+  state.detailIdx = 0;
+  var tags = (it.tags && it.tags.length)
+    ? it.tags.map(function (t) { return '#' + esc(t); }).join(' ') : '';
+  document.getElementById('detailBody').innerHTML = html +
+    '<div class="detail-info">' +
+      '<div class="detail-caption">' + esc(it.caption || '（暂无描述）') + '</div>' +
+      (tags ? '<div class="detail-tags">' + tags + '</div>' : '') +
+      '<div class="detail-author">' + (it.authorId ? ('作者 ID ' + esc(it.authorId)) : 'TurboFeed 用户') + '</div>' +
+    '</div>';
+  document.getElementById('detail').classList.add('open');
+}
+
+function closeDetail() { document.getElementById('detail').classList.remove('open'); }
+
+function detailStep(delta, total) {
+  state.detailIdx = (state.detailIdx + delta + total) % total;
+  var img = document.getElementById('detailImg');
+  if (img) img.src = state.detailImages[state.detailIdx];
+  var counter = document.getElementById('detailCounter');
+  if (counter) counter.textContent = (state.detailIdx + 1) + ' / ' + total;
+}
+
+// ESC 关闭详情层
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') closeDetail();
+});
+
+/** 用户搜索（精确匹配，不分页）。 */
+function loadUsers() {
+  TF.api('/api/v1/search/user?q=' + encodeURIComponent(state.keyword) + '&size=20',
+    { auth: false, silent: true })
+    .then(function (data) {
+      var items = (data && data.items) || [];
+      var box = document.getElementById('userList');
+      if (!items.length) {
+        box.innerHTML = '<div class="empty-hint">没有找到同名用户</div>';
+        return;
+      }
+      box.innerHTML = items.map(function (u) {
+        var nick = u.nickname || ('用户' + u.userId);
+        return '<div class="user-row">' +
+          '<div class="user-avatar">' + esc(nick.charAt(0).toUpperCase()) + '</div>' +
+          '<div class="user-name">' + esc(nick) + '</div>' +
+          '<div class="user-id">ID ' + esc(u.userId) + '</div></div>';
+      }).join('');
+    })
+    .catch(function () {
+      document.getElementById('userList').innerHTML =
+        '<div class="empty-hint">用户搜索暂时不可用</div>';
+    });
+}
+</script>
+</body>
+</html>
