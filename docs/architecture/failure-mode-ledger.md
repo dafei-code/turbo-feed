@@ -27,7 +27,7 @@
 | 1 | 客户端 → 对象存储（预签名直传） | **至多一次** | 无（幂等键 = 预约 ID） | 客户端传完 bytes 不调 complete | `OrphanObjectCleanupTask` 回收 |
 | 2 | complete → 落库 + 机审 | 同步事务 | 无（主键幂等） | 无（同步返回） | 接口返回码 |
 | 3 | 审核通过 → 入流事件落库 | **至少一次** | 无（事件行幂等） | 事务回滚 = 业务也没成功，一致 | — |
-| 4 | 入流事件 → 引擎时间线 | **至少一次** | 低（append 覆盖写 / remove 精确摘） | 重投耗尽 → DEAD；MQ 重试耗尽 → RocketMQ DLQ | `OutboxDeadLetterSweeper` + `DeadLetterAlert`；**RocketMQ DLQ 无巡检（缺口）** |
+| 4 | 入流事件 → 引擎时间线 | **至少一次** | 低（append 覆盖写 / remove 精确摘） | 重投耗尽 → DEAD；MQ 重试耗尽 → RocketMQ DLQ | `OutboxDeadLetterSweeper` + `DefaultDeadLetterAlert`；`DlqAlertService` 定时巡检 DLQ + `tf_feed_dlq_depth` / `tf_feed_dlq_alert_total` 指标（随 mq/dlq profile 开启） |
 | 5 | 互动 → 计数增量落库 | **至少一次** | 无（dedup + 事务闭合，见 §4） | 进程崩溃 → 未 flush 的内存增量丢失 | `post_counter.updated_at`；**无水位指标（缺口）** |
 | 6 | 行为埋点 → 兴趣画像 / 明细落盘 | **至多一次** | 无 | 队列满直接丢弃；Pod 重建丢未落盘文件 | 无（明确取舍） |
 
@@ -123,20 +123,21 @@
 一个完全没有。**M4 已把「缺指标化」这部分补掉**，下面区分「已落地」与「仍是缺口」，
 避免后来者读旧结论或误以为全做完了。
 
-### 5.1 DLQ 巡检告警 —— 🟢 发件箱侧已闭环 / 🔴 MQ 侧仍无巡检
+### 5.1 DLQ 巡检告警 —— 🟢 两侧均已闭环（MQ 侧默认随 mq profile 关闭）
 
 | 层 | 现状 |
 |---|---|
 | 发件箱 DEAD 行 | ✅ `OutboxDeadLetterSweeper` 周期重投（带冷却、有上限） |
 | 默认告警实现 | ✅ **M4 已升级**：`DefaultDeadLetterAlert`（原 `LogDeadLetterAlert`）= 日志 + `tf_outbox_deadletter_total{type}`。计数在写日志**之前**，日志失败也留得下指标 |
 | 消费失败可观测性 | ✅ **M4 新增**：`tf_feed_timeline_consume_total{action}`（分母）+ `tf_feed_timeline_consume_failed_total{action}`（分子）——失败率曲线能提前看到「正在滑向 DLQ」 |
-| **RocketMQ DLQ 深度** | 🔴 **仍无巡检**。`maxReconsumeTimes=5` 耗尽后消息进 `%DLQ%{consumerGroup}`，此后没有任何组件会去看它 |
+| **RocketMQ DLQ 深度** | ✅ **已补齐**：`RocketMqDlqStore` 用独立 inspector group 读 `%DLQ%{consumerGroup}`，`DlqAlertService` 每 60s 巡检（阈值 + 冷却 + webhook/日志告警）；指标 `tf_feed_dlq_depth`（Gauge，启动即注册 0、巡检失败保留上一轮）+ `tf_feed_dlq_alert_total`（Counter） |
+| 前端/客户端 traceId | 🔴 仍未接（见 §5.4） |
 
-**为什么 DLQ 深度没一起做**（不是遗漏，是依赖不满足）：读 DLQ 位点需要
-`rocketmq-tools` 的 `DefaultMQAdminExt`，而它是独立 artifact——本机 `.m2` 无缓存，
-且必须连到真实 name-server 才能验证。按项目纪律「先验证再宣称」，不上未验证的实现。
-消费失败率指标已经把**最需要提前量的那段**覆盖住了（失败率飙升 → 5 次重试 → 才进 DLQ），
-所以这块的紧迫性低于「完全没有信号」的发件箱侧。
+**为什么曾经留白**：原方案卡在 `rocketmq-tools` 的 `DefaultMQAdminExt`——独立 artifact 且必须连真实
+name-server 才能验证。最终改用 RocketMQ 客户端自带的 `DefaultLitePullConsumer`（`RocketMqDlqStore`）
+订阅 DLQ topic，绕开该依赖；本机已用真实 broker 验证 peek/replay。
+**注意默认不开**：`DlqAlertService` 需 `dlq-alert.enabled` + `dlq-replay.enabled` + `mq.enabled`
+三者同时为 true 才注册，生产接线时确认 profile。
 
 **DLQ 巡检 runbook（运维侧，不依赖代码改动）**：
 
@@ -165,6 +166,17 @@ mqadmin resetOffsetByTime -n <namesrv:9876> -g turbofeed-feed-timeline-group -t 
   for: 1m
   # 下架类（type="TIMELINE_REMOVE"）应单独配一条更急的（P1），
   # 因为「下架没生效 = 内容仍在公域可见」是正向错误。
+
+- alert: Feed时间线DLQ积压
+  expr: tf_feed_dlq_depth > 0
+  for: 5m
+  # 深度是最近一次巡检的观测值（默认 60s 刷新）。fail-quiet：broker 查不到时保留上一轮值，
+  # 不会误报成「已清零」。服务自身另有阈值 + 冷却的 webhook/日志告警，二者互为补充。
+
+- alert: Feed时间线DLQ告警频繁触发
+  expr: increase(tf_feed_dlq_alert_total[1h]) > 3
+  for: 10m
+  # 冷却期内不重复计数，因此这里的增长代表「多轮真实积压」，不是刷屏。
 ```
 
 ### 5.2 Outbox 积压水位 —— 🟢 已落地（M4）
@@ -208,14 +220,18 @@ mqadmin resetOffsetByTime -n <namesrv:9876> -g turbofeed-feed-timeline-group -t 
 | 计数 flush 批次/去重指标 | `tf_counter_flush_batch_size` / `_duration_seconds` / `_empty_total` / `_dedup_skipped_total`（M4） |
 | 契约版本协商 | `ContractVersion`（M2/4.1） |
 | 链路追踪 | `TraceIds` + 网关/引擎 `TraceIdFilter` + `TracePropagationInterceptor`（M4） |
+| MQ 消费侧 traceId 恢复 | `FeedTimelineEvent` / `FeedBehaviorEvent` / `CounterIncrementEvent` 消息体带 traceId；消费侧 `TraceContext.begin(event.traceId())` + `finally end`；`tf-counter` 入站同样恢复 |
+| DLQ 巡检 + 指标 | `RocketMqDlqStore`（独立 inspector group，peek/replay）+ `DlqAlertService`（阈值/冷却/webhook + `tf_feed_dlq_depth` / `tf_feed_dlq_alert_total`） |
 
 ### 5.4 观测面仍未覆盖的地方（M4 之后）
 
+> **状态已校正（DLQ 指标补齐时逐条读码核对）**：
+> `FeedTimelineEvent.traceId` + 消费侧 `TraceContext.begin`、`tf-counter` 入站 traceId、
+> RocketMQ DLQ 深度巡检 + 指标均已落地（实现清单见 §5.1、§5.3），不再列为缺口。
+> 当时误判的根因是把"方案未写进本文"当成了"代码未实现"。当前真实残余只有一条：
+
 | 缺口 | 影响 | 归属 |
 |---|---|---|
-| MQ 消费侧拿不到生产者 traceId | 消费链路日志与生产请求无法串成一条 | 需在 `FeedTimelineEvent` 加字段并升 schemaVersion |
-| `tf-counter` 无入站 traceId | HTTP 兜底增量这条链路断链（九成流量走 MQ，影响小） | 随 MQ 契约一起做 |
-| RocketMQ DLQ 深度 | 进 DLQ 的消息无人知晓，只能靠人工/外部巡检 | 需 name-server 环境 |
 | 前端/客户端埋点未接 traceId | 用户侧报障只能给时间，不能给 id | 待前端工程化（P1-5） |
 
 ---
@@ -238,7 +254,7 @@ grep "<traceId>" gateway.log | grep -E "ERROR|WARN"   # 只看异常
 | 「已下架却还在展示」 | outbox `TIMELINE_REMOVE` 事件状态 | 引擎反查索引 `tf:feed:idx:` 是否对得上（`timelineKey` 口径不一致会让 `ZREM` 静默失效） |
 | 「发布后一直不可见」 | `tf_outbox_backlog{status}` 是否在涨（补偿通道是否追不上） | `tf_outbox_oldest_age_seconds{status}` 最老一条卡了多久；`tf_outbox_deadletter_total` 是否在增长 |
 | 「点赞数不对」 | `post_counter.updated_at`（多久没落库了） | `tf_counter_flush_batch_size` 是否有样本（调度还活着吗）；`tf_counter_flush_dedup_skipped_total` 是否非 0（flush 是否在反复重放） |
-| 「开 MQ 后新内容不可见」 | `rate(tf_feed_timeline_consume_failed_total)` / `rate(…_total)` 失败率 | 是否走了 `FeedTimelineDeliveryService` 单入口（旧代码曾漏掉缓存失效）；RocketMQ DLQ 是否有堆积（§5.1 runbook） |
+| 「开 MQ 后新内容不可见」 | `rate(tf_feed_timeline_consume_failed_total)` / `rate(…_total)` 失败率 | 是否走了 `FeedTimelineDeliveryService` 单入口（旧代码曾漏掉缓存失效）；`tf_feed_dlq_depth > 0` 看 DLQ 堆积（细节走 §5.1 runbook） |
 | 「兴趣画像不更新」 | 行为事件是否到达引擎 | `BehaviorLogSink` 队列是否长期打满（样本持续丢弃） |
 | 「注册偶发失败」 | 是否 `DuplicateKeyException`（主键冲突） | 多实例 worker-id 是否重复；租约模式下看续约日志是否被拉闸 |
 
