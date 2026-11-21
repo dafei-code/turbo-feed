@@ -54,3 +54,19 @@
 - `share_record` DDL + ShardingSphere 登记；`ShareService` + `ShareController`（`/api/v1/share/create | my | stats`）+ 短链生成。
 - tf-counter 加 `share` 维度；防刷 Redis 滑动窗口。
 - `feed.html` / 详情页加分享按钮与转发入口；前端生成分享卡片（快照渲染）。
+
+## 6. 状态核查（2026-11-20）
+
+**仍为"提议"是正确的，不改成已采纳**：逐项核对源码，本 ADR 的落地项**全部未完成**——
+`media` 无 `ref_post_id` 列、无 `share_record` 表 / `ShareService` / `ShareController`、
+tf-counter 的 `CounterDimension` 无 `share` 维度、前端无分享按钮（`feed.html` 的分享弹层仅为复制链接 UI，未接后端）。
+唯一相关的是计数表预留了 `share_count` 列（DDL 预留，无写入链路）。
+
+**待决策**（本次收口未替决策人拍板，保持 Proposed）：
+
+| 选项 | 含义 | 触发条件 |
+|---|---|---|
+| 排期实施 | 按 §5 落地，先做引用式分享 + 站内转发 | 需要裂变拉新指标或产品明确要求 |
+| 明确不做（Deprecated） | 承认分享/转发不在本期范围，状态改"已废弃"，避免长期挂"提议"误导 | 若判断无裂变诉求 |
+
+当前无新证据触发任一选项，故维持原状。

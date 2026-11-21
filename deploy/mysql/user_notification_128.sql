@@ -1,6 +1,6 @@
 -- user_notification 物理分片（128 表，分片键 user_id，hashMod128）。
 -- 偶数下标落 ds_0=turbo_feed_1、奇数 ds_1=turbo_feed_2。
--- 写模型(OLTP)：每条通知一行；读模型 Redis 收件箱 ZSET tf:notify:{userId} + 未读计数 tf:notify:unread:{userId}。
+-- 写模型(OLTP)：每条通知一行，收件箱列表直接查本表；Redis 侧仅保留未读计数快路径 tf:notify:unread:{userId}（DB 回源兜底）。
 -- 配置见 shardingsphere-config(-128).yaml 的 user_notification autoTable（shardingAlgorithmName: hashMod128）。
 
 CREATE TABLE `turbo_feed_1`.`user_notification_0` (

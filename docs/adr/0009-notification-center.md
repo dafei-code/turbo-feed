@@ -1,6 +1,6 @@
 # ADR-0009：通知中心（Notification Center）有界上下文设计
 
-- **状态**：提议（Proposed, 2026-10-31）
+- **状态**：已采纳（Accepted，2026-11-20 状态收口；后端 2026-11 落地 `489b88e` + 埋点 `9b872d5`，前端收件箱抽屉已接 `/api/v1/notify/*`）
 - **所属改进项**：产品级能力缺口 #342（P0 产品级）
 - **决策人**：dafei
 - **关联 ADR**：[0003 tf-counter](0003-tf-counter-service.md)（通知未读计数复用计数维度）、[0008 读模型分层](0008-timeline-layering.md)（收件箱与 timeline 读模型同构）
@@ -55,10 +55,16 @@
 | 纯 MySQL 读（不建 Redis 读模型） | 未读角标是高频读，直查分片表在大用户量下扛不住；与现有 timeline / 计数器读模型风格不一致 |
 | 只轮询不接 WS | 实时性差；但保留为降级路径，WS 是可选项而非必需，故不否决、只是默认值 |
 
-## 5. 落地记录（待做，纯设计）
+## 5. 落地记录（2026-11-20 逐条读码核对）
 
-- 新增 `user_notification` DDL + ShardingSphere 登记（`HASH_MOD`，键 `user_id`）。
-- `tf-gateway` 新增通知模块：`NotificationGenerator`（消费事件）+ `NotificationRepository` + `NotificationController`（`/api/v1/notify/inbox | unread | read`）+ WebSocket / SSE 端点。
-- 读模型 Redis 双写 + 回源兜底；未读计数接 tf-counter 维度或独立 INCR。
-- 各业务方埋 `NotificationEvent`（`MediaLikeService` / CommentService / `FollowService` / `MediaReviewService`）。
-- `admin.html` / `user.html` 加通知中心 tab + 角标。
+| 计划项 | 状态 | 代码实证 |
+|---|---|---|
+| `user_notification` DDL + ShardingSphere 登记（`HASH_MOD`，键 `user_id`） | ✅ | `NotificationJdbcRepository` 按 `user_id` 分片读写；分片 DDL 已登记 |
+| 通知模块：`NotificationGenerator` + Repository + `NotificationController` | ✅ | `service/notify/{Notification,NotificationEvent,NotificationType,NotificationGenerator,NotificationJdbcRepository}.java` + `controller/NotificationController.java`（`inbox`/`unread`/`read` 三端点） |
+| WebSocket / SSE 实时端点 | 🔴 **未做** | 决策 3 的 WS 推送未实现；当前走前端轮询降级路径（ADR 明示 WS 为可选项、轮询为默认，属已接受的取舍） |
+| 读模型 Redis 双写 + 回源兜底 | ✅（2026-11-21 收窄） | 未读计数 Redis 快路径 + DB 回源 ✅（`unreadCount`）。收件箱 ZSET 原设计**写了但没读**（`inbox()` 一直走 `repository.listByUser` 读分片表），且只 ZADD、无 TTL、已读时也不 ZREM = 无界增长的死键 → **2026-11-21 已移除该写入**，读路径语义不变，`NotificationGeneratorTest` 加了"never 碰 ZSET"断言防止加回。若未来规模上来要引入收件箱读模型，应作为新决策重开，而非恢复这个死键 |
+| 各业务方埋 `NotificationEvent` | ✅ | `MediaLikeService` / `CommentService` / `FollowService` / `MediaReviewService` / `MediaFavoriteService` 共 5 处（commit `9b872d5`） |
+| 前端入口 + 角标 | ✅ | `feed.html`：铃铛按钮 `#btnNotify` + 未读角标 `#notifyBadge` + 收件箱抽屉 `#notifyDrawer`（复用评论抽屉样式，接 `/api/v1/notify/*`） |
+| `NotificationGenerator` 单测 | 🔴 **未做** | 通知模块目前无测试文件（网关其余服务有 65 个测试文件）；后续补 `NotificationGeneratorTest` |
+
+**剩余缺口**（不阻塞已落地部分）：WS 实时端点（可选增强）；通知模块的其余单测（`inbox` / `markRead` / 游标分页已由 `NotificationGeneratorTest` 覆盖，控制器层与各业务方埋点尚无）。收件箱 ZSET 已从设计中移除，不再是缺口。

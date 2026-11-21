@@ -247,7 +247,7 @@ rules:
             shardingAlgorithmName: hashMod128
       # 逻辑表 user_notification：通知中心收件箱（抖音式，ADR-0009）。分片键 user_id，hashMod128 与 user_follow 同规模。
       # 偶数下标落 ds_0(turbo_feed_1)、奇数 ds_1(turbo_feed_2)；写模型(OLTP)单分片命中「某用户全部通知」，
-      # 读模型 Redis 收件箱 ZSET tf:notify:{userId} + 未读计数 tf:notify:unread:{userId}（见 NotificationGenerator）。
+      # 收件箱列表直接查本表；Redis 侧仅保留未读计数快路径 tf:notify:unread:{userId}（见 NotificationGenerator）。
       user_notification:
         actualDataSources: ds_0, ds_1
         shardingStrategy:

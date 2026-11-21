@@ -20,19 +20,23 @@ import java.util.concurrent.Executor;
  *
  * <p><b>写路径（fail-open）</b>：{@link #generate(NotificationEvent)} 异步提交到 {@code bestEffortExecutor}，
  * 由 {@link #doGenerate} 在后台完成：① 幂等去重（{@code SETNX tf:notify:event:{eventId}}）；
- * ② 落库；③ ZADD 收件箱 ZSET；④ INCR 未读计数。任一异常仅告警，绝不抛回业务方
+ * ② 落库；③ INCR 未读计数。任一异常仅告警，绝不抛回业务方
  * （通知生成失败不能阻塞点赞等主链路）。</p>
  *
  * <p><b>读路径</b>：{@link #inbox} / {@link #unreadCount} / {@link #markRead} 供 {@code NotificationController}
- * 调用。未读计数以 Redis 为快路径、DB 为真相源（Redis 缺失 / 异常回源 COUNT）。</p>
+ * 调用。收件箱列表直接读分片表（{@code user_notification}）；未读计数以 Redis 为快路径、DB 为真相源
+ * （Redis 缺失 / 异常回源 COUNT）。</p>
+ *
+ * <p><b>为什么没有收件箱 ZSET</b>：ADR-0009 设计了 {@code tf:notify:{userId}} ZSET，但读路径从未使用它
+ * ——member 只有 notifyId，要拼完整列表仍得回源 DB，等于多一次 Redis 往返且引入双写不一致。
+ * 更关键的是原实现只 ZADD、无 TTL、已读时也不 ZREM，是<b>无界增长</b>的死键。2026-11-21 移除该写入，
+ * 读路径语义不变；未读计数 Redis 快路径保留（角标是高频读，DB 回源兜底仍在）。</p>
  */
 @Service
 public class NotificationGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(NotificationGenerator.class);
 
-    /** 收件箱 ZSET：{@code tf:notify:{userId} => ZSET<notifyId, score=createdAtMs>}。 */
-    static final String INBOX_PREFIX = "tf:notify:";
     /** 未读计数：{@code tf:notify:unread:{userId} => 整数}。 */
     static final String UNREAD_PREFIX = "tf:notify:unread:";
     /** 事件幂等去重：{@code tf:notify:event:{eventId} => 1（TTL 1d）}。 */
@@ -80,11 +84,9 @@ public class NotificationGenerator {
             long id = snowflakeIdGenerator.nextId();
             Notification n = new Notification(id, event.recipientId(), event.type().name(), event.actorId(),
                     event.targetType(), event.targetId(), event.summary(), event.refPayload(), false, now, 0L);
-            // ② 落库（写模型）
+            // ② 落库（写模型；收件箱读路径直接查此表）
             repository.insert(n);
-            // ③ 收件箱 ZSET
-            addToInbox(event.recipientId(), id, now.toEpochMilli());
-            // ④ 未读 +1
+            // ③ 未读 +1
             incrUnread(event.recipientId());
             // （WS 实时推送见 #345）
         } catch (Exception e) {
@@ -160,14 +162,6 @@ public class NotificationGenerator {
         }
     }
 
-    private void addToInbox(long userId, long notifyId, long scoreMs) {
-        try {
-            redisTemplate.opsForZSet().add(inboxKey(userId), String.valueOf(notifyId), (double) scoreMs);
-        } catch (Exception e) {
-            log.warn("收件箱 ZSET 写入失败（fail-open）: userId={}, notifyId={}, {}", userId, notifyId, e.getMessage());
-        }
-    }
-
     private void incrUnread(long userId) {
         try {
             redisTemplate.opsForValue().increment(unreadKey(userId));
@@ -183,10 +177,6 @@ public class NotificationGenerator {
         } catch (Exception e) {
             log.warn("未读计数 -{} 失败（fail-open，DB 为真相源回源）: userId={}, {}", by, userId, e.getMessage());
         }
-    }
-
-    private static String inboxKey(long userId) {
-        return INBOX_PREFIX + userId;
     }
 
     private static String unreadKey(long userId) {

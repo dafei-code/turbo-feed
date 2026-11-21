@@ -1,6 +1,6 @@
 # ADR-0016：分布式事务重构——事务性事件总线、计数聚合底座与高并发演进（合并版）
 
-- **状态**：提议（Proposed，2026-11-13；同日按第三方代码评审结论修订合并）
+- **状态**：已采纳（Accepted，2026-11-20 状态收口；PR-A/B/C/D/E 及 D3 墓碑防旧均已落地，详见 §5 落地记录）
 - **所属改进项**：无（基于 2026-11-13 全量代码走查 + 评审修订）
 - **决策人**：dafei
 - **关联 ADR**：ADR-0003（tf-counter）、ADR-0007（可观测性）、ADR-0008（时间线分层）、ADR-0011（CDC-ClickHouse，**仍为提议、零落地**，本文不引用其为既有经验）、ADR-0012（异步执行器背压）
@@ -135,7 +135,22 @@
 
 ## 5. 落地记录
 
-待实施。PR 序列（依赖关系严格，A→B→C→D 不可乱序；E/F 可并行）：
+> **2026-11-20 状态收口**：下表 PR 序列为原实施计划（保留作验收依据）；实际落地情况见其后的对照表。
+> 结论：PR-A/B/C/D/E 全部完成，PR-F（观测前置）部分完成——outbox 积压/最老年龄/死信计数指标已落地，
+> 但"写入 TPS / findDueIds 延迟 / relay 轮内耗时"三条新曲线未见代码，故 Part C 演进项仍未解锁。
+
+**实际落地对照（逐 commit 核对）**
+
+| PR | 状态 | 落地 commit / 代码实证 |
+|---|---|---|
+| **PR-A** 止损 | ✅ | `6651fc3` 评论落库收口（先查后插 + 幂等路径 + 双 WARN） |
+| **PR-B** 事务边界 | ✅ | `078585e` 新增 `MediaUploadTransaction` + `finalizer`/`upload`/`complete` 事务边界 + `MediaUploadTransactionTest` |
+| **PR-C** 契约修正 | ✅ | `078585e` `OutboxHandlerRegistry` 注册表 + `StorageDeleteHandler` + `MinioStorageClient` 严格化 |
+| **PR-D** dispatcher | ✅ | `078585e` 三类事件 Handler；`0b92044` 墓碑防旧（`TimelineTombstoneStore` + `occurredAt` 透传）；`f54c04b` DLQ 告警巡检；`211f7a6` 运维接线；`23eb479` DLQ 深度指标 |
+| **PR-E** 计数底座 | ✅ | `e78bd41` flush 三段式失败暂存 + 原 batchId 重放 |
+| **PR-F** 观测前置 | 部分 | §5.1/§5.2 已有 `tf_outbox_backlog{status}` / `tf_outbox_oldest_age_seconds{status}` / `tf_outbox_deadletter_total{type}` / DLQ 深度与告警计数；但写入 TPS / findDueIds 延迟 / relay 轮内耗时三指标未建，**基线报告未产出，Part C 演进项不解锁** |
+
+**原实施计划（保留作验收依据）**——PR 序列（依赖关系严格，A→B→C→D 不可乱序；E/F 可并行）：
 
 | PR | 内容 | 验收标准（全部可执行，不依赖文档自述） |
 | --- | --- | --- |

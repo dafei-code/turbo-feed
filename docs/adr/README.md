@@ -65,15 +65,15 @@
 | [0006](0006-worker-id-lease.md) | 雪花 worker-id 自租约 | 已采纳 | 2026-10-27 | Redis `SET NX EX` 抢占 + 续约保活 + 失效即 fail-closed 拉闸 |
 | [0007](0007-observability.md) | 可观测性口径：指标与 traceId | 已采纳 | 2026-10-27 | 告警用失败率不用裸计数；traceId 纯逻辑共享、servlet 管道各自一份 |
 | [0008](0008-timeline-layering.md) | 公域时间线的分层边界与格式单一真值 | 已采纳 | 2026-10-27 | 桶键/反查索引只在 `TimelineSupport` 拼装解析；非法格式一律「不猜」；不为行数拆类 |
-| [0009](0009-notification-center.md) | 通知中心有界上下文 | 提议 | 2026-10-31 | 事件驱动单点生成 + `user_notification` 分片写模型 + Redis 收件箱/未读读模型；WS 实时、轮询降级、fail-open |
+| [0009](0009-notification-center.md) | 通知中心有界上下文 | 已采纳（2026-11-20） | 2026-10-31 | 后端 + 前端抽屉已落地，通知生成器 10 个单测；2026-11-21 移除无界增长的收件箱 ZSET 冗余写；剩余缺口：WS 实时端点、控制器/埋点层测试 |
 | [0010](0010-share-forward.md) | 分享/转发设计 | 提议 | 2026-10-31 | 分享=引用式动作+快照不复制内容；站内转发=新帖 `ref_post_id` 引用；计数复用 tf-counter、Redis 防刷 |
 | [0011](0011-cdc-clickhouse.md) | 行为数据 CDC 出仓 ClickHouse + 画像标签 | 提议 | 2026-10-31 | Canal 订阅只读副本 binlog→Kafka→CH；与在线库隔离；画像 T+1 回写 `user_interest`/`user_tag` |
 | [0012](0012-async-executor-backpressure.md) | 异步执行器背压分层（可丢活 vs 持久化活） | 已采纳 | 2026-11-01 | 通知生成/交互样本走 bestEffort 丢弃策略（绝不阻塞主链路）；点赞/收藏/关注/评论持久化双写保留 CallerRuns 防丢 + 饱和计数；JDBC 加 socketTimeout 兜底 |
 | [0013](0013-content-review-limit-downstream.md) | 内容级 REVIEW/LIMIT 接通下游（引擎降权信号） | 被 0014 取代 | 2026-11-06 | 新增 fail-open 路由 `ModerationDownstreamRouter`：REVIEW/LIMIT→`tf:mod:media=MONITOR`；双开关可逆、severity 可配；评论/昵称/举报路径不改（**档位与语义已被 0014 修正，勿照此新增用法**） |
 | [0014](0014-content-demote-and-signal-lifecycle.md) | 新增内容级 DEMOTE 档与审核信号解除闭环 | 已采纳 | 2026-11-07 | 跨服务契约变更：REVIEW→MONITOR 硬剔除 / LIMIT→DEMOTE 精排轻降权；人审通过与改描述 PASS 分路径解除；直传主路径接通；引擎懒读+本页缓存；搜索/播放零改动 |
 | [0015](0015-signal-release-atomicity-and-readside-resign.md) | 审核信号解除闭环补齐、条件解除原子化与推荐流读取侧重签 | 已采纳 | 2026-11-08 | 判无违规按三闸门恢复公域时间线（投递成功后才删标记）、申诉翻案先清 INTERCEPT、条件解除改单键 Lua、推荐流按 URL 反推对象名现签；零契约变更、网关先引擎后 |
-| [0016](0016-distributed-transaction-redesign.md) | 分布式事务重构：事务性事件总线、计数聚合底座与高并发演进（合并版） | 提议（合并并取代初版 0016/0017/0018） | 2026-11-13 | 三份初版逐条复核后合并：评论/上传/存储删除纳入 outbox，dispatch 改注册表；计数 flush 用原 batchId 重放 + 对账重建兜底；DLQ 防旧靠时间线墓碑；高并发只做观测前置，不提前排期 |
-| [0016 实施计划](0016-pr-bcd-implementation-plan.md) | PR-B/C/D 实施方案（合并版 ADR-0016 的未完成部分） | 提议 | 2026-11-16 | 按 C3 注册表 → B 上传事务边界 → C1/C2 存储删除 → D2 上传事件 → D3 墓碑防旧 → D4 水位巡检 → D5 通道收口分步落地，每步独立可发布、回退 = 关开关 |
+| [0016](0016-distributed-transaction-redesign.md) | 分布式事务重构：事务性事件总线、计数聚合底座与高并发演进（合并版） | 已采纳（2026-11-20；合并并取代初版 0016/0017/0018） | 2026-11-13 | PR-A~E + 墓碑防旧全落地；PR-F 观测前置部分完成（三条新曲线未建，Part C 演进项仍锁） |
+| [0016 实施计划](0016-pr-bcd-implementation-plan.md) | PR-B/C/D 实施方案（合并版 ADR-0016） | 已完成（2026-11-20） | 2026-11-16 | C3/B/C1-C2/D2/D3/D4/D5 全部落地（commit `078585e`/`0b92044`/`211f7a6`/`23eb479`），每步独立可发布、回退 = 关开关 |
 
 ## 状态语义
 

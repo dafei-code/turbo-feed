@@ -59,3 +59,21 @@
 - 出仓作业：binlog → `dwd_user_action`（含 behavior_log 回流）；`dim_user_profile` / `dim_item_profile` 计算 + 回写 `user_interest` / `user_tag`。
 - 在线侧：推荐特征服务接 `user_tag`（增量），A/B 报表接 CH。
 - 契约校验：binlog schema ↔ CH 列映射 CI 强校验。
+
+## 6. 状态核查（2026-11-20）
+
+**仍为"提议"是正确的，不改成已采纳**：源码核对结果为**零落地**——全部 `pom.xml` 无 canal / kafka-clients / clickhouse 依赖，
+无 Canal 部署配置，无出仓作业。`behavior_log` 归档到 MinIO（已落地）是独立链路，不是本 ADR 的 binlog→Kafka→CH 出仓。
+另一条线 `/Volumes/D/workbuddy/用户画像落地方案-01~04-知识星球.md` 是**规划文档**（开头已声明未实施），同样不是落地证据。
+
+**规划细化 ≠ 决议**：画像落地方案 4 篇比本 ADR 更细，但属于本 ADR 的施工级展开，不改变本 ADR 的 Proposed 状态。
+
+**待决策**（本次收口未替决策人拍板，保持 Proposed）：
+
+| 选项 | 含义 | 触发条件 |
+|---|---|---|
+| 排期实施 | 按用户画像落地方案 M1→M4 分期推进 | 需要长期兴趣 / 留存 / 完播分析，且能为在线推荐带来可测收益 |
+| 明确不做（Deprecated） | 承认列存数仓不在本期范围，状态改"已废弃" | 若判断当前 Redis 实时画像 + MinIO 归档已够用 |
+
+注意与 [ADR-0016](0016-distributed-transaction-redesign.md) 的约束冲突：0016 明确"不引入新中间件"，
+若选排期实施，需在 ADR 中显式标注本决策**推翻 0016 的该条约束**并给出理由，不能两边都写成有效决策。
