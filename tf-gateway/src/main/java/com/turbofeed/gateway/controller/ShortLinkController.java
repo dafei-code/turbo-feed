@@ -40,12 +40,17 @@ public class ShortLinkController {
     private final ShareService shareService;
     private final String frontendUrl;
 
+    /**
+     * 落地页默认用<b>站点相对路径</b> {@code /feed.html}：302 的 Location 允许相对 URI，
+     * 浏览器按当前请求 host 解析，因此无论本地还是生产都不会误跳到写死的 localhost。
+     * 前端若独立域名部署，须显式配置 {@code turbofeed.share.frontend-url} 为完整 URL
+     * （prod compose 已把该变量暴露到环境变量，见 docker-compose.prod.yml）。
+     */
     public ShortLinkController(ShareService shareService,
-                               @Value("${" + FeatureFlagKeys.SHARE_FRONTEND_URL
-                                       + ":http://localhost:5500/feed.html}") String frontendUrl) {
+                               @Value("${" + FeatureFlagKeys.SHARE_FRONTEND_URL + ":/feed.html}") String frontendUrl) {
         this.shareService = shareService;
         this.frontendUrl = frontendUrl == null || frontendUrl.isBlank()
-                ? "http://localhost:5500/feed.html" : frontendUrl.trim();
+                ? "/feed.html" : frontendUrl.trim();
     }
 
     /** 短链跳转：APPROVED → 302 到详情页并带归因参数；否则返回不可用提示页。 */

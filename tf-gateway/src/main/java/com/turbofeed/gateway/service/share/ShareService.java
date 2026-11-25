@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.turbofeed.gateway.repository.MediaJdbcRepository;
 import com.turbofeed.gateway.repository.ShareRepository;
+import com.turbofeed.gateway.service.counter.CounterEventPublisher;
 import com.turbofeed.gateway.service.notify.NotificationEvent;
 import com.turbofeed.gateway.service.notify.NotificationGenerator;
 import com.turbofeed.gateway.service.notify.NotificationType;
@@ -15,6 +16,7 @@ import com.turbofeed.gateway.util.SnowflakeIdGenerator;
 import com.turbofeed.shared.feature.FeatureFlagKeys;
 import com.turbofeed.shared.result.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -57,6 +59,7 @@ public class ShareService {
     private final FollowService followService;
     private final NotificationGenerator notificationGenerator;
     private final UploadRateLimiter rateLimiter;
+    private final ObjectProvider<CounterEventPublisher> counterPublisher;
     private final String baseUrl;
 
     public ShareService(ShareRepository shareRepository,
@@ -69,6 +72,7 @@ public class ShareService {
                         FollowService followService,
                         NotificationGenerator notificationGenerator,
                         UploadRateLimiter rateLimiter,
+                        ObjectProvider<CounterEventPublisher> counterPublisher,
                         @Value("${" + FeatureFlagKeys.SHARE_BASE_URL + ":}") String baseUrl) {
         this.shareRepository = shareRepository;
         this.codeGenerator = codeGenerator;
@@ -80,6 +84,7 @@ public class ShareService {
         this.followService = followService;
         this.notificationGenerator = notificationGenerator;
         this.rateLimiter = rateLimiter;
+        this.counterPublisher = counterPublisher;
         this.baseUrl = baseUrl == null ? "" : baseUrl.trim().replaceAll("/+$", "");
     }
 
@@ -145,6 +150,9 @@ public class ShareService {
             throw new ShareException(ErrorCode.INTERNAL_ERROR, "短链生成失败，请重试");
         }
 
+        // 分享计数：只统计"实际创建成功的短链"（方案 §4.7 / §8.1），跳转 /s/{code} 不重复计数。
+        // 与 Redis 计数（如点赞）不同，分享数只做聚合底座，不参与去重 Set 的幂等口径。
+        notifyCounter(created.postId());
         int notified = notifyFriends(created, friendIds);
         return new CreateResult(created.code(), shortPath(created.code()), shortUrl(created.code()),
                 created.snapshotJson(), notified);
@@ -221,8 +229,15 @@ public class ShareService {
         return record;
     }
 
+    /** 快照 caption 上限：H2 测试表 snapshot_json 是 VARCHAR(4000)，截到 200 字符留足 JSON 转义余量。 */
+    private static final int SNAPSHOT_CAPTION_MAX = 200;
+
     private String buildSnapshot(String postId, MediaJdbcRepository.PostRepresentative post, long sharerId) {
-        String caption = ""; // MediaItem.caption 不在代表行里；快照只存最小元数据，文案由前端展示时读详情
+        // caption 是帖子级属性，代表行（seq=0）已带出；空值兜底为空串，超长截断防溢出测试表列。
+        String caption = post.caption() == null ? "" : post.caption();
+        if (caption.length() > SNAPSHOT_CAPTION_MAX) {
+            caption = caption.substring(0, SNAPSHOT_CAPTION_MAX);
+        }
         try {
             ShareSnapshot snapshot = new ShareSnapshot(postId, post.mediaId(), post.url(), caption,
                     post.authorId(), sharerId, Instant.now().toEpochMilli());
@@ -262,6 +277,22 @@ public class ShareService {
             }
         }
         return sent;
+    }
+
+    /**
+     * 发分享计数增量给 tf-counter 聚合底座（opt-in，fail-open）。
+     *
+     * <p>与 {@code MediaLikeService#notifyCounter} 同范式：用 {@link ObjectProvider} 是为了在
+     * {@code turbofeed.counter.service.enabled=false}（默认）时 Bean 不存在也不影响分享主流程；
+     * 计数是附加副作用，失败只告警、不回滚已创建的短链。</p>
+     */
+    private void notifyCounter(String postId) {
+        try {
+            counterPublisher.ifAvailable(c -> c.incr(postId, "SHARE", 1));
+        } catch (Exception e) {
+            log.warn("分享计数增量通知 tf-counter 失败（fail-open，不影响主流程）: postId={}, {}",
+                    postId, e.getMessage());
+        }
     }
 
     private String shortPath(String code) {

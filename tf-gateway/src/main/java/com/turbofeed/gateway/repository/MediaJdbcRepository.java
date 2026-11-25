@@ -433,11 +433,12 @@ public class MediaJdbcRepository {
     }
 
     /**
-     * 帖代表行解析（postId → 代表 media_id + 归属 user_id + 当前状态）。
+     * 帖代表行解析（postId → 代表 media_id + 归属 user_id + 当前状态 + 封面 url + caption）。
      *
      * <p><b>用途</b>：行为上报链路只携带 {@code postId}（帖身份），而审核/复审任务以
      * 代表行 {@code media_id} 为对象（整帖一审语义）。本方法把 postId 解析回代表行，
-     * 供「热度阈值复审」（changelog 0066）建任务时使用。</p>
+     * 供「热度阈值复审」（changelog 0066）建任务时使用；短链分享也用它取卡片快照的
+     * caption（帖子级属性，代表行与帖内其余行同值，取 seq=0 即可）。</p>
      *
      * <p><b>分片路由</b>：{@code post_id} 不是分片键，本查询会广播到全部分片；但 {@code post_id}
      * 由上传时生成的雪花 UUID 保证全局唯一，结果至多一行，属「高基数列点查」而非范围扫，
@@ -450,20 +451,21 @@ public class MediaJdbcRepository {
             return null;
         }
         List<PostRepresentative> rows = jdbcTemplate.query(
-                "SELECT media_id, user_id, status, url FROM media WHERE post_id = ? AND " + REPRESENTATIVE_CONDITION
-                        + " LIMIT 1",
+                "SELECT media_id, user_id, status, url, caption FROM media WHERE post_id = ? AND "
+                        + REPRESENTATIVE_CONDITION + " LIMIT 1",
                 (rs, rn) -> new PostRepresentative(
                         rs.getString("media_id"),
                         rs.getLong("user_id"),
                         toStatus(rs.getInt("status")),
                         // 现签（minio 私有桶→预签名），避免给 AI 机审/复审下发过期 URL 拉不到图
-                        urlResolver.resolve(rs.getString("media_id"))),
+                        urlResolver.resolve(rs.getString("media_id")),
+                        rs.getString("caption")),
                 postId);
         return rows.isEmpty() ? null : rows.get(0);
     }
 
-    /** 帖代表行解析结果（postId → 代表 media_id + 归属 user_id + 当前状态 + 封面 url）。 */
-    public record PostRepresentative(String mediaId, long authorId, MediaStatus status, String url) {
+    /** 帖代表行解析结果（postId → 代表 media_id + 归属 user_id + 当前状态 + 封面 url + caption）。 */
+    public record PostRepresentative(String mediaId, long authorId, MediaStatus status, String url, String caption) {
     }
 
     /**

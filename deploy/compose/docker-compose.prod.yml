@@ -152,6 +152,9 @@ services:
       TURBOFEED_MINIO_ACCESS_KEY: ${TURBOFEED_MINIO_ACCESS_KEY:?请在 deploy/env/.env 中设置 TURBOFEED_MINIO_ACCESS_KEY}
       TURBOFEED_MINIO_SECRET_KEY: ${TURBOFEED_MINIO_SECRET_KEY:?请在 deploy/env/.env 中设置 TURBOFEED_MINIO_SECRET_KEY}
       TURBOFEED_MEDIA_PUBLIC_URL_BASE: ${TURBOFEED_MEDIA_PUBLIC_URL_BASE:?生产必须是外部可达的 URL 前缀}
+      # 短链跳转落地页：前端静态服务独立域名，必须显式给完整 URL。
+      # 代码默认是相对路径 /feed.html（会跳到网关自身域名），生产不可依赖该默认值。
+      TURBOFEED_SHARE_FRONTEND_URL: ${TURBOFEED_SHARE_FRONTEND_URL:?生产必须配置短链落地页完整 URL，如 https://feed.example.com/feed.html}
       # 网关与引擎必须同值；prod profile 无默认值，缺失直接启动失败（fail-fast）
       TURBOFEED_INTERNAL_TOKEN: ${TURBOFEED_INTERNAL_TOKEN:?请在 deploy/env/.env 中设置 TURBOFEED_INTERNAL_TOKEN}
       TURBOFEED_MQ_ENABLED: ${TURBOFEED_MQ_ENABLED:-false}

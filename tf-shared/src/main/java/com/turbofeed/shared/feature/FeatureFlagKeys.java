@@ -63,7 +63,11 @@ public final class FeatureFlagKeys {
     public static final String SHARE_CODE_SECRET = "turbofeed.share.code-secret";
     /** 短链对外基址（为空时返回相对路径 /s/{code}，由前端拼域名）。 */
     public static final String SHARE_BASE_URL = "turbofeed.share.base-url";
-    /** 短链跳转成功后的前端落地页地址（前端由独立静态服务托管，不在网关静态目录）。 */
+    /**
+     * 短链跳转成功后的前端落地页地址（前端由独立静态服务托管，不在网关静态目录）。
+     * 默认是站点相对路径 {@code /feed.html}（302 允许相对 Location，按当前 host 解析）；
+     * 前端独立域名部署时必须显式配置完整 URL，不可留默认。
+     */
     public static final String SHARE_FRONTEND_URL = "turbofeed.share.frontend-url";
 
     // ===== 缓存失效广播 =====
