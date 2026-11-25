@@ -58,6 +58,14 @@ public final class FeatureFlagKeys {
     // ===== 媒资存储（minio / local / placeholder）=====
     public static final String MEDIA_STORAGE = "turbofeed.media.storage";
 
+    // ===== 短链分享 =====
+    /** 分享短码混淆密钥（生产必须显式配置，默认串仅供本地演示）。 */
+    public static final String SHARE_CODE_SECRET = "turbofeed.share.code-secret";
+    /** 短链对外基址（为空时返回相对路径 /s/{code}，由前端拼域名）。 */
+    public static final String SHARE_BASE_URL = "turbofeed.share.base-url";
+    /** 短链跳转成功后的前端落地页地址（前端由独立静态服务托管，不在网关静态目录）。 */
+    public static final String SHARE_FRONTEND_URL = "turbofeed.share.frontend-url";
+
     // ===== 缓存失效广播 =====
     public static final String STATE_CACHE_BROADCAST_ENABLED = "turbofeed.state-cache.broadcast-enabled";
 

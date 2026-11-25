@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -33,6 +34,16 @@ class ApiPathGateTest {
     /** 当前控制器数量的下限（写死一个下界而不是精确值：新增控制器不需要改这个数字，删到异常才红）。 */
     private static final int MIN_CONTROLLERS = 17;
 
+    /**
+     * 刻意不版本化的公开入口白名单（新增条目必须写明理由，否则视为债务）。
+     *
+     * <p>{@code ShortLinkController} 的 {@code /s/{code}} 是给人类点击的<b>短链永久契约</b>：
+     * 加 {@code /api/v1} 前缀会让短链失去意义（URL 从 16 字符膨胀到 40+），且它只做 302 跳转 +
+     * 状态校验，不暴露任何业务数据契约。豁免类仍必须声明类级 {@code @RequestMapping}，便于路由收敛。</p>
+     */
+    private static final Set<String> PUBLIC_NON_VERSIONED =
+            Set.of("com.turbofeed.gateway.controller.ShortLinkController");
+
     @Test
     void 所有控制器都必须声明版本前缀或内部前缀() {
         ClassPathScanningCandidateComponentProvider scanner =
@@ -55,6 +66,12 @@ class ApiPathGateTest {
                 continue;
             }
             String[] paths = mapping == null ? new String[0] : mapping.value();
+            if (PUBLIC_NON_VERSIONED.contains(className)) {
+                if (paths.length == 0) {
+                    violations.add(className + "：豁免类仍必须声明类级 @RequestMapping（便于路由收敛）");
+                }
+                continue;
+            }
             if (paths.length == 0) {
                 violations.add(className + "：未声明类级 @RequestMapping（端点会挂在根路径）");
                 continue;

@@ -135,6 +135,13 @@ public class FeedTimelineStore {
         detach(timelineKey, null);
         redisTemplate.opsForZSet().add(key, member, approvedAt.toEpochMilli());
         redisTemplate.expire(key, BUCKET_TTL);
+        // 反查索引：帖身份 → (桶 key + member 全文)，相当于图书馆索书号卡片。
+        // 为什么必须有：ZSET 的 member 是整帖 JSON，ZREM 必须传入写入时的 member 原文（差一字节都删不掉），
+        // 而手里只有 postId，既反推不出 member 全文，也不知道落在「日期 × 池」9 个桶里的哪一个。
+        // value 因此存 member 全文而非只存桶 key——删除时直接拿来用，无需重新拼装 JSON。
+        // 没有它：removeStrict 退化成 scanRemoveStrict 扫 9 桶 × 每桶 500 条逐个比对，
+        // 被挤出最新 500 条的内容漏删 → 已下架内容仍出现在推荐流，属合规事故。
+        // 代价：多一次 SET 写放大，换下架时与桶内条数无关的 O(1) 精确 ZREM。
         redisTemplate.opsForValue().set(indexKey(timelineKey), indexValue(key, member), BUCKET_TTL);
         // 关注流作者索引（G6）：denormalized 同成员串，score = 入流时刻；关注召回依此取作者近期内容。
         String authorId = authorIdOf(item);

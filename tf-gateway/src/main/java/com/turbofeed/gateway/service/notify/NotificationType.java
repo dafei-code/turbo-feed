@@ -10,6 +10,7 @@ package com.turbofeed.gateway.service.notify;
  *   <li>{@code MENTION}      有人在评论 / @ 中提到了你</li>
  *   <li>{@code FOLLOW}       有人关注了你</li>
  *   <li>{@code FAVORITE}     有人收藏了你的内容</li>
+ *   <li>{@code SHARE}        好友把你的内容分享给你（短链分享，方案 §4.4）</li>
  *   <li>{@code SYSTEM}       系统公告 / 平台消息（广播写全量收件箱）</li>
  *   <li>{@code REVIEW_RESULT} 你的内容审核结果（通过 / 驳回）</li>
  * </ul>
@@ -21,6 +22,7 @@ public enum NotificationType {
     MENTION,
     FOLLOW,
     FAVORITE,
+    SHARE,
     SYSTEM,
     REVIEW_RESULT
 }

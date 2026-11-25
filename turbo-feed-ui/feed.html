@@ -406,6 +406,26 @@
     transition: .2s;
   }
   .share-pop.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+  /* 分享给互关好友的选择面板：复用分享弹层的暗色风格，选中项提交给后端校验互关 */
+  .friend-pop {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%) translateY(8px);
+    width: min(360px, 86vw); max-height: 60vh; overflow-y: auto;
+    background: #1a1a1a; border: 1px solid rgba(255,255,255,.12); border-radius: 14px;
+    padding: 18px; z-index: 40; color: #e6edf3; font-size: 14px;
+    box-shadow: 0 18px 48px rgba(0,0,0,.55);
+    opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s;
+  }
+  .friend-pop.show { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) translateY(0); }
+  .friend-pop h4 { margin: 0 0 12px; font-size: 15px; }
+  .friend-pop label { display: block; padding: 8px 6px; border-radius: 8px; cursor: pointer; }
+  .friend-pop label:hover { background: rgba(255,255,255,.06); }
+  .friend-pop .fp-actions { display: flex; gap: 8px; margin-top: 14px; }
+  .friend-pop button {
+    flex: 1; padding: 9px 12px; border: 0; border-radius: 8px; cursor: pointer;
+    background: #fe2c55; color: #fff; font-size: 13px;
+  }
+  .friend-pop button.ghost { background: rgba(255,255,255,.1); }
+  .friend-pop .fp-tip { color: #8b98ab; font-size: 12px; line-height: 1.6; }
   .share-pop li {
     list-style: none; padding: 9px 16px;
     font-size: 13px; color: #ccc; cursor: pointer;
@@ -823,6 +843,9 @@
   <li data-to="wechat" data-page-node-id="UocuFQf3JfuutaZF0RPBBQ">分享到微信</li>
 </ul>
 
+<!-- 分享给互关好友（动态填充关注列表，服务端二次校验互关） -->
+<div class="friend-pop" id="friendPicker"></div>
+
 <script>
   // ========== 搜索入口：跳到独立搜索页（search.html），带上当前输入词 ==========
   // 之前搜索框是纯静态摆设（无 id、无事件），点按钮无任何反应；后端 /api/v1/search/*
@@ -1134,6 +1157,18 @@
     setPlay(0, true);
     dwellIdx = -1;              // 重新渲染 = 新一次列表，重置停留计时避免把上一批算进来
     onEnterItem(0);             // 首条曝光
+    focusSharedPost();          // 短链跳回时定位到被分享的那条
+  }
+
+  /** 短链落地：后端 302 带 ?post=&trace=&sharer=，这里只消费 post 定位内容。 */
+  function focusSharedPost() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      var post = params.get('post');
+      if (!post) return;
+      var idx = videos.findIndex(function (v) { return v.postId === post || v.id === post; });
+      if (idx >= 0) { setTimeout(function () { gotoVideo(idx); }, 250); }
+    } catch (e) { /* 不支持 URLSearchParams 的旧浏览器：忽略即可，不影响正常浏览 */ }
   }
 
   // ========== 一帖多图：轮播（滑动 + 圆点 + 「n/总数」计数，抖音图文口径） ==========
@@ -1809,31 +1844,106 @@
     });
   }
 
-  // ========== 分享 ==========
+  // ========== 分享（接后端短链 API） ==========
   const sharePop = document.getElementById('sharePop');
+  const friendPicker = document.getElementById('friendPicker');
+
+  /**
+   * 所有分享入口共用一次后端调用：生成真短链 + 可选好友通知。
+   * 失败由 TF.api 统一 toast；成功沿用原有 SHARE 行为埋点（服务端热度权重 2.0）。
+   */
+  function createShortLink(friendIds) {
+    const v = videos[currentIdx];
+    if (!v || !v.id) { toast('该内容无法分享'); return Promise.reject(new Error('no post')); }
+    if (!TF.getToken()) { toast('请先登录'); return Promise.reject(new Error('no login')); }
+    return TF.api('/api/v1/share/create', {
+      method: 'POST',
+      json: { postId: v.id, friendIds: friendIds || [] }
+    }).then(function (res) {
+      v.share++;
+      document.getElementById('shareCount').textContent = fmt(v.share);
+      track(v.id, 'SHARE', { position: currentIdx });
+      return res;
+    });
+  }
+
+  function shortLinkUrl(code) { return TF_url('/s/' + code); }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    // file:// / 非安全上下文无 clipboard API：退回手动复制，不能静默失败
+    window.prompt('复制短链：', text);
+    return Promise.resolve();
+  }
+
+  /** 好友候选来自关注列表；互关关系由服务端二次校验，前端勾选不可信。 */
+  function openFriendPicker() {
+    if (!TF.getToken()) { toast('请先登录'); return; }
+    friendPicker.innerHTML = '<h4>选择好友（互关）</h4><div class="fp-tip">加载关注列表…</div>';
+    friendPicker.classList.add('show');
+    TF.api('/api/v1/social/following?limit=100', { silent: true }).then(function (data) {
+      const ids = (data && data.items) || [];
+      if (!ids.length) {
+        friendPicker.innerHTML = '<h4>选择好友（互关）</h4>'
+          + '<div class="fp-tip">你还没有关注的人。互相关注后即可直接分享给好友。</div>'
+          + '<div class="fp-actions"><button class="ghost" data-fp="close">关闭</button></div>';
+        return;
+      }
+      friendPicker.innerHTML = '<h4>选择好友（互关）</h4>'
+        + '<div class="fp-tip">仅互关好友会收到站内通知，非互关由服务端跳过。</div>'
+        + ids.map(function (id) {
+            const sid = String(id);
+            return '<label><input type="checkbox" value="' + sid + '"> 用户 ' + sid + '</label>';
+          }).join('')
+        + '<div class="fp-actions"><button class="ghost" data-fp="close">取消</button>'
+        + '<button data-fp="send">发送</button></div>';
+    }).catch(function () {
+      friendPicker.innerHTML = '<h4>选择好友（互关）</h4>'
+        + '<div class="fp-tip">关注列表加载失败，请稍后重试。</div>'
+        + '<div class="fp-actions"><button class="ghost" data-fp="close">关闭</button></div>';
+    });
+  }
+
+  friendPicker.addEventListener('click', function (e) {
+    const act = e.target.dataset.fp;
+    if (act === 'close') { friendPicker.classList.remove('show'); return; }
+    if (act !== 'send') return;
+    const ids = Array.from(friendPicker.querySelectorAll('input[type=checkbox]:checked'))
+      .map(function (el) { return Number(el.value); })
+      .filter(function (n) { return n > 0; });
+    friendPicker.classList.remove('show');
+    createShortLink(ids).then(function (res) {
+      toast(res.notifiedFriends > 0
+        ? '短链已生成，已通知 ' + res.notifiedFriends + ' 位好友'
+        : '短链已生成（没有互关好友收到通知）');
+    }).catch(function () {});
+  });
+
   document.getElementById('btnShare').addEventListener('click', function (e) {
     e.stopPropagation();
     sharePop.classList.toggle('show');
   });
-  document.addEventListener('click', () => sharePop.classList.remove('show'));
+  document.addEventListener('click', function () {
+    sharePop.classList.remove('show');
+    friendPicker.classList.remove('show');
+  });
   sharePop.addEventListener('click', function (e) {
     e.stopPropagation();
     const to = e.target.dataset.to;
     if (!to) return;
-    const v = videos[currentIdx];
-    if (to === 'copy') {
-      navigator.clipboard && navigator.clipboard.writeText('https://turbofeed.dev/v/' + v.id);
-      toast('链接已复制');
-    } else if (to === 'friend') {
-      v.share++;
-      // 分享是最强的传播信号（服务端热度权重 2.0，高于点赞 1.0）
-      track(v.id, 'SHARE', { position: currentIdx });
-      document.getElementById('shareCount').textContent = fmt(v.share);
-      toast('已推荐给朋友');
-    } else if (to === 'wechat') {
-      toast('请使用微信扫码分享（演示）');
-    }
     sharePop.classList.remove('show');
+    if (to === 'friend') { openFriendPicker(); return; }
+    createShortLink([]).then(function (res) {
+      if (to === 'copy') {
+        copyText(shortLinkUrl(res.code)).then(function () { toast('短链已复制'); });
+      } else if (to === 'wechat') {
+        copyText(shortLinkUrl(res.code)).then(function () {
+          toast('短链已复制，可粘贴到微信发送');
+        });
+      }
+    }).catch(function () {});
   });
 
   document.getElementById('btnMore').addEventListener('click', function () {

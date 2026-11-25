@@ -257,6 +257,20 @@ rules:
         keyGenerateStrategy:
           column: id
           keyGeneratorName: snowflake
+      # 逻辑表 share_record：短链映射（方案 §4.2），分片键 code（跳转点查单分片）；
+      # hashMod128，物理表 share_record_0..127 由 deploy/mysql/share_record_128.sql 建，
+      # 偶数下标 ds_0=turbo_feed_1、奇数 ds_1=turbo_feed_2。
+      # ⚠️ 主键由应用层 SnowflakeIdGenerator 生成；此处 keyGenerateStrategy 仅兜底。
+      share_record:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: code
+            shardingAlgorithmName: hashMod128
+        keyGenerateStrategy:
+          column: id
+          keyGeneratorName: snowflake
+
     shardingAlgorithms:
       # 分片数 4：user / account_credit / violation_record / account_penalty / report / appeal / comment
       hashMod4:
