@@ -49,6 +49,9 @@ class ShareServiceTest {
     private UploadRateLimiter rateLimiter;
     private ObjectProvider<CounterEventPublisher> counterProvider;
     private CounterEventPublisher counterPublisher;
+    private ShareMappingCache mappingCache;
+    private ObjectProvider<ShareBloomFilter> bloomProvider;
+    private ShareBloomFilter bloomFilter;
     private ShareService service;
 
     private static final String POST_ID = "post-share-001";
@@ -66,6 +69,15 @@ class ShareServiceTest {
         rateLimiter = mock(UploadRateLimiter.class);
         counterProvider = mock(ObjectProvider.class);
         counterPublisher = mock(CounterEventPublisher.class);
+        mappingCache = mock(ShareMappingCache.class);
+        bloomProvider = mock(ObjectProvider.class);
+        bloomFilter = mock(ShareBloomFilter.class);
+        // L1 mock 默认直调 loader（模拟缓存未命中），BF 默认不存在（关闭）
+        org.mockito.Mockito.doAnswer(inv -> {
+            java.util.function.Supplier<?> loader = inv.getArgument(1);
+            return loader.get();
+        }).when(mappingCache).getOrLoad(anyString(), any());
+        when(bloomProvider.getIfAvailable()).thenReturn(null);
 
         when(idGenerator.nextId()).thenReturn(123456789L);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
@@ -90,7 +102,17 @@ class ShareServiceTest {
                 notificationGenerator,
                 rateLimiter,
                 counterProvider,
+                mappingCache,
+                bloomProvider,
+                true,   // share enabled
                 "");
+    }
+
+    private ShareService newService(boolean enabled, ObjectProvider<ShareBloomFilter> bfProvider) {
+        return new ShareService(shareRepository, new ShareCodeGenerator("test-share-secret"),
+                idGenerator, redisTemplate, new ObjectMapper(), mediaRepository,
+                mock(MediaQueryService.class), followService, notificationGenerator, rateLimiter,
+                counterProvider, mappingCache, bfProvider, enabled, "");
     }
 
     private void mockPost(String caption) {
@@ -176,5 +198,67 @@ class ShareServiceTest {
         assertEquals(HttpStatus.OK, response.getStatusCode());
         assertTrue(response.getBody().toString().contains("该内容已不可用"));
         Mockito.verifyNoInteractions(counterPublisher);
+    }
+
+    // ===== 新增五项的单测 =====
+
+    @Test
+    void createRejectedWhenShareDisabled() {
+        mockPost("caption");
+        ShareService disabled = newService(false, bloomProvider);
+        org.junit.jupiter.api.Assertions.assertThrows(ShareException.class,
+                () -> disabled.create(SHARER_ID, POST_ID, List.of()),
+                "开关关闭时创建应被拒绝");
+        verify(shareRepository, never()).insert(any());
+    }
+
+    @Test
+    void createWarmsL1AndAddsToBloom() {
+        mockPost("caption");
+        when(bloomProvider.getIfAvailable()).thenReturn(bloomFilter);
+        org.mockito.Mockito.doAnswer(inv -> {
+            java.util.function.Consumer<ShareBloomFilter> c = inv.getArgument(0);
+            c.accept(bloomFilter);
+            return null;
+        }).when(bloomProvider).ifAvailable(any());
+        ShareService withBf = newService(true, bloomProvider);
+
+        ShareService.CreateResult result = withBf.create(SHARER_ID, POST_ID, List.of());
+
+        verify(mappingCache).getOrLoad(eq(result.code()), any());
+        verify(bloomFilter).add(result.code());
+    }
+
+    @Test
+    void resolveRejectsWhenBloomSaysAbsentAndEnforced() {
+        when(bloomProvider.getIfAvailable()).thenReturn(bloomFilter);
+        when(bloomFilter.shouldReject("randomcode")).thenReturn(true);
+        ShareService withBf = newService(true, bloomProvider);
+
+        assertEquals(null, withBf.resolve("randomcode"),
+                "BF 严格模式判定不存在时直接拒绝，不查缓存/DB");
+        verifyNoRedisOrDbLookup();
+    }
+
+    @Test
+    void resolveIgnoresBloomWhenShadowMode() {
+        when(bloomProvider.getIfAvailable()).thenReturn(bloomFilter);
+        when(bloomFilter.shouldReject("code123")).thenReturn(false); // shadow 恒 false
+        when(shareRepository.findByCode("code123")).thenReturn(java.util.Optional.of(
+                new ShareRecord("code123", 1L, POST_ID, "media-001", SHARER_ID, SHARER_ID,
+                        "{}", ShareRecord.STATUS_ACTIVE, java.time.Instant.now())));
+        MediaQueryService query = mock(MediaQueryService.class);
+        when(query.statusOf("media-001", String.valueOf(SHARER_ID))).thenReturn(MediaStatus.APPROVED);
+        ShareService withBf = new ShareService(shareRepository, new ShareCodeGenerator("test-share-secret"),
+                idGenerator, redisTemplate, new ObjectMapper(), mediaRepository,
+                query, followService, notificationGenerator, rateLimiter,
+                counterProvider, mappingCache, bloomProvider, true, "");
+
+        ShareService.ResolveResult r = withBf.resolve("code123");
+        assertNotNull(r, "shadow 模式 BF 不拦截，仍可解析");
+    }
+
+    private void verifyNoRedisOrDbLookup() {
+        verify(shareRepository, never()).findByCode(anyString());
     }
 }

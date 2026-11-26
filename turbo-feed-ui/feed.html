@@ -432,6 +432,39 @@
   }
   .share-pop li:hover { background: rgba(255,255,255,.08); color: #fff; }
 
+  /* ===== 分享卡片页（二维码 + 短链 + 快照） ===== */
+  .share-card-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 60;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .share-card-overlay.show { opacity: 1; pointer-events: auto; }
+  .share-card {
+    width: min(360px, 90vw); background: #1a1a1a; border: 1px solid rgba(255,255,255,.12);
+    border-radius: 16px; padding: 20px; color: #e6edf3; text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,.6); transform: translateY(10px); transition: transform .2s;
+  }
+  .share-card-overlay.show .share-card { transform: translateY(0); }
+  .share-card h3 { margin: 0 0 4px; font-size: 16px; }
+  .share-card .sc-sub { color: #8b98ab; font-size: 12px; margin-bottom: 14px; }
+  .share-card .sc-qr { display: inline-block; background: #fff; padding: 8px; border-radius: 8px; line-height: 0; }
+  .share-card .sc-qr svg { display: block; }
+  .share-card .sc-caption { margin: 14px 0 10px; font-size: 13px; color: #ccc; word-break: break-all; }
+  .share-card .sc-link {
+    display: block; font-size: 12px; color: #58a6ff; margin-bottom: 14px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .share-card .sc-actions { display: flex; gap: 8px; }
+  .share-card .sc-actions button {
+    flex: 1; padding: 9px 12px; border: 0; border-radius: 8px; cursor: pointer;
+    background: #fe2c55; color: #fff; font-size: 13px;
+  }
+  .share-card .sc-actions button.ghost { background: rgba(255,255,255,.1); }
+  .share-card .sc-close {
+    position: absolute; top: -38px; right: 0; color: #fff; font-size: 22px;
+    cursor: pointer; background: none; border: 0;
+  }
+
   /* Toast */
   .toast {
     position: absolute; left: 50%; top: 80px; transform: translateX(-50%);
@@ -699,6 +732,7 @@
 </head>
   <script src="sanitize.js"></script>
   <script src="config.js"></script>
+  <script src="qrcode.js"></script>
   <script src="api.js"></script>
 <body data-page-node-id="Ax6LENLAQutQI0qFnRZ92A">
 
@@ -839,12 +873,29 @@
 <!-- 分享弹窗 -->
 <ul class="share-pop" id="sharePop" data-page-node-id="axCZmezu3V1IeVxCHFcia2">
   <li data-to="friend" data-page-node-id="nYthS8ucUqzLDhAXWNPWyg">推荐给朋友</li>
+  <li data-to="qrcode">生成二维码卡片</li>
   <li data-to="copy" data-page-node-id="Iv5FlPHDDiwFizPICIQ8Dz">复制链接</li>
   <li data-to="wechat" data-page-node-id="UocuFQf3JfuutaZF0RPBBQ">分享到微信</li>
 </ul>
 
 <!-- 分享给互关好友（动态填充关注列表，服务端二次校验互关） -->
 <div class="friend-pop" id="friendPicker"></div>
+
+<!-- 分享卡片页：二维码 + 短链 + 快照 -->
+<div class="share-card-overlay" id="shareCardOverlay">
+  <div class="share-card" style="position:relative">
+    <button class="sc-close" id="scClose" aria-label="关闭">✕</button>
+    <h3>扫码查看作品</h3>
+    <div class="sc-sub">用手机相机扫描二维码，或直接复制链接</div>
+    <div class="sc-qr" id="scQr"></div>
+    <div class="sc-caption" id="scCaption"></div>
+    <div class="sc-link" id="scLink"></div>
+    <div class="sc-actions">
+      <button class="ghost" id="scCopy">复制链接</button>
+      <button id="scDone">完成</button>
+    </div>
+  </div>
+</div>
 
 <script>
   // ========== 搜索入口：跳到独立搜索页（search.html），带上当前输入词 ==========
@@ -1869,6 +1920,29 @@
 
   function shortLinkUrl(code) { return TF_url('/s/' + code); }
 
+  /** 分享卡片页：展示可扫码的短链二维码 + 后端快照文案。 */
+  const shareCardOverlay = document.getElementById('shareCardOverlay');
+  let shareCardUrl = '';
+  function openShareCard(res) {
+    if (!window.QrCode) { toast('二维码组件加载失败'); return; }
+    shareCardUrl = shortLinkUrl(res.code);
+    let caption = '';
+    try { caption = (JSON.parse(res.snapshotJson || '{}').caption) || ''; } catch (e) { /* 快照损坏不阻断二维码 */ }
+    document.getElementById('scQr').innerHTML = window.QrCode.svg(shareCardUrl, 6);
+    document.getElementById('scCaption').textContent = caption || '分享一个精彩作品';
+    document.getElementById('scLink').textContent = shareCardUrl;
+    shareCardOverlay.classList.add('show');
+  }
+  function closeShareCard() { shareCardOverlay.classList.remove('show'); }
+  document.getElementById('scClose').addEventListener('click', closeShareCard);
+  document.getElementById('scDone').addEventListener('click', closeShareCard);
+  shareCardOverlay.addEventListener('click', function (e) {
+    if (e.target === shareCardOverlay) closeShareCard();
+  });
+  document.getElementById('scCopy').addEventListener('click', function () {
+    copyText(shareCardUrl).then(function () { toast('短链已复制'); });
+  });
+
   function copyText(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       return navigator.clipboard.writeText(text);
@@ -1936,7 +2010,9 @@
     sharePop.classList.remove('show');
     if (to === 'friend') { openFriendPicker(); return; }
     createShortLink([]).then(function (res) {
-      if (to === 'copy') {
+      if (to === 'qrcode') {
+        openShareCard(res);
+      } else if (to === 'copy') {
         copyText(shortLinkUrl(res.code)).then(function () { toast('短链已复制'); });
       } else if (to === 'wechat') {
         copyText(shortLinkUrl(res.code)).then(function () {

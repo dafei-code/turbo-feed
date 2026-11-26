@@ -69,6 +69,18 @@ public final class FeatureFlagKeys {
      * 前端独立域名部署时必须显式配置完整 URL，不可留默认。
      */
     public static final String SHARE_FRONTEND_URL = "turbofeed.share.frontend-url";
+    /** 分享功能总开关（默认开启；关闭后创建接口直接拒绝，已生成的短链跳转不受影响）。 */
+    public static final String SHARE_ENABLED = "turbofeed.share.enabled";
+    /** 热点短链本地缓存（L1）：默认开启，Redis 未起时也能命中，降低跳转读放大。 */
+    public static final String SHARE_CACHE_ENABLED = "turbofeed.share.cache-enabled";
+    /** 热点短链本地缓存条目 TTL（秒，默认 60）。 */
+    public static final String SHARE_CACHE_TTL_SECONDS = "turbofeed.share.cache-ttl-seconds";
+    /** 热点短链本地缓存最大条目数（默认 10000）。 */
+    public static final String SHARE_CACHE_MAX_ENTRIES = "turbofeed.share.cache-max-entries";
+    /** 布隆过滤器防穿透（默认关闭，需回填 + shadow 7 天后才开 enforce）。 */
+    public static final String SHARE_BLOOM_FILTER_ENABLED = "turbofeed.share.bloom-filter-enabled";
+    /** 布隆过滤器严格模式（默认 false = shadow 只观测不拦截）。 */
+    public static final String SHARE_BLOOM_FILTER_ENFORCE = "turbofeed.share.bloom-filter-enforce";
 
     // ===== 缓存失效广播 =====
     public static final String STATE_CACHE_BROADCAST_ENABLED = "turbofeed.state-cache.broadcast-enabled";

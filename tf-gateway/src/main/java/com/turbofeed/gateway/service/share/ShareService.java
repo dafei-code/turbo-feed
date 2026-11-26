@@ -60,6 +60,9 @@ public class ShareService {
     private final NotificationGenerator notificationGenerator;
     private final UploadRateLimiter rateLimiter;
     private final ObjectProvider<CounterEventPublisher> counterPublisher;
+    private final ShareMappingCache mappingCache;
+    private final ObjectProvider<ShareBloomFilter> bloomFilter;
+    private final boolean enabled;
     private final String baseUrl;
 
     public ShareService(ShareRepository shareRepository,
@@ -73,6 +76,9 @@ public class ShareService {
                         NotificationGenerator notificationGenerator,
                         UploadRateLimiter rateLimiter,
                         ObjectProvider<CounterEventPublisher> counterPublisher,
+                        ShareMappingCache mappingCache,
+                        ObjectProvider<ShareBloomFilter> bloomFilter,
+                        @Value("${" + FeatureFlagKeys.SHARE_ENABLED + ":true}") boolean enabled,
                         @Value("${" + FeatureFlagKeys.SHARE_BASE_URL + ":}") String baseUrl) {
         this.shareRepository = shareRepository;
         this.codeGenerator = codeGenerator;
@@ -85,6 +91,9 @@ public class ShareService {
         this.notificationGenerator = notificationGenerator;
         this.rateLimiter = rateLimiter;
         this.counterPublisher = counterPublisher;
+        this.mappingCache = mappingCache;
+        this.bloomFilter = bloomFilter;
+        this.enabled = enabled;
         this.baseUrl = baseUrl == null ? "" : baseUrl.trim().replaceAll("/+$", "");
     }
 
@@ -96,6 +105,9 @@ public class ShareService {
      * @param friendIds 可选：互关好友列表，逐个发站内通知
      */
     public CreateResult create(long sharerId, String postId, List<Long> friendIds) {
+        if (!enabled) {
+            throw new ShareException(ErrorCode.FORBIDDEN, "分享功能已关闭");
+        }
         if (postId == null || postId.isBlank()) {
             throw new ShareException(ErrorCode.PARAM_ERROR, "postId 不能为空");
         }
@@ -150,6 +162,13 @@ public class ShareService {
             throw new ShareException(ErrorCode.INTERNAL_ERROR, "短链生成失败，请重试");
         }
 
+        // 附加优化项（均 fail-open，失败绝不回滚已创建的短链）：
+        final ShareRecord saved = created; // lambda 捕获需要 effectively final
+        // ① 预热 L1：新 code 刚生成必然热点，直接进本地缓存，省掉首次跳转的 Redis/DB 读。
+        mappingCache.getOrLoad(saved.code(), () -> saved);
+        // ② BF add：只在 DB/Redis 写入成功后加位；漏加由回填 Runner 补齐（方案 §4.8.3）。
+        bloomFilter.ifAvailable(bf -> bf.add(saved.code()));
+
         // 分享计数：只统计"实际创建成功的短链"（方案 §4.7 / §8.1），跳转 /s/{code} 不重复计数。
         // 与 Redis 计数（如点赞）不同，分享数只做聚合底座，不参与去重 Set 的幂等口径。
         notifyCounter(created.postId());
@@ -165,6 +184,12 @@ public class ShareService {
      */
     public ResolveResult resolve(String code) {
         if (code == null || code.isBlank()) {
+            return null;
+        }
+        // BF 前置闸门：确定不存在时一次 Redis/DB 都不碰；默认关闭时 ifAvailable 不执行任何动作。
+        // shadow 模式（enforce=false）shouldReject 恒 false，只打点不拦截；Redis 异常 fail-open。
+        ShareBloomFilter bf = bloomFilter.getIfAvailable();
+        if (bf != null && bf.shouldReject(code)) {
             return null;
         }
         ShareRecord record = load(code);
@@ -185,6 +210,33 @@ public class ShareService {
         return new ResolveResult(record.postId(), record.ownerId(), record.snapshotJson());
     }
 
+    /**
+     * 运营盘点（P1-1）：按状态/分享者过滤 + code 游标分页。
+     * 查询经 Service 收敛，Controller 不直连 Repository（架构门禁零例外）。
+     */
+    public AdminShareList listForAdmin(Integer status, Long sharerId, String cursor, int limit) {
+        int size = Math.max(1, Math.min(limit, 100));
+        List<ShareRecord> rows = shareRepository.listForAdmin(status, sharerId, cursor, size);
+        boolean hasMore = rows.size() > size;
+        if (hasMore) {
+            rows = rows.subList(0, size);
+        }
+        String next = hasMore && !rows.isEmpty() ? rows.get(rows.size() - 1).code() : null;
+        return new AdminShareList(rows, next);
+    }
+
+    /** 运营作废单条短链：DB 置失效 + 清 L1/L2 缓存，幂等。返回是否实际作废了一行。 */
+    public boolean invalidateByCode(String code) {
+        if (code == null || code.isBlank()) {
+            return false;
+        }
+        int updated = shareRepository.invalidate(code);
+        if (updated > 0) {
+            invalidate(code); // 清 L1 + L2，让作废即时生效
+        }
+        return updated > 0;
+    }
+
     /** 我的分享列表（返回下一页游标；无更多时为 0）。 */
     public MyShareList myShares(long sharerId, long cursor, int limit) {
         int size = Math.max(1, Math.min(limit, 100));
@@ -203,7 +255,35 @@ public class ShareService {
 
     // ==================== 内部实现 ====================
 
+    /**
+     * 失效短链映射（运营作废 / 内容下架链路调用）：先清 L1 并广播，再清 L2 Redis。
+     * 两次失效都 fail-open——清理失败由各自 TTL 兜底，不能让下架流程抛异常。
+     *
+     * <p>注意：BF 位图<b>不删位</b>（方案 §4.8.5）：已删除 code 仍被判"可能存在"，继续查 Redis/DB，
+     * 由状态校验返回不可用页，正确性不受影响，只损失一点过滤率。</p>
+     */
+    public void invalidate(String code) {
+        if (code == null || code.isBlank()) {
+            return;
+        }
+        try {
+            mappingCache.invalidate(code);
+        } catch (Exception e) {
+            log.warn("短链 L1 失效失败: code={}, {}", code, e.getMessage());
+        }
+        try {
+            redisTemplate.delete(CACHE_PREFIX + code);
+        } catch (Exception e) {
+            log.warn("短链 L2 失效失败: code={}, {}", code, e.getMessage());
+        }
+    }
+
+    /** 三级读：L1 进程内 → L2 Redis → DB。任一级失败自动降级到下一级，绝不阻断跳转。 */
     private ShareRecord load(String code) {
+        return mappingCache.getOrLoad(code, () -> loadFromRedisOrDb(code));
+    }
+
+    private ShareRecord loadFromRedisOrDb(String code) {
         try {
             String cached = redisTemplate.opsForValue().get(CACHE_PREFIX + code);
             if (cached != null) {
@@ -326,5 +406,9 @@ public class ShareService {
 
     /** 我的分享分页。 */
     public record MyShareList(List<ShareView> items, long nextCursor) {
+    }
+
+    /** 运营盘点结果（含下一页 code 游标；null 表示无更多）。 */
+    public record AdminShareList(List<ShareRecord> items, String nextCursor) {
     }
 }
