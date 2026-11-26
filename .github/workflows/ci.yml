@@ -149,6 +149,8 @@ jobs:
       TURBOFEED_REDIS_PASSWORD: ci-placeholder
       TURBOFEED_REDIS_CLUSTER_NODES: redis-0:7000,redis-1:7000,redis-2:7000
       TURBOFEED_MEDIA_PUBLIC_URL_BASE: https://ci.example.com/turbo-feed-media/
+      # 短链落地页（prod 编排用 ${VAR:?} 强制必填，CI 必须给占位值才能通过 config --quiet）
+      TURBOFEED_SHARE_FRONTEND_URL: https://ci.example.com/feed.html
 
     steps:
       - name: Checkout
