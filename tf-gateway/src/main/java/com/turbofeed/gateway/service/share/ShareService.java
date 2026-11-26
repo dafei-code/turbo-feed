@@ -237,6 +237,61 @@ public class ShareService {
         return updated > 0;
     }
 
+    /**
+     * 内容下架/删除时按 postId 失效该帖所有短链（方案 §8.1 边界项）。
+     *
+     * <p><b>为什么必须做而不只靠 resolve 的状态校验</b>：跳转侧 {@code statusOf} 回源确实能挡住
+     * 下架内容（60s 旁路缓存内可能短暂放行），但 DB 的 share_record 仍留 ACTIVE、快照里还存着
+     * 敏感 caption/封面——这是残留数据与合规风险。本方法把三件事一次做完：
+     * ① DB 状态翻 INVALID；② 快照文案/封面打码；③ L1/L2 缓存即时失效。</p>
+     *
+     * <p><b>调用契约</b>：由 {@code ViolationDispositionService#takeDownAndPenalize} 在
+     * APPROVED→TAKEN_DOWN 的 CAS 成功后调用；整段 fail-open（下架主流程不能被短链清理拖垮），
+     * 且必须在事务提交后执行——{@code @TransactionalEventListener(AFTER_COMMIT)} 由适配层负责，
+     * 本方法只做同步清理动作。</p>
+     *
+     * @return 实际失效的短链条数（重复下架返回 0，幂等）
+     */
+    public int invalidateByPostId(String postId) {
+        if (postId == null || postId.isBlank()) {
+            return 0;
+        }
+        List<ShareRecord> records = shareRepository.findByPostId(postId);
+        int changed = 0;
+        for (ShareRecord record : records) {
+            try {
+                String redacted = redactSnapshot(record.snapshotJson());
+                if (shareRepository.invalidateAndRedact(record.code(), redacted) > 0) {
+                    changed++;
+                }
+                invalidate(record.code()); // 清 L1（含广播）+ L2，让下架即时生效
+            } catch (Exception e) {
+                log.warn("短链下架失效失败（fail-open）: code={}, postId={}, {}",
+                        record.code(), postId, e.getMessage());
+            }
+        }
+        if (changed > 0) {
+            log.info("内容下架→短链批量失效完成: postId={}, invalidated={}", postId, changed);
+        }
+        return changed;
+    }
+
+    /** 快照打码：清空 caption 与封面 URL，保留 postId/owner/sharer/createdAt 等结构化元数据。 */
+    private String redactSnapshot(String snapshotJson) {
+        if (snapshotJson == null || snapshotJson.isBlank()) {
+            return snapshotJson;
+        }
+        try {
+            ShareSnapshot snap = objectMapper.readValue(snapshotJson, ShareSnapshot.class);
+            ShareSnapshot redacted = new ShareSnapshot(snap.postId(), snap.mediaId(), "", "[内容已下架]",
+                    snap.ownerId(), snap.sharerId(), snap.createdAt());
+            return objectMapper.writeValueAsString(redacted);
+        } catch (Exception e) {
+            log.warn("短链快照打码失败（保留原 JSON，DB 状态仍会失效）: {}", e.getMessage());
+            return snapshotJson;
+        }
+    }
+
     /** 我的分享列表（返回下一页游标；无更多时为 0）。 */
     public MyShareList myShares(long sharerId, long cursor, int limit) {
         int size = Math.max(1, Math.min(limit, 100));

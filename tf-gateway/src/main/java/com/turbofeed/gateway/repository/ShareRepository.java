@@ -79,6 +79,39 @@ public class ShareRepository {
     }
 
     /**
+     * 按 postId 反查该帖全部短链（含已失效的，便于重复下架时幂等清理缓存）。
+     *
+     * <p><b>不带分片键</b>会广播 128 片（code 是分片键），但内容下架是低频管理操作，
+     * 与 {@link #listByUser} / {@link #scanCodesAfter} 同口径——不为它引入 postId→codes 的
+     * Redis 反查索引（索引与 DB 双写有一致性窗口，下架时反而可能漏清）。DB 是权威源。</p>
+     */
+    public List<ShareRecord> findByPostId(String postId) {
+        if (postId == null || postId.isBlank()) {
+            return List.of();
+        }
+        return jdbcTemplate.query(
+                "SELECT code, id, post_id, media_id, owner_id, sharer_id, snapshot_json, status, created_at "
+                        + "FROM share_record WHERE post_id = ?",
+                MAPPER, postId);
+    }
+
+    /**
+     * 下架单条短链：DB 状态置 INVALID 并把快照整体替换为打码后的 JSON（§8.1）。
+     *
+     * <p><b>按 code 更新</b>：code 是分片键，精准命中单分片，不广播。
+     * 快照必须逐条按原记录重新生成（保留 owner_id / sharer_id / created_at 各自的值），
+     * 不能用一条统一 JSON 覆盖整帖——那会把不同分享者的元数据冲成同一个。</p>
+     *
+     * <p>影响行数：1 = 实际翻转；0 = 已失效、不存在。配合 {@link #findByPostId} 由 Service
+     * 逐条调用，下架一个帖子的几十条短链各自命中单分片，比一条广播 UPDATE 更省 DB。</p>
+     */
+    public int invalidateAndRedact(String code, String redactedJson) {
+        return jdbcTemplate.update(
+                "UPDATE share_record SET status = ?, snapshot_json = ? WHERE code = ? AND status = ?",
+                ShareRecord.STATUS_INVALID, redactedJson, code, ShareRecord.STATUS_ACTIVE);
+    }
+
+    /**
      * 按 code 游标分页扫描全部短码（BF 回填专用，方案 §4.8.4）。
      *
      * <p>不带分片键会广播 128 片，但回填是启动时一次性的低频运维操作，可接受；

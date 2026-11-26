@@ -258,6 +258,67 @@ class ShareServiceTest {
         assertNotNull(r, "shadow 模式 BF 不拦截，仍可解析");
     }
 
+    // ===== 内容下架自动失效短链（§8.1）=====
+
+    @Test
+    void invalidateByPostIdRedactsAndClearsAllCodes() throws Exception {
+        String snap1 = new ObjectMapper().writeValueAsString(new ShareService.ShareSnapshot(
+                POST_ID, "media-001", "https://cdn.example.com/cover1.jpg", "敏感文案一",
+                SHARER_ID, SHARER_ID, 1000L));
+        String snap2 = new ObjectMapper().writeValueAsString(new ShareService.ShareSnapshot(
+                POST_ID, "media-001", "https://cdn.example.com/cover2.jpg", "敏感文案二",
+                SHARER_ID, 99L, 2000L));
+        when(shareRepository.findByPostId(POST_ID)).thenReturn(List.of(
+                new ShareRecord("codeA", 1L, POST_ID, "media-001", SHARER_ID, SHARER_ID,
+                        snap1, ShareRecord.STATUS_ACTIVE, java.time.Instant.now()),
+                new ShareRecord("codeB", 2L, POST_ID, "media-001", SHARER_ID, 99L,
+                        snap2, ShareRecord.STATUS_ACTIVE, java.time.Instant.now())));
+        when(shareRepository.invalidateAndRedact(anyString(), anyString())).thenReturn(1);
+
+        int n = service.invalidateByPostId(POST_ID);
+
+        assertEquals(2, n, "该帖两条短链都应失效");
+        verify(shareRepository).invalidateAndRedact(eq("codeA"), anyString());
+        verify(shareRepository).invalidateAndRedact(eq("codeB"), anyString());
+        verify(mappingCache).invalidate("codeA"); // L1（含广播）
+        verify(mappingCache).invalidate("codeB");
+        verify(redisTemplate).delete("tf:share:code:codeA"); // L2
+        verify(redisTemplate).delete("tf:share:code:codeB");
+
+        // 快照打码：caption / coverUrl 被清空，但各自 sharerId / createdAt 保留
+        org.mockito.ArgumentCaptor<String> captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(shareRepository, org.mockito.Mockito.times(2)).invalidateAndRedact(anyString(), captor.capture());
+        var redacted = new ObjectMapper().readValue(captor.getAllValues().get(0), ShareService.ShareSnapshot.class);
+        assertEquals("[内容已下架]", redacted.caption(), "敏感文案应打码");
+        assertEquals("", redacted.coverUrl(), "封面 URL 应清空");
+        assertEquals(SHARER_ID, redacted.ownerId());
+        assertEquals(1000L, redacted.createdAt());
+    }
+
+    @Test
+    void invalidateByPostIdSkipsBlankPostId() {
+        assertEquals(0, service.invalidateByPostId(""));
+        assertEquals(0, service.invalidateByPostId(null));
+        verify(shareRepository, never()).findByPostId(anyString());
+    }
+
+    @Test
+    void invalidateByPostIdContinuesWhenOneCodeFails() {
+        when(shareRepository.findByPostId(POST_ID)).thenReturn(List.of(
+                new ShareRecord("codeA", 1L, POST_ID, "media-001", SHARER_ID, SHARER_ID,
+                        "{}", ShareRecord.STATUS_ACTIVE, java.time.Instant.now()),
+                new ShareRecord("codeB", 2L, POST_ID, "media-001", SHARER_ID, 99L,
+                        "{}", ShareRecord.STATUS_ACTIVE, java.time.Instant.now())));
+        when(shareRepository.invalidateAndRedact(eq("codeA"), anyString()))
+                .thenThrow(new RuntimeException("db down"));
+        when(shareRepository.invalidateAndRedact(eq("codeB"), anyString())).thenReturn(1);
+
+        int n = service.invalidateByPostId(POST_ID);
+
+        assertEquals(1, n, "一条失败不影响另一条（fail-open）");
+        verify(mappingCache).invalidate("codeB");
+    }
+
     private void verifyNoRedisOrDbLookup() {
         verify(shareRepository, never()).findByCode(anyString());
     }

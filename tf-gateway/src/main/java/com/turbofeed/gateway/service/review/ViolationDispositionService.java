@@ -11,6 +11,7 @@ import com.turbofeed.gateway.service.penalty.ViolationSource;
 import com.turbofeed.gateway.service.health.AccountHealthService;
 import com.turbofeed.gateway.service.review.credit.AccountCreditService;
 import com.turbofeed.gateway.service.signal.ModerationSignalService;
+import com.turbofeed.gateway.service.share.ShareService;
 import com.turbofeed.gateway.service.behavior.BehaviorLogService;
 import com.turbofeed.gateway.service.event.outbox.OutboxEventType;
 import com.turbofeed.gateway.service.event.outbox.OutboxService;
@@ -23,6 +24,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 
@@ -65,6 +68,16 @@ public class ViolationDispositionService {
      */
     @Autowired(required = false)
     private OutboxService outboxService;
+
+    /**
+     * 分享短链失效（方案 §8.1）：内容下架时同步作废该帖所有短链并给快照打码。
+     *
+     * <p><b>同样用字段注入 + required=false</b>：本服务被多个单测按既有 11 参构造器手动 new，
+     * 加构造参数会编译断裂；脱离 Spring 时为 null，跳过短链清理（仅测试/直调场景）。
+     * 与 outboxService 并列，二者都是下架后的附加副作用。</p>
+     */
+    @Autowired(required = false)
+    private ShareService shareService;
 
     public ViolationDispositionService(MediaJdbcRepository mediaRepository,
                                        StringRedisTemplate redisTemplate,
@@ -291,6 +304,9 @@ public class ViolationDispositionService {
         int rows = mediaRepository.updateStatusCas(mediaId, authorId, MediaStatus.APPROVED, MediaStatus.TAKEN_DOWN);
         if (rows > 0) {
             delivery.removeFromTimeline(mediaId, authorId);
+            // 短链失效（方案 §8.1）：该帖所有短链 DB 置无效 + 快照打码 + L1/L2 缓存清理。
+            // 必须 afterCommit：缓存若在原事务提交前被清，跳转回源 DB 会读到未回滚的旧状态短暂放行。
+            invalidateSharesAfterCommit(mediaId, authorId);
             accountCreditService.onViolationConfirmed(authorId);
             // penalty 集成缝：确认违规 → 落处罚（与信用扣分同触发点，CAS 保证单次）。
             penaltyService.recordViolation(authorId, ViolationCategory.OTHER, severity,
@@ -315,5 +331,44 @@ public class ViolationDispositionService {
             }
         }
         return rows;
+    }
+
+    /**
+     * 下架后失效该帖全部短链（方案 §8.1），在事务提交后执行。
+     *
+     * <p><b>为什么 afterCommit</b>：短链失效含缓存清理（不可随 DB 事务回滚）。若在下架事务提交前
+     * 清缓存，其它实例的跳转会回源 DB 读到尚未提交的 APPROVED，把已下架内容短暂放行。
+     * 注册 afterCommit 后，缓存清理一定发生在下架状态已落库之后，跨实例收敛靠 L1 广播。</p>
+     *
+     * <p><b>postId 来自代表行反查</b>：历史单图帖 {@code post_id=''} 无短链，直接跳过。
+     * 整段 fail-open：短链清理失败不回滚已完成的处置（与 outbox/storage 同口径）。</p>
+     */
+    private void invalidateSharesAfterCommit(String mediaId, long authorId) {
+        if (shareService == null) {
+            return; // 脱离 Spring 的单测/直调场景
+        }
+        Runnable task = () -> {
+            try {
+                String postId = mediaRepository.findPostId(mediaId, authorId);
+                int n = shareService.invalidateByPostId(postId);
+                if (n > 0) {
+                    log.info("内容下架→短链失效完成: mediaId={}, postId={}, count={}", mediaId, postId, n);
+                }
+            } catch (Exception e) {
+                log.warn("内容下架→短链失效失败（fail-open，不影响处置）: mediaId={}, {}", mediaId, e.getMessage());
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+        } else {
+            // 无事务（单测直调 / 漏加 @Transactional）：立即执行，等价 outbox 的退化路径。
+            log.warn("短链失效无事务，立即执行（缺少 afterCommit 屏障，请核查调用方）: mediaId={}", mediaId);
+            task.run();
+        }
     }
 }
