@@ -77,4 +77,39 @@ public class ShareRepository {
         return jdbcTemplate.update(
                 "UPDATE share_record SET status = ? WHERE code = ?", ShareRecord.STATUS_INVALID, code);
     }
+
+    /**
+     * 按 code 游标分页扫描全部短码（BF 回填专用，方案 §4.8.4）。
+     *
+     * <p>不带分片键会广播 128 片，但回填是启动时一次性的低频运维操作，可接受；
+     * 每批按 code 字典序游标推进，批间让出 DB 由 Runner 负责。</p>
+     */
+    public List<String> scanCodesAfter(String cursor, int limit) {
+        return jdbcTemplate.queryForList(
+                "SELECT code FROM share_record WHERE code > ? ORDER BY code LIMIT ?",
+                String.class, cursor, limit);
+    }
+
+    /** 运营盘点：按状态/分享者过滤 + 游标分页（不带分片键，广播 128 片的低频管理操作）。 */
+    public List<ShareRecord> listForAdmin(Integer status, Long sharerId, String cursor, int limit) {
+        StringBuilder sql = new StringBuilder(
+                "SELECT code, id, post_id, media_id, owner_id, sharer_id, snapshot_json, status, created_at "
+                        + "FROM share_record WHERE 1=1");
+        java.util.List<Object> args = new java.util.ArrayList<>();
+        if (status != null) {
+            sql.append(" AND status = ?");
+            args.add(status);
+        }
+        if (sharerId != null && sharerId > 0) {
+            sql.append(" AND sharer_id = ?");
+            args.add(sharerId);
+        }
+        if (cursor != null && !cursor.isBlank()) {
+            sql.append(" AND code > ?");
+            args.add(cursor);
+        }
+        sql.append(" ORDER BY code LIMIT ?");
+        args.add(limit + 1);
+        return jdbcTemplate.query(sql.toString(), MAPPER, args.toArray());
+    }
 }
