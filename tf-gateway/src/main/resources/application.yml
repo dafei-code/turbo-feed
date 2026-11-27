@@ -303,6 +303,23 @@ turbofeed:
     channel:
       default: ${TURBOFEED_OUTBOX_CHANNEL_DEFAULT:}
       media-uploaded: ${TURBOFEED_OUTBOX_CHANNEL_MEDIA_UPLOADED:}
+    # P2 CDC 流式投递（Opt-in 灰度，默认关闭）：
+    #   cdc-consumer-enabled=true 时网关消费 turbofeed-outbox-cdc（由 Canal 转发器写入），
+    #   收到 eventId 后复用 OutboxService.tryDeliver 的 claim CAS 幂等投递。
+    #   前置：turbofeed.mq.enabled=true（需 name-server）；Relay 保留为兜底，不要关。
+    #   ⚠️ Canal / Kafka 或 RocketMQ 转发器属于外部基建，需单独部署，见 docs/ops/outbox-cdc-rollout.md。
+    cdc-consumer-enabled: ${TURBOFEED_OUTBOX_CDC_CONSUMER_ENABLED:false}
+    cdc:
+      topic: ${TURBOFEED_OUTBOX_CDC_TOPIC:turbofeed-outbox-cdc}
+      consumer-group: ${TURBOFEED_OUTBOX_CDC_CONSUMER_GROUP:turbofeed-outbox-cdc-group}
+    # P3 分片前置：SENT 终态行分批清理（只删 SENT、只删超过保留窗口的冷行，非终态一行不碰）。
+    # 不清理就分片 = 广播查询代价抵消写入分散收益；详见 docs/ops/outbox-sharding-rollout.md。
+    sent-cleaner-enabled: ${TURBOFEED_OUTBOX_SENT_CLEANER_ENABLED:true}
+    sent-cleaner:
+      retention-days: ${TURBOFEED_OUTBOX_SENT_RETENTION_DAYS:7}    # 保留窗口（天），给对账/审计留缓冲
+      batch-size: ${TURBOFEED_OUTBOX_SENT_CLEANER_BATCH_SIZE:500}  # 每轮每片最多删多少条，多轮收敛
+      initial-delay-ms: ${TURBOFEED_OUTBOX_SENT_CLEANER_INITIAL_DELAY_MS:300000}
+      poll-interval-ms: ${TURBOFEED_OUTBOX_SENT_CLEANER_POLL_MS:3600000}
   # Redis 拓扑（changelog 0038）：
   #   single   = 单机（默认）。此时 RedisTopologyConfig 一个 Bean 都不注册，完全交给 Boot 自动装配，
   #              与改造前逐字节一致，保证「克隆即跑」。
