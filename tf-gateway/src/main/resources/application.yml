@@ -309,9 +309,26 @@ turbofeed:
     #   前置：turbofeed.mq.enabled=true（需 name-server）；Relay 保留为兜底，不要关。
     #   ⚠️ Canal / Kafka 或 RocketMQ 转发器属于外部基建，需单独部署，见 docs/ops/outbox-cdc-rollout.md。
     cdc-consumer-enabled: ${TURBOFEED_OUTBOX_CDC_CONSUMER_ENABLED:false}
+    # Canal→MQ 转发器（Opt-in，默认关；多实例只应在一个实例开）：
+    #   Canal Server 订阅 outbox_event binlog → 转发器取 eventId/aggregateId/traceId
+    #   → syncSendOrderly(topic, event, key=aggregate_id) → OutboxCdcConsumer 消费。
+    #   ⚠️ 前置：Canal Server 已部署（见 docs/ops/outbox-cdc-rollout.md §6）+ MQ name-server 可达。
+    cdc-forwarder-enabled: ${TURBOFEED_OUTBOX_CDC_FORWARDER_ENABLED:false}
     cdc:
       topic: ${TURBOFEED_OUTBOX_CDC_TOPIC:turbofeed-outbox-cdc}
       consumer-group: ${TURBOFEED_OUTBOX_CDC_CONSUMER_GROUP:turbofeed-outbox-cdc-group}
+      canal:
+        host: ${TURBOFEED_OUTBOX_CDC_CANAL_HOST:127.0.0.1}
+        port: ${TURBOFEED_OUTBOX_CDC_CANAL_PORT:11111}
+        destination: ${TURBOFEED_OUTBOX_CDC_CANAL_DESTINATION:example}
+        username: ${TURBOFEED_OUTBOX_CDC_CANAL_USERNAME:}
+        password: ${TURBOFEED_OUTBOX_CDC_CANAL_PASSWORD:}
+      forwarder:
+        batch-size: ${TURBOFEED_OUTBOX_CDC_FORWARDER_BATCH_SIZE:100}
+        poll-timeout-ms: ${TURBOFEED_OUTBOX_CDC_FORWARDER_POLL_TIMEOUT_MS:1000}
+        poll-interval-ms: ${TURBOFEED_OUTBOX_CDC_FORWARDER_POLL_MS:1000}
+        initial-delay-ms: ${TURBOFEED_OUTBOX_CDC_FORWARDER_INITIAL_DELAY_MS:10000}
+        max-rollback-rounds: ${TURBOFEED_OUTBOX_CDC_FORWARDER_MAX_ROLLBACK_ROUNDS:3}
     # P3 分片前置：SENT 终态行分批清理（只删 SENT、只删超过保留窗口的冷行，非终态一行不碰）。
     # 不清理就分片 = 广播查询代价抵消写入分散收益；详见 docs/ops/outbox-sharding-rollout.md。
     sent-cleaner-enabled: ${TURBOFEED_OUTBOX_SENT_CLEANER_ENABLED:true}

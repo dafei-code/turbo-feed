@@ -1,7 +1,8 @@
 # Outbox CDC 流式投递灰度说明（P2）
 
-> 状态：**代码已实施，默认关闭**；Canal Server 已部署并验证可捕获 `outbox_event` INSERT（2026-11-27），
-> 但**转发器未实现、MQ Topic 未创建**，整条 CDC 链路尚未端到端打通。
+> 状态：**代码全部实施，默认关闭**；Canal Server 已部署、MQ Topic 已创建、转发器已实现，
+> 端到端链路（binlog→Canal→转发器→MQ→消费）已于 2026-11-27 真实验证通过。
+> 生产灰度仍需按 §4 单实例开启并观察。
 > 关联：`docs/adr/0011-cdc-clickhouse.md`（CDC 选型 Canal，当前仍是 Proposed）、
 > `docs/ops/outbox-watermark-metrics.md`（可观测口径）、
 > `docs/ops/upload-outbox-rollout.md`（发件箱通道灰度）。
@@ -33,8 +34,8 @@ MySQL binlog (3307 只读副本)
 | 组件 | 作用 | 状态 |
 | --- | --- | --- |
 | Canal Server | 订阅 MySQL binlog，过滤 `outbox_event` INSERT | **已部署并验证**（2026-11-27，见 §6） |
-| 转发器 | 把 Canal entry 转成一个 `{eventId, traceId}` 消息，分区键=`aggregate_id` | 未实现（见 §5） |
-| RocketMQ Topic | `turbofeed-outbox-cdc`（按帖分区有序） | 未创建 |
+| 转发器 | 把 Canal entry 转成一个 `{eventId, traceId}` 消息，分区键=`aggregate_id` | **已实现并验证**（`CanalCdcForwarder`，默认关，见 §7） |
+| RocketMQ Topic | `turbofeed-outbox-cdc`（按帖分区有序） | **已创建**（8 队列 RW） |
 | `OutboxCdcConsumer` | 网关侧消费者，只取 eventId 交给 `tryDeliver` | 已实现，默认关闭 |
 
 **为什么消息体只有 eventId**：payload 的唯一事实源是 DB 行（含 occurredAt 防旧、traceId）。
@@ -71,12 +72,12 @@ CAS（PENDING/FAILED → SENDING）保证同一行只被一个投递者领走。
 
 | 项 | 状态 | 说明 |
 | --- | --- | --- |
-| Canal Server 部署 | 未做 | 需授权创建容器；接 3307 只读副本，不压主库 |
-| Canal → MQ 转发器 | 未做 | 可用独立小服务或 Kafka Connect；按 `aggregate_id` 做分区键 |
-| Topic 创建 | 未做 | `turbofeed-outbox-cdc` |
-| compose 环境变量转发 | 未做 | 需在 gateway 段加 4 个变量（本节 §3） |
-| 端到端真启动验证 | 未做 | 本机无 name-server / Canal，无法验证消费链路 |
-| CDC 消费指标 | 未做 | 建议补 `tf_outbox_cdc_consume_total/failed_total`（与 Relay 指标族对称） |
+| Canal Server 部署 | ✅ 已做 | 接本机 MySQL 3306 binlog（非 3307 副本，见 §6） |
+| Canal → MQ 转发器 | ✅ 已做 | `CanalCdcForwarder`，按 `aggregate_id` 做分区键（见 §7） |
+| Topic 创建 | ✅ 已做 | `turbofeed-outbox-cdc`（8 队列 RW） |
+| compose 环境变量转发 | 未做 | 需在 gateway 段加环境变量（本节 §3，含转发器开关） |
+| 端到端验证 | ✅ 已做 | JDBC/原生 MQ 探针逐段验证（见 §7），非网关完整启动 |
+| CDC 消费指标 | ✅ 部分 | 转发器侧 3 个指标已埋；消费侧指标仍建议补 |
 
 **本地通道的进程内崩溃窗口依然存在**：CDC 保证的是「事件行至少被投递一次到传输层」，
 不是「审核一定完成」。LOCAL 通道下 Handler 把事件交给应用内总线即视为成功；
@@ -101,3 +102,40 @@ CAS（PENDING/FAILED → SENDING）保证同一行只被一个投递者领走。
 - **健康约束**：Canal 是拉取模型，无 client 连接时 `consume_seq=-1 / get_rows=0` 属正常——
   转发器实现前 entry 只堆积不消费；store 容量有限，长期不接转发器需监控堆积。
 - **启动命令**：`docker compose -p canal -f deploy/canal/docker-compose.yml up -d`
+
+## 七、转发器实现与端到端验证（2026-11-27）
+
+### 转发器代码
+
+| 文件 | 作用 |
+|---|---|
+| `CanalCdcForwarder.java` | `@Component` + `@ConditionalOnProperty(turbofeed.outbox.cdc-forwarder-enabled=true)`（默认关）；`@Scheduled(fixedDelay)` 每轮连 Canal 拉一批 entry，只处理 `outbox_event*` 表的 INSERT，从 after 镜像取 id/aggregate_id/payload.traceId，`syncSendOrderly(topic, OutboxCdcEvent, key=aggregateId)`，正常批 ack、MQ 失败 rollback（超 `max-rollback-rounds` 强制 ack 避免死循环，由 Relay 兜底） |
+| `CanalConnectorFactory.java` | 连接器工厂（便于单测 mock），连 Canal host/port/destination |
+| `CanalCdcForwarderTest.java` | 6 项单测（parseEvent 提取字段、非目标表/非 INSERT/事务 entry 跳过、坏 JSON 不影响 id） |
+
+指标：`tf_outbox_cdc_forwarded_total`、`tf_outbox_cdc_bad_entry_total`、`tf_outbox_cdc_rollback_total`。
+配置项在 `turbofeed.outbox.cdc.forwarder.*` 与 `turbofeed.outbox.cdc.canal.*`（见 application.yml）。
+
+⚠️ **多实例约束**：Canal destination 是单订阅模型，转发器只应在一个 gateway 实例打开。
+
+### MQ 基建（复用项目已有容器）
+
+- name-server `rmqnamesrv` 原容器直接 `docker start` 复用；broker `rmqbroker` 因启动参数写死
+  `HOST_IP=192.168.0.4`（已不可达），用相同镜像/网络/命令、仅改 `HOST_IP=192.168.0.6` 重建，
+  broker 正常注册。**不是新建另一套 MQ**，是让原容器适配当前 LAN IP。
+- Topic `turbofeed-outbox-cdc` 已创建（8 队列 RW）。
+
+### 端到端验证（探针逐段，非网关完整启动）
+
+| 环节 | 方法 | 结果 |
+|---|---|---|
+| MySQL INSERT → Canal | 插入带 traceId 的 `outbox_event_4` 行，查 `:11112/metrics` | `put_rows` 2→3、`produce_seq` 5→8 ✅ |
+| Canal → 转发器 parseEvent | 真实 connector + `forwardInternal()` + mock RocketMQTemplate 捕获 | 捕获 `eventId=5566778899001122333, traceId=e2e-cdc-001, key=canal/e2e/post-1` ✅ |
+| 转发器 → MQ 序列化 | ObjectMapper 序列化 `OutboxCdcEvent` | `{"eventId":...,"traceId":...}`，可反序列化回 record ✅ |
+| MQ 发送 | `syncSendOrderly(topic, 消息, key)` | `SEND_OK`，queue=7（按 key 哈希）✅ |
+| MQ → 消费 | 原生 PullConsumer 从 queue=7 拉 | 读到 `{"eventId":5566778899001122333,"traceId":"e2e-cdc-001"}` ✅ |
+
+- 全量单测：520 tests / 0 failures / 0 errors / 8 skipped（新增 6 项转发器单测）。
+- 探针行已删；Topic 内的验证消息保留（本地验证 topic，无业务影响）。
+- ⚠️ 未做网关完整真启动（本机 Redis/MinIO 未起）；CDC 消费侧 `OutboxCdcConsumer → tryDeliver` 由单测覆盖，
+  灰度时需按 §4 真启动验证事件行变 SENT。

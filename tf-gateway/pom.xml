@@ -238,6 +238,19 @@
             <artifactId>rocketmq-spring-boot-starter</artifactId>
             <version>2.3.5</version>
         </dependency>
+        <!-- Canal Client：CDC 转发器（P2）拉取 outbox_event 的 binlog entry。
+             与 Canal Server 1.1.7 同版本，协议兼容；only opt-in，默认不启动转发器 Bean。 -->
+        <dependency>
+            <groupId>com.alibaba.otter</groupId>
+            <artifactId>canal.client</artifactId>
+            <version>1.1.7</version>
+        </dependency>
+        <!-- canal.protocol 在 canal.client 里是 optional，不会传递；转发器直接用了 CanalEntry/Message，必须显式引入 -->
+        <dependency>
+            <groupId>com.alibaba.otter</groupId>
+            <artifactId>canal.protocol</artifactId>
+            <version>1.1.7</version>
+        </dependency>
         <!-- Lombok：@RequiredArgsConstructor / @Slf4j 简化构造器与日志（optional 不参与传递、不打入可执行 jar）。
              钉 1.18.42：本机 JDK 为 17.0.19（2026 补丁版），Lombok 1.18.36 的 TypeTag 反射在改版
              javac 内部 API 上抛 ExceptionInInitializerError，clean 编译时 @Slf4j 的 log 字段无法生成、
