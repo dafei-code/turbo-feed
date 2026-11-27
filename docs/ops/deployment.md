@@ -11,17 +11,20 @@ mvn -pl tf-gateway -am package    # 只构建网关（-am 连带 tf-shared）
 
 ## 2. 依赖中间件（MySQL / Redis / MinIO / 可选 RocketMQ）
 
-`docker-compose.yml` **只提供 RocketMQ**（namesrv + broker 5.3.1），Redis / MinIO / MySQL 需自行准备：
+根目录 `docker-compose.yml` 提供**全栈演示环境**（mysql + redis + minio + 三服务）；RocketMQ 收在 `mq` profile，Canal 单独编排：
 
 ```bash
-docker compose up -d          # 可选：仅当要启用 MQ 投递时才需要
+docker compose up -d                 # MySQL / Redis / MinIO / 三服务，不含 MQ
+docker compose --profile mq up -d    # 额外拉起 RocketMQ
+docker compose -p canal -f deploy/canal/docker-compose.yml up -d   # 可选：outbox CDC
 ```
 
 | 组件 | 默认地址 | 用途 |
 |---|---|---|
-| MySQL | `127.0.0.1:3306` | 元数据（经 ShardingSphere 分片，2 库 × 2 表） |
+| MySQL | `127.0.0.1:3306` | 元数据（ShardingSphere：16 张分片逻辑表 + 12 张单表，2 库） |
 | Redis | `127.0.0.1:6379`（默认 single 模式） | 限流 / 并发护栏 / 状态缓存 / 公域时间线 |
 | MinIO | `127.0.0.1:9000` | 图片对象存储（bucket `turbo-feed-media` 需**匿名可读**，否则返回的图片 URL 浏览器 403） |
+| Canal | `127.0.0.1:11111` / metrics `11112` | outbox CDC：过滤 `outbox_event*`，需 MySQL binlog ROW 与复制账号；默认不接，见 [outbox-cdc-rollout.md](outbox-cdc-rollout.md) |
 
 Redis 集群化（可选）：`deploy/redis/docker-compose-cluster.yml` 提供 3 主 3 从（7000-7005，
 详见文件头注释与 changelog 0043）。切换只需两个环境变量，**不改任何代码/配置文件**：
@@ -51,7 +54,7 @@ docker compose up -d
 建表与种子数据：
 
 ```bash
-# 新库：建 4 类物理表 + 演示账号（role 列已写入）
+# 新库：建 16 张分片逻辑表的物理表 + 12 张单表 + 演示账号（role 列已写入）
 mysql < deploy/mysql/init-local.sql
 
 # 既有库升级到「一帖多图」（加 post_id / seq / idx_user_post）
@@ -90,7 +93,7 @@ CREATE TABLE IF NOT EXISTS `turbo_feed_1`.`sensitive_whitelist` (
 
 ```bash
 java -jar tf-gateway/target/tf-gateway-0.1.0-SNAPSHOT.jar          # :8080
-java -jar tf-counter/target/tf-counter-0.1.0-SNAPSHOT.jar          # :8081（模块骨架）
+java -jar tf-counter/target/tf-counter-0.1.0-SNAPSHOT.jar          # :8081（计数服务）
 java -jar tf-feed-engine/target/tf-feed-engine-0.1.0-SNAPSHOT.jar  # :8083
 ```
 
@@ -103,6 +106,9 @@ java -jar tf-feed-engine/target/tf-feed-engine-0.1.0-SNAPSHOT.jar  # :8083
 | `TURBOFEED_DB_PASSWORD` | MySQL 数据源口令（网关，经 ShardingSphere 数据源）。**仓库内无默认值**（changelog 0048）：SS 配置中口令占位符在加载期从本变量渲染（驱动 URL 携带 `placeholder-type=ENVIRONMENT`）；未注入时空口令连接，认证直接失败。同族的 `TURBOFEED_DB_0_URL` / `TURBOFEED_DB_1_URL` / `TURBOFEED_DB_USERNAME` 可覆盖库 URL（默认本机 `127.0.0.1:3306` 的 `turbo_feed_1` / `turbo_feed_2`）与用户名（默认 `root`） |
 | `TURBOFEED_REDIS_PASSWORD` | Redis 口令。**已外部化，默认空串 = 无密码**；未注入而 Redis 要求鉴权时直接报 NOAUTH（不静默降级） |
 | `TURBOFEED_FEED_ENGINE_BASE_URL` | Feed 引擎地址，默认 `http://localhost:8083` |
+| `TURBOFEED_MQ_ENABLED` | RocketMQ 事件总线开关，默认 `false`；部署 Canal CDC 前需打开并确认 name-server 可达 |
+| `TURBOFEED_OUTBOX_CDC_CONSUMER_ENABLED` / `TURBOFEED_OUTBOX_CDC_FORWARDER_ENABLED` | CDC 消费端 / Canal 转发器开关，默认 `false`；转发器只应在一个网关实例开启 |
+| `TURBOFEED_OUTBOX_CDC_TOPIC` / `_CONSUMER_GROUP` / `_CANAL_HOST` / `_CANAL_PORT` / `_CANAL_DESTINATION` | CDC Topic、消费组与 Canal 连接参数；complete默认值见 `application.yml`，灰度步骤见 [CDC 灰度文档](outbox-cdc-rollout.md) |
 
 示例：
 
@@ -133,6 +139,9 @@ java -jar tf-gateway/target/tf-gateway-0.1.0-SNAPSHOT.jar
 | `turbofeed.media.review.auto-pass` | false | `true` = 机审结果直接放行（演示占位，跳过人审闸）。**生产严禁** |
 | `turbofeed.media.review.moderation-mode` | `rule` | `rule` 本地规则引擎 / `pass` 恒通过占位 / `ai`、`cloud` 预留接入点 |
 | `turbofeed.media.review.new-user-approve-threshold` | 3 | 新人观察期解除阈值。新注册账号默认先审后放，累计**人工**通过该帖数后转正常分级；设为 `0`/`1` 可近似放宽为「新号直接先发后审」 |
+| `turbofeed.outbox.cdc-consumer-enabled` / `cdc-forwarder-enabled` | false | outbox CDC 旁路；前置为 MQ + Canal，Relay 必须继续保留。灰度步骤见 [outbox-cdc-rollout.md](outbox-cdc-rollout.md) |
+| `turbofeed.outbox.sent-cleaner-enabled` / `sent-cleaner.*` | true / 7d、500、1h | 只清理超保留期的 SENT 终态行；分片迁移前置，非终态不碰 |
+| `turbofeed.feed.follow.bigv-first-enabled` / `author-index-shards` / `author-cache-enabled` | false / 1 / true | 关注流大 V 治理；切 `author-index-shards>1` 前必须回填存量作者索引 |
 | `management.health.redis.enabled` | false | Redis 健康指示器（就绪后可开启；保持 false 避免「克隆即跑」时整体状态被拉 DOWN） |
 
 ## 5. 生产前必改清单
@@ -143,8 +152,9 @@ java -jar tf-gateway/target/tf-gateway-0.1.0-SNAPSHOT.jar
 - [ ] `turbofeed.media.public-url-base`：改指真实对象存储 / CDN 域名
 - [ ] `turbofeed.media.review.auto-pass` 确认为 `false`；按需接入云内容安全（`moderation-mode=cloud`）
 - [ ] `turbofeed.feed.degraded-mode` 确认为 `empty`（禁止生产回源广播）
-- [ ] **服务间鉴权**：`/internal/**` 当前无鉴权，需补服务间令牌 / mTLS
-- [ ] **服务注册与发现**：`turbofeed.feed.engine.base-url` 直连 → Nacos + 客户端负载均衡
+- [x] **服务间鉴权**：`/internal/**` 已接 `X-Internal-Token` 双侧校验，非 dev/local 缺令牌启动即失败；仍建议叠加网络策略 / mTLS
+- [x] **服务注册与发现**：Nacos + `@LoadBalanced` 双向 opt-in 已落地并完成本地多实例验证，生产需配置 Nacos 地址与服务名
+- [ ] **outbox CDC**：默认关闭；开启前确认 Canal 单订阅实例、Topic、位点、指标与 Relay 兜底都就绪，见 [CDC 灰度文档](outbox-cdc-rollout.md)
 - [ ] 数据库账号密码：`shardingsphere-config.yaml` 内含开发期凭据，改由密钥管理注入
 - [ ] 审核队列与公域流的**广播查询**只适用于演示：`listPendingGlobal` / `listApprovedGlobal` 不带分片键，会路由到全部分片并合并；生产审核队列应走审核中台 + 独立索引
 
@@ -152,6 +162,6 @@ java -jar tf-gateway/target/tf-gateway-0.1.0-SNAPSHOT.jar
 
 | 阶段 | 形态 |
 |---|---|
-| 当前 | 单机三个 jar（counter 为骨架），actuator 探活 |
-| Phase 2 | K8s 部署（health 探针 + Prometheus 指标）、集中日志、Micrometer Tracing；服务注册与发现 |
-| Phase 3 | 多机房容灾 + 容量规划（tf-benchmark 压测报告驱动） |
+| 当前 | 单机三个 jar + 全栈 compose；actuator 与 Prometheus 指标；Nacos opt-in；Outbox CDC 可灰度 |
+| Phase 2 | K8s 部署（health 探针 + Prometheus 指标）、集中日志与 Micrometer Tracing；通知 WS/SSE；outbox CDC 生产灰度 |
+| Phase 3 | ClickHouse 出仓 + T+1 画像回灌、多机房容灾 + 容量规划（tf-benchmark 压测报告驱动） |

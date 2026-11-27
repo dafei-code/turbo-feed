@@ -77,3 +77,21 @@
 
 注意与 [ADR-0016](0016-distributed-transaction-redesign.md) 的约束冲突：0016 明确"不引入新中间件"，
 若选排期实施，需在 ADR 中显式标注本决策**推翻 0016 的该条约束**并给出理由，不能两边都写成有效决策。
+
+## 7. 增量核查（2026-11-27）
+
+**状态仍为 Proposed，但“零 Canal”这句已经过期**：本轮为 `outbox_event` 引入了 Canal client 1.1.7，
+并完成 `MySQL binlog → Canal → CanalCdcForwarder → RocketMQ → OutboxCdcConsumer → tryDeliver` 的端到端验证，
+详见 [outbox-cdc-rollout.md](../ops/outbox-cdc-rollout.md)。
+
+但这**不等于本 ADR 落地**：
+
+| 本 ADR 的范围 | 当前状态 |
+|---|---|
+| 全表（user / media / 互动表）行级 CDC → ClickHouse `dwd_*` / `dim_*` | 未做，无 ClickHouse / Kafka 依赖与出仓作业 |
+| T+1 画像批算并回写 `user_interest` / `user_tag` | 未做，仍是规划 |
+| 运营/AB 报表 | 未做 |
+
+本轮 Canal 只订阅 `outbox_event*`，只传 `eventId + traceId`，用于替换 Relay 的轮询发现机制；
+payload 唯一事实源仍是 DB 行。它是 ADR-0016 的规模化演进，不是 ADR-0011 的 ClickHouse 出仓。
+本 ADR 是否排期，仍按 §6 的待决策表执行。

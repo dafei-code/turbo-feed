@@ -16,12 +16,23 @@ docs/
 │   ├── 0004-hotspot-cache-sdk.md         # 抽 tf-hotspot 缓存失效 SDK
 │   ├── 0005-contract-versioning.md       # 跨服务契约版本协商
 │   ├── 0006-worker-id-lease.md           # 雪花 worker-id 自租约
-│   └── 0007-observability.md             # 可观测性口径（指标 / 告警 / traceId）
+│   ├── 0007-observability.md             # 可观测性口径（指标 / 告警 / traceId）
+│   ├── 0008-timeline-layering.md         # 时间线桶键/反查索引格式单一真值
+│   ├── 0009-notification-center.md       # 通知中心有界上下文
+│   ├── 0010-share-forward.md             # 分享/转发设计
+│   ├── 0011-cdc-clickhouse.md            # 行为数据 CDC → ClickHouse + T+1 画像（Proposed）
+│   ├── 0012-async-executor-backpressure.md # 异步执行器背压分层
+│   ├── 0013-content-review-limit-downstream.md # REVIEW/LIMIT 接通下游（被 0014 取代）
+│   ├── 0014-content-demote-and-signal-lifecycle.md # DEMOTE 档与审核信号生命周期
+│   ├── 0015-signal-release-atomicity-and-readside-resign.md # 解除闭环原子化与读取侧重签
+│   ├── 0016-distributed-transaction-redesign.md # 事务性事件总线合并版
+│   └── 0016-pr-bcd-implementation-plan.md # PR-B/C/D 实施方案（已完成）
+
 ├── architecture/             # 架构层文档
 │   ├── overview.md           # 系统总体架构：模块 / 通信 / 技术栈 / 关键决策
 │   ├── c4-model.md           # C4 模型：上下文 / 容器 / 组件三层（Mermaid 图）
 │   ├── service-split.md      # 微服务拆分方案：部署单元 / 端口 / 通信矩阵
-│   ├── sharding.md           # 分库分表：分片键选型 / 13 张逻辑表 / 演进与踩坑
+│   ├── sharding.md           # 分库分表：分片键选型 / 16 张分片逻辑表 + 12 张单表 / 演进与踩坑
 │   ├── contract-evolution.md # 跨服务契约演进：版本协商 / 校验挂点 / 兼容性矩阵
 │   ├── failure-mode-ledger.md# 全链路失败模式对账：投递语义 / 降级口径 / 指标与告警
 │   ├── threat-model-degradation.md # 威胁模型与降级矩阵
@@ -32,15 +43,21 @@ docs/
 ├── modules/                  # 模块级技术文档（与 Maven 模块一一对应，有 CI 检查）
 │   ├── tf-gateway.md         # 网关：认证与 RBAC / 一帖多图上传 / 审核状态机 / 分片 / 配置
 │   ├── tf-counter.md         # 计数服务：已落地（分桶 / MQ 削峰 / 批量落库 / 三级读缓存）+ 与 tf-hotspot 联动待补
-│   ├── tf-feed-engine.md     # Feed 引擎：公域时间线读模型（已实现）+ 扇出蓝图
-│   ├── tf-hotspot.md         # 热点探测 SDK：设计蓝图（尚未实现）
+│   ├── tf-feed-engine.md     # Feed 引擎：推荐漏斗 + 公域时间线读模型 + 关注流大 V 治理（已实现）；传统扇出仍是蓝图
+│   ├── tf-hotspot.md         # 热点治理 SDK：L1 + 广播失效已落地，冷热桶迁移仍待做
 │   ├── tf-redis.md           # Redis 拓扑装配单一事实源：三态切换 / AutoConfiguration 机制
 │   ├── tf-shared.md          # 公共契约：Result / ErrorCode / FeedItemView / FeedTimelineEvent
 │   └── tf-benchmark.md       # 压测模块：五场景压测器 + Markdown 报告（**已实现**，不入服务拓扑）
 ├── api/                      # 接口文档
 │   └── gateway-api.md        # HTTP 接口：全量端点 / 参数 / 返回结构 / 错误码 / curl
 ├── ops/                      # 运维层文档
-│   └── deployment.md         # 构建部署 / 必需环境变量 / 配置开关 / 生产前必改清单
+│   ├── deployment.md         # 构建部署 / 必需环境变量 / 配置开关 / 生产前必改清单
+│   ├── outbox-sharding-rollout.md # outbox_event 128 分片 / SENT 清理 / 迁移回滚 / 路由实证
+│   ├── outbox-cdc-rollout.md # Canal → MQ 转发器 → CDC 消费 / 端到端验证 / 灰度回滚
+│   ├── outbox-watermark-metrics.md # 发件箱水位与告警口径
+│   ├── timeline-tombstone.md / upload-outbox-rollout.md / burst-mq-profile.md
+│   ├── multinode-switches.md / observability.md / comment-read-scaling.md
+│   └── hotspot-count-sharding.md / moderation-epoch-broadcast.md / content-security-slo.md
 ├── benchmark/                # 压测报告归档（tf-benchmark 实跑产出，按轮次）
 │   ├── README.md             # 轮次索引 / 阶梯汇总 / 读法与诚实边界 / 复现命令
 │   └── 2026-10-30-feed-*.md  # 第 1 轮 feed 场景五档阶梯（100/300/600/1200/2000 QPS）
@@ -59,7 +76,8 @@ docs/
 | 前端 / 联调 | [API 文档](api/gateway-api.md)（含登录换取 JWT 与上传示例） |
 | 运维 / 部署 | [部署文档](ops/deployment.md) → [服务拆分](architecture/service-split.md) → [压测基线](benchmark/README.md) |
 | 线上排障 | [失败模式对账 §6](architecture/failure-mode-ledger.md)（**第一步永远先拿 traceId**） |
-| 想知道「为什么这么设计」 | [ADR 索引](adr/README.md)（7 份，含否决过的方案与代价） |
+| 想知道「为什么这么设计」 | [ADR 索引](adr/README.md)（17 份，含否决过的方案与代价） |
+| 事务发件箱规模化 | [outbox 分片改造](ops/outbox-sharding-rollout.md) → [CDC 灰度与验证](ops/outbox-cdc-rollout.md) → [水位指标](ops/outbox-watermark-metrics.md) |
 | 审核 / 产品 | [审核体系蓝图](architecture/moderation-design.md)（P0~P3，**规划中**）→ [tf-gateway §4 审核状态机](modules/tf-gateway.md)（现状） |
 | 内容安全 | [内容安全设计](architecture/content-security-design.md)（文本侧：五层架构 / 归一化抗绕过 / 白名单；**S1 已落地**） |
 | 查历史变更 | [changelog 目录](changelog/)（倒序看编号） |

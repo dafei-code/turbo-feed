@@ -77,7 +77,7 @@
   （保证同一业务聚合的事件有序），消息体仍只含 `eventId` + `traceId`（`OutboxCdcEvent`）。
 - `OutboxCdcConsumer` 收到 eventId 后调用 `OutboxService.tryDeliver(eventId)`，该函数按 id 精准命中
   单片，与分片改造完全兼容，无需改动消费者。
-- ⚠️ Canal / 转发器 / Topic 属外部基建，本次未部署；见 `docs/ops/outbox-cdc-rollout.md`。
+- Canal / 转发器 / Topic 属外部基建，本机已部署并完成端到端验证；生产接入仍需单独授权，见 `docs/ops/outbox-cdc-rollout.md`。
 
 ## 5. 回滚
 
@@ -107,5 +107,7 @@
 
 - 存量迁移实跑：旧单表 55 行（53 SENT + 2 DEAD），备份为 `outbox_event_backup` 后，
   2 条 DEAD 按真实 shard（4 / 102）迁入分片表并校验命中；SENT 冷行未迁移（终态、无投递价值）。
-- 探针行已删除；备份表 `turbo_feed_1.outbox_event_backup` 暂留供回滚，观察 30 分钟无异常后按 §5 清理。
-- ⚠️ 本机 Redis/MinIO/3307 副本未起，未做网关完整真启动（无依赖）；以上为 JDBC 层直连 ShardingSphere 的路由实证。
+- 探针行已删除；观察期结束后备份表 `turbo_feed_1.outbox_event_backup` 已清理（复核 `information_schema` 为 0 张）。
+- 上述表格是 JDBC 层直连 ShardingSphere 的路由实证。后续在 Redis cluster / MinIO / RocketMQ / Canal 全部在线的条件下，
+  已用 `--spring.profiles.active=mq --spring.profiles.include=ss-local` 完成网关完整真启动，
+  事件按 id 精准路由并从 INSERT 到 SENT，详见 `docs/ops/outbox-cdc-rollout.md` §7。

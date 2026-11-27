@@ -67,7 +67,7 @@
 | [0008](0008-timeline-layering.md) | 公域时间线的分层边界与格式单一真值 | 已采纳 | 2026-10-27 | 桶键/反查索引只在 `TimelineSupport` 拼装解析；非法格式一律「不猜」；不为行数拆类 |
 | [0009](0009-notification-center.md) | 通知中心有界上下文 | 已采纳（2026-11-20） | 2026-10-31 | 后端 + 前端抽屉已落地，通知生成器 10 个单测；2026-11-21 移除无界增长的收件箱 ZSET 冗余写；剩余缺口：WS 实时端点、控制器/埋点层测试 |
 | [0010](0010-share-forward.md) | 分享/转发设计 | 提议 | 2026-10-31 | 分享=引用式动作+快照不复制内容；站内转发=新帖 `ref_post_id` 引用；计数复用 tf-counter、Redis 防刷 |
-| [0011](0011-cdc-clickhouse.md) | 行为数据 CDC 出仓 ClickHouse + 画像标签 | 提议 | 2026-10-31 | Canal 订阅只读副本 binlog→Kafka→CH；与在线库隔离；画像 T+1 回写 `user_interest`/`user_tag` |
+| [0011](0011-cdc-clickhouse.md) | 行为数据 CDC 出仓 ClickHouse + 画像标签 | 提议 | 2026-10-31 | 全表 binlog→Kafka→CH 与 T+1 画像仍未做；本轮 Canal 仅落地 outbox_event 投递加速，不改本 ADR 状态 |
 | [0012](0012-async-executor-backpressure.md) | 异步执行器背压分层（可丢活 vs 持久化活） | 已采纳 | 2026-11-01 | 通知生成/交互样本走 bestEffort 丢弃策略（绝不阻塞主链路）；点赞/收藏/关注/评论持久化双写保留 CallerRuns 防丢 + 饱和计数；JDBC 加 socketTimeout 兜底 |
 | [0013](0013-content-review-limit-downstream.md) | 内容级 REVIEW/LIMIT 接通下游（引擎降权信号） | 被 0014 取代 | 2026-11-06 | 新增 fail-open 路由 `ModerationDownstreamRouter`：REVIEW/LIMIT→`tf:mod:media=MONITOR`；双开关可逆、severity 可配；评论/昵称/举报路径不改（**档位与语义已被 0014 修正，勿照此新增用法**） |
 | [0014](0014-content-demote-and-signal-lifecycle.md) | 新增内容级 DEMOTE 档与审核信号解除闭环 | 已采纳 | 2026-11-07 | 跨服务契约变更：REVIEW→MONITOR 硬剔除 / LIMIT→DEMOTE 精排轻降权；人审通过与改描述 PASS 分路径解除；直传主路径接通；引擎懒读+本页缓存；搜索/播放零改动 |

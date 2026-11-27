@@ -19,12 +19,12 @@ CDC 把「发现新事件」从**轮询 DB**换成**订阅 binlog**，延迟降�
 - 语义不变：本地事务原子 + 至少一次投递 + 消费端幂等；
 - 发现机制：从 `findDueIds` 轮询 → Canal 订阅 `outbox_event` 的 INSERT。
 
-## 二、拓扑与组件（均未部署，需单独授权创建）
+## 二、拓扑与组件（本机已部署验证，生产接入需单独授权）
 
 ```
-MySQL binlog (3307 只读副本)
+MySQL binlog (本机 3306 主库；生产建议 3307 只读副本)
     → Canal Server（instance 过滤 outbox_event 的 INSERT）
-        → 转发器（按 aggregate_id 做消息 key）
+        → 转发器（按 aggregate_id 做 MQ 分区键；DB 路由仍按 eventId 的雪花 id）
             → RocketMQ Topic: turbofeed-outbox-cdc
                 → gateway: OutboxCdcConsumer
                     → OutboxService.tryDeliver(eventId)
@@ -50,8 +50,10 @@ CAS（PENDING/FAILED → SENDING）保证同一行只被一个投递者领走。
 | 变量 | 默认 | 含义 |
 | --- | --- | --- |
 | `TURBOFEED_OUTBOX_CDC_CONSUMER_ENABLED` | `false` | 打开后网关注册 CDC 消费者 |
+| `TURBOFEED_OUTBOX_CDC_FORWARDER_ENABLED` | `false` | 打开后网关启动 Canal 拉取与转发（只应开一个实例） |
 | `TURBOFEED_OUTBOX_CDC_TOPIC` | `turbofeed-outbox-cdc` | CDC Topic |
 | `TURBOFEED_OUTBOX_CDC_CONSUMER_GROUP` | `turbofeed-outbox-cdc-group` | 消费组 |
+| `TURBOFEED_OUTBOX_CDC_CANAL_HOST` / `_PORT` / `_DESTINATION` | `127.0.0.1` / `11111` / `example` | Canal Server 连接参数 |
 | `TURBOFEED_MQ_ENABLED` | `false` | 前置：CDC 消费者依赖 MQ 基础设施（name-server） |
 
 ⚠️ compose `environment:` 是白名单——只改 `.env` 不转发等于没设，需在 compose 文件显式转发。
@@ -59,7 +61,7 @@ CAS（PENDING/FAILED → SENDING）保证同一行只被一个投递者领走。
 ## 四、灰度步骤
 
 1. **前置**：`turbofeed.mq.enabled=true` + name-server 可达；`outbox_event` 表已建；Relay 在跑。
-2. **基建**：部署 Canal（接 3307 只读副本）+ 转发器 + 创建 Topic。这一步需单独授权创建容器/资源。
+2. **基建**：本机已部署 Canal（接 3306 主库）+ 转发器代码 + 创建 Topic（见 §6/§7）；生产接 3307 只读副本与容器创建需要单独授权。
 3. **单实例灰度**：只给一个 gateway 实例设 `cdc-consumer-enabled=true`，其余保持 false。
    - 验证：上传一帖 → `outbox_event` 行很快变 `SENT`；CDC 消费指标正常；
    - `tf_outbox_backlog{status="PENDING"}` 保持 ≈0；无重复投递（消费侧幂等日志）。
@@ -76,7 +78,7 @@ CAS（PENDING/FAILED → SENDING）保证同一行只被一个投递者领走。
 | Canal → MQ 转发器 | ✅ 已做 | `CanalCdcForwarder`，按 `aggregate_id` 做分区键（见 §7） |
 | Topic 创建 | ✅ 已做 | `turbofeed-outbox-cdc`（8 队列 RW） |
 | compose 环境变量转发 | 未做 | 需在 gateway 段加环境变量（本节 §3，含转发器开关） |
-| 端到端验证 | ✅ 已做 | JDBC/原生 MQ 探针逐段验证（见 §7），非网关完整启动 |
+| 端到端验证 | ✅ 已做 | 逐段探针 + 网关完整真启动（见 §7），事件从 INSERT 到 SENT、traceId 贯通 |
 | CDC 消费指标 | ✅ 部分 | 转发器侧 3 个指标已埋；消费侧指标仍建议补 |
 
 **本地通道的进程内崩溃窗口依然存在**：CDC 保证的是「事件行至少被投递一次到传输层」，
@@ -125,7 +127,7 @@ CAS（PENDING/FAILED → SENDING）保证同一行只被一个投递者领走。
   broker 正常注册。**不是新建另一套 MQ**，是让原容器适配当前 LAN IP。
 - Topic `turbofeed-outbox-cdc` 已创建（8 队列 RW）。
 
-### 端到端验证（探针逐段，非网关完整启动）
+### 端到端验证（探针逐段 + 网关完整真启动）
 
 | 环节 | 方法 | 结果 |
 |---|---|---|

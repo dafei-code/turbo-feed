@@ -1,8 +1,9 @@
 # tf-feed-engine 技术文档
 
 > 公域 Feed 时间线读模型（独立 Spring Boot 服务，端口 8083，父包 `com.turbofeed.feedengine`）。
-> **当前状态：已实现「公域时间线读模型」**；「推拉结合」的扇出部分（收件箱 / 大 V outbox / 活跃度分层 /
-> 多路归并）**仍是未实现蓝图**，源码中仅有空包占位（见 §5）。
+> **当前状态：已是推荐服务 + 公域时间线读模型**：多路召回 / 粗排 / 精排 / 三层重排、三级流量池、关注流读均已落地；
+> 关注流的大 V 优先扫描、作者索引分片与 L1 缓存也已实现（默认保持旧行为，按配置 opt-in）。
+> 传统「推拉结合扇出」（收件箱 / 大 V outbox / 活跃度分层 / 多路归并）**仍是未实现蓝图**（见 §5）。
 
 ## 1. 为什么先做「时间线读模型」
 
@@ -24,7 +25,8 @@
 | `recall/` | 多路召回通道与向量基础设施 | `VectorRecallChannel` / `TagVectorRecallChannel`、`ItemEmbeddingSource` / `UserEmbeddingSource` 家族（hash / model / ann 三种模式）、`VectorIndexWriter`（HNSW） |
 | `ranking/` | 粗排与精排模型 | `PreRankFilter` / `LinearPreRankModel`、`RankingModel` 家族（`LinearWeightedRankingModel` / `MultiTargetRankingModel` / `DeepFmRankingModel`）、`SelectedRankingModel`（按 `modelType` 分发的 `@Primary`） |
 | `interest/` | 兴趣标签、会话序列、搜索运维 | `InterestService`、`SessionSequenceService`、`TagIndexService`、`TagScoreBackfillService` |
-| `client/` · `config/` · `interceptor/` · `logging/` · `trace/` · `contract/` · `social/` | 外部客户端 / 装配 / 内部令牌拦截 / 行为日志 / traceId / 跨服务契约 / 关注关系 | 见包内类名 |
+| `social/` · `client/` · `config/` · `interceptor/` · `logging/` · `trace/` · `contract/` | 关注关系 / 外部客户端 / 装配 / 内部令牌拦截 / 行为日志 / traceId / 跨服务契约 | `FollowService`（大 V 优先扫描 + 动态配额）、`GatewayReviewClient`、`InternalTokenInterceptor`、`TraceContext` |
+| `timeline/` 内的关注流读优化 | 作者索引分片与本地 L1 | `TimelineSupport.authorIndexKey/authorIndexShardFor`（key 格式唯一出口）、`RecallSupport`（viewer hash 读分片）、`AuthorRecentCache`（复用 tf-hotspot SDK，5s TTL-only） |
 
 **一条硬约定**：桶键 `tf:feed:tl:{pool}:{yyyyMMdd}` 与反查索引值 `{bucketKey}\u0001{member}` 的
 拼装/解析**只允许出现在 `TimelineSupport`**（`bucketKey` / `indexValue` / `parseIndex` 等）。
@@ -38,6 +40,7 @@
 | `tf:feed:tl:{pool}:{yyyyMMdd}` | ZSET | 某流量池某日的公域时间线；member = `FeedItemView` JSON，**score = 入流时刻** | 7 天 |
 | `tf:feed:idx:{timelineKey}` | String | **反查索引**：`{bucketKey}\u0001{member}`，用于精确 `ZREM` | 7 天 |
 | `tf:feed:rec:{page}:{limit}` | String | 推荐流旁路缓存（整页结果） | **15s** |
+| `tf:feed:author:{authorId}` 或 `tf:feed:author:{authorId}:shard:{n}` | ZSET | 作者近期内容索引；写侧按分片数写 N 份，读侧按 viewer hash 选 1 份，下架删全部；格式只在 `TimelineSupport` 拼装 | `author-index-ttl-hours`（默认 24h） |
 
 关键设计：
 
@@ -47,6 +50,13 @@
   而读路径只并最近 3 天分桶 → 该内容**永远不会出现在发现流**。统一以过审时刻分桶与打分，保证「今天过审 → 今天可见」；
 - **反查索引**：因为 member JSON 不包含所在桶信息，下架时必须靠索引精确定位到「哪个桶 + 哪个 member」才能 `ZREM`，
   否则只能扫桶。索引与桶同 TTL，避免悬挂。
+- **关注流大 V 治理**：关注流是读扩散（写作者索引，读关注列表），真正瓶颈是热 key 与扫描窗口截断。`FollowService.rankedFollowees`
+  在配置开启时用 Redis pipeline 读粉丝数，把大 V 排到扫描窗口前部，并对大 V 用更小的 per-author cap 防霸屏；
+  关闭时等价于原 `followedAuthors`，零回归。
+- **作者索引分片副本**：`shards>1` 时写侧写 `:shard:0..N-1` 共 N 份，读侧用 `floorMod(viewerId.hashCode(), N)` 选 1 份，
+  匿名/空 viewer 固定读 shard 0；`shards=1` 保持历史单 key。切分片前必须先回填存量，否则旧数据只在无后缀 key 上。
+- **作者近期内容 L1**：`AuthorRecentCache` 复用 `tf-hotspot` 的 `LocalCacheWithBroadcast`，默认 5s TTL-only（不广播），
+  因为关注流是近似信号，短延迟可接受。
 
 ## 4. 读路径与一致性
 
@@ -61,6 +71,9 @@ GET /internal/feed/recommended?page=&size=
 **最多 15s 内公域仍可能返回旧页**。这是刻意的取舍（简单 + 无阻塞），已作为验收口径确认。
 
 ## 5. 未实现蓝图：推拉结合扇出
+
+> ⚠️ 与 §3 的 P0/P1 优化区分：大 V 优先扫描、作者索引分片、作者 L1 缓存属于**关注流读侧优化**，不是传统扇出。
+> 真正的收件箱 / 大 V outbox / 活跃度分层 / 多路归并仍未实现，下面这段保持蓝图状态。
 
 `com.turbofeed.feed.{fanout,inbox,outbox,aggregate,config}` 五个包**目前只有 `.gitkeep` 占位、无任何实现**。
 
@@ -111,14 +124,15 @@ POST /internal/feed/timeline/remove?mediaId=         # 下架
 
 路径前缀 `/internal/**` 与对外 `/api/v1/**` **物理区分**，便于在网关 / 前置层拒绝外部直达。
 
-> ⚠️ **当前无鉴权**：依赖内网信任。生产必须补服务间令牌 / mTLS，否则任何能访问 8083 的调用方都可写入 / 删除公域时间线。
+> ⚠️ **已接 `X-Internal-Token` 双侧校验**（值来自 `TURBOFEED_INTERNAL_TOKEN`）：`dev`/`local` 缺令牌可 fail-open 便于克隆即跑，
+> 其它 profile 缺令牌启动即失败。生产仍建议叠加网络层隔离 / mTLS，避免任何能访问 8083 的调用方写入或删除公域时间线。
 
 ## 8. 依赖边界
 
 - 依赖 `tf-shared`（契约 `FeedItemView` / `FeedTimelineEvent`）；
 - Redis 客户端为官方 `spring-boot-starter-data-redis`（**Lettuce** + `commons-pool2`）——
   **不使用 Redisson**（只需要 ZSET / String 原子命令，不需要分布式锁）；
-- **不依赖 `tf-hotspot`**：热点治理 SDK 尚无实现（0 个源文件），当前无任何模块依赖它；
+- **依赖 `tf-hotspot`**：`LocalCacheWithBroadcast` 已用于热点榜 L1（`HotTimelineKeyCache`）与作者近期内容 L1（`AuthorRecentCache`）；冷热桶迁移仍待做；
 - 不连 MySQL：本服务是纯 Redis 读模型，无数据源。
 
 ## 9. 配置
@@ -129,12 +143,18 @@ POST /internal/feed/timeline/remove?mediaId=         # 下架
 | `spring.data.redis.host / port / password` | localhost:6379 / `${TURBOFEED_REDIS_PASSWORD:}` | Lettuce 懒连接；口令外部化，未注入而 Redis 要求鉴权时直接 NOAUTH |
 | `management.health.redis.enabled` | false | Redis 就绪前关闭健康指示器，防「克隆即跑」被拉 DOWN |
 | `turbofeed.mq.enabled` | false | 由 `mq` profile 加载 `application-mq.yml` 后置 true，才装配 `FeedTimelineConsumer` |
-| `turbofeed.fanout.*` | — | **占位**，扇出未实现 |
+| `turbofeed.feed.follow.bigv-first-enabled` | false | 开启后按粉丝数把大 V 排到关注扫描窗口前部 |
+| `turbofeed.feed.follow.bigv-follower-threshold` / `bigv-scan-window` / `bigv-per-author-cap` | 100000 / 200 / 1 | 大 V 阈值、扫描窗口、大 V 单页 per-author 配额 |
+| `turbofeed.feed.follow.author-index-shards` | 1 | 作者索引副本数；>1 时写入写 N 份、读按 viewer hash 选 1 份，切换前需回填 |
+| `turbofeed.feed.follow.author-cache-enabled` / `author-cache-ttl-seconds` | true / 5 | 作者近期内容 L1 缓存及 TTL |
+| `turbofeed.fanout.*` | — | **占位**，传统扇出未实现 |
 
 ## 10. 已做 vs 未做
 
 - ✅ 时间线读模型（多池 ZSET 分桶 + 反查索引 + 游标分页）、推荐流 15s 旁路缓存、
   `/internal/**` 接口、RocketMQ 顺序消费、独立部署单元。
-- ⬜ 推拉结合扇出（收件箱 / outbox / 活跃度分层 / 多路归并）——仅有空包与配置占位。
-- ⬜ 服务间鉴权（令牌 / mTLS）。
-- ⬜ 服务注册与发现：当前网关**直连 `base-url`**，无注册中心与客户端负载均衡。
+- ✅ 推荐漏斗（多路召回 + 粗排 + 精排 + 三层重排 + 流量池赛马 + 冷启动 + 生态调节）、行为日志归档、HNSW 向量召回。
+- ✅ 关注流读侧优化：大 V 优先扫描 + 动态 per-author 配额、作者索引分片、viewer hash 读分片、作者近期内容 L1。
+- ✅ 服务间鉴权：`X-Internal-Token` 双侧校验；服务发现：Nacos 双向 opt-in，默认直连 `base-url`。
+- ⬜ 传统推拉结合扇出（收件箱 / outbox / 活跃度分层 / 多路归并）——仅有空包与配置占位。
+- ⬜ 通知 WS/SSE、集中日志与全链路 Tracing。

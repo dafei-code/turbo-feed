@@ -1,7 +1,8 @@
 # 分库分表设计（turbo-feed-gateway 元数据层）
 
 > 载体：ShardingSphere JDBC 5.5.3（原生驱动模式）+ **内置 HASH_MOD 算法** + `autoTables` 自动分片。
-> 适用：网关全部元数据表（当前 **11 张逻辑表**：`user` / `media` / `account_credit` / `violation_record` / `account_penalty` / `report` / `appeal`（7 张走 hashMod4）+ `comment` / `media_like` / `user_follow` / `user_fans`（4 张走 hashMod128，含 P0-2 关注关系））。
+> 适用：网关全部元数据表（当前 **16 张分片逻辑表 + 12 张显式登记单表**）。
+> 分片逻辑表：`user` / `media` / `account_credit` / `violation_record` / `account_penalty` / `report` / `appeal`（7 张走 `hashMod4`）；`comment` / `media_like` / `comment_like` / `media_favorite` / `user_follow` / `user_fans` / `user_notification` / `share_record` / `outbox_event`（9 张走 `hashMod128`）。
 > 其他服务（counter / feed-engine）不持有元数据表，不参与分片。
 
 ## 1. 为什么分片
@@ -19,7 +20,12 @@ UGC 场景元数据增速 ≈ 用户量 × 人均写入量。单表在千万级�
 | `account_credit` | `user_id` | 与 `user` 同片；`ensure` / `deduct` / `restore` / `onHumanApproved` 全部 `WHERE user_id = ?` 单分片命中，信用扣减不跨片。加列须**逐张物理表**执行（`account_credit_0.._3` 共 4 张，分落两库） |
 | `report` | `media_id` | 举报的写入与处理（`insert(media_id)` / `resolve(WHERE media_id=?)`）均按 `media_id` 定位；管理员待处理列表按 `status` 查为**广播**，低频可接受 |
 | `appeal` | `media_id` | 同 `report`，申诉单与举报单按同一维度聚集，便于按内容聚合查看 |
-| `comment` | `media_id` | 「读某条内容下所有评论」单分片命中，**不依赖 media 所在库**即可定位评论——评论分片键与 media 分片键（`user_id`）**正交**，这是刻意的：评论独立成包、独立读写路径，不与内容耦合 |
+| `comment` / `comment_like` | `media_id` | 「读某条内容下所有评论/评论点赞」单分片命中，**不依赖 media 所在库**即可定位——分片键与 media 的 `user_id` **正交**是刻意的：互动独立成包、独立读写路径，不与内容耦合 |
+| `media_like` / `media_favorite` | `post_id` | 与 Redis 去重 Set、时间线幂等键同为 `postId`；同帖点赞/收藏落同片，计数与读模型以 Redis 为权威，本表为持久化兜底 |
+| `user_follow` / `user_notification` | `user_id` | 「我关注了谁」「我的通知」按 viewer/user 精准命中；关注流读侧另有 Redis ZSET `tf:follow:{userId}` 与作者索引副本 |
+| `user_fans` | `author_id` | 「谁关注了我」与 `user_follow` 互为镜像双写，避免 fan-out；大 V 粉丝查询单分片命中 |
+| `share_record` | `code` | 短链跳转按 code 点查单分片；主键由应用层雪花生成 |
+| `outbox_event` | `id`（雪花） | 投递主链路 `findById`/`claim`/`markSent`/`markFailed`/`reDeadLetter` 全部只有 eventId；按 `aggregate_id` 会让这些 CAS 广播到全部 128 片。迁移必须用 `Long.hashCode()`，详见 [outbox 分片改造](../ops/outbox-sharding-rollout.md) |
 
 **刻意不用 `username` 做 `user` 表分片键**：登录常只给 username/phone，按 username 分片会要求先定位 id（鸡生蛋），且 username 可变。username 仅作展示与单分片内唯一，全局唯一由上层保证（见 §5）。
 
@@ -28,15 +34,17 @@ UGC 场景元数据增速 ≈ 用户量 × 人均写入量。单表在千万级�
 ```
 规则：autoTables + HASH_MOD，**两套算法并存**（库数 2 固定，表数按表不同）：
   - 7 张元数据表（user / media / account_credit / violation_record / account_penalty / report / appeal）走 `hashMod4`（sharding-count = 4 = 库数 2 × 表数 2）
-  - 4 张高写入表（comment / media_like / user_follow / user_fans，P0-2 关注关系 + 评论/点赞扩容）走 `hashMod128`（sharding-count = 128）
+  - 9 张高写入表（comment / media_like / comment_like / media_favorite / user_follow / user_fans / user_notification / share_record / outbox_event）走 `hashMod128`（sharding-count = 128）
 
 逻辑表 → 物理表命名：<逻辑表>_0 .. <逻辑表>_{N-1}（N = 各自的 sharding-count）
 落库规则：第 i 张物理表落在 actualDataSources.get(i % 2)，偶数下标落 ds_0(turbo_feed_1)、奇数下标落 ds_1(turbo_feed_2)
 
-物理表（11 张逻辑表共 540 张）：
+物理表（16 张逻辑表共 1180 张）：
   hashMod4（7 表 × 4 = 28 张）：user / media / account_credit / violation_record / account_penalty / report / appeal 各 _0.._3
-  hashMod128（4 表 × 128 = 512 张）：comment / media_like / user_follow / user_fans 各 _0.._127
+  hashMod128（9 表 × 128 = 1152 张）：comment / media_like / comment_like / media_favorite / user_follow / user_fans / user_notification / share_record / outbox_event 各 _0.._127
 ```
+
+> `outbox_event` 的分片键是雪花 `id`，不是 CDC 消息分区键 `aggregate_id`：后者只用于 MQ 按帖保序，不能拿来做 DB 路由。SENT 清理器先清终态冷行，再进入分片迁移；完整步骤与实证见 [outbox 分片改造](../ops/outbox-sharding-rollout.md)。
 
 选择 2×2 的考量：起步规模小，2 库解决单实例容量上限、2 表解决单表行数上限，足以撑到亿级；且 2 的幂次取模无余数偏差。
 
@@ -88,8 +96,8 @@ UGC 场景元数据增速 ≈ 用户量 × 人均写入量。单表在千万级�
 
 | 阶段 | 动作 | 状态 / 影响 |
 |---|---|---|
-| 当前 | 混合：7 表 hashMod4 + 4 表 hashMod128（comment / media_like / user_follow / user_fans） | ✅ **已落地**，撑到约亿级；4 张高写入表已直接 128 无需再切 |
-| media 进一步扩容 | 2 库 × 64 表 = **128 物理表** | ⚠️ **前置已就绪并实机验证，仍未切换**（其余 4 张高写入表已直接 128）：`shardingsphere-config-128.yaml`（0041 重写为 `autoTables`，此前根本起不来）+ `db/expand_media_tables_128.sql`（已在本机建成 128 张）+ `db/rebalance_media_128.sql`（存量搬迁）。切换需改 `application.yml` 的 `spring.datasource.url` 指向 128 版配置并**重启应用**（SS 启动期加载元数据） |
+| 当前 | 混合：7 表 hashMod4 + 9 表 hashMod128（含 P3 的 outbox_event） | ✅ **已落地**，撑到约亿级；9 张高写入表已直接 128 无需再切 |
+| media 进一步扩容 | 2 库 × 64 表 = **128 物理表** | ⚠️ **前置已就绪并实机验证，仍未切换**（其余 9 张高写入表已直接 128，含 `outbox_event`）：`shardingsphere-config-128.yaml`（0041 重写为 `autoTables`，此前根本起不来）+ `db/expand_media_tables_128.sql`（已在本机建成 128 张）+ `db/rebalance_media_128.sql`（存量搬迁）。切换需改 `application.yml` 的 `spring.datasource.url` 指向 128 版配置并**重启应用**（SS 启动期加载元数据） |
 | 单库容量瓶颈 | 4 库 × N 表 | 加 `ds_2`/`ds_3` 数据源 + 库层 `sharding-count` + 建表 |
 | 扩容再平衡 | 复制 + 清理两阶段，库内搬迁 | 4 → 128 是 2 的幂倍扩展，实证 **库定位不变**（`idx128 % 4 == idx4`，故 `%2` 亦同）——源 `media_X` 只是拆到同库的 `{X, X+4, ..., X+124}` 共 32 张表，**不跨库**。搬迁必须「先复制再删源表中不属于它的行」，缺一步会重复或丢数据（见 changelog 0041）。生产仍建议双写 + 灰度，勿停机硬切 |
 
@@ -100,7 +108,7 @@ UGC 场景元数据增速 ≈ 用户量 × 人均写入量。单表在千万级�
 - `application.yml`：`spring.datasource.driver-class-name=org.apache.shardingsphere.driver.ShardingSphereDriver` + `url=jdbc:shardingsphere:classpath:shardingsphere-config.yaml`；
 - `shardingsphere-config.yaml`：
   - `dataSources`：`ds_0` / `ds_1`（Hikari + MySQL 驱动，指向 `turbo_feed_1` / `turbo_feed_2`）。**注意文件内账号密码仅供克隆即跑，生产必须用环境变量/密钥管理注入**（文件内已留 TODO）；
-  - `rules - !SHARDING`：`autoTables`（11 张逻辑表的 `shardingColumn` 与算法引用，分属 `hashMod4` 与 `hashMod128` 两套算法）+ `shardingAlgorithms.hashMod` / `hashMod128`（`type: HASH_MOD` / `props.sharding-count: 4 | 128`）+ `keyGenerators.snowflake`；
+  - `rules - !SHARDING`：`autoTables`（16 张逻辑表的 `shardingColumn` 与算法引用，分属 `hashMod4` 与 `hashMod128` 两套算法）+ `shardingAlgorithms.hashMod` / `hashMod128`（`type: HASH_MOD` / `props.sharding-count: 4 | 128`）+ `keyGenerators.snowflake`；另 12 张表显式登记在 `!SINGLE`；
   - `props.sql-show: true`（开发期打印实际落库表与 SQL，便于核对路由；生产可关）；
 - `pom.xml`：`shardingsphere-jdbc:5.5.3`（原生驱动，无需 starter；⚠️ 是 `shardingsphere-jdbc`，**不是** `shardingsphere-jdbc-core`，后者不存在导致 import 全军报红）。**版本选择**：5.5.3 是 5.5.x 线最新稳定版，相比 5.5.0 已修复"test-util 缺失发布"的 release 缺陷（Apache PR #31143），无需 exclusion。
 - **主键生成**：`user.id` 与 `comment.comment_id` 配置了雪花生成器；`media` / `report` / `appeal` 的业务主键由应用侧生成（如 `media/{userId}/{uuid}.{ext}`、`post/{userId}/{uuid}`），非 SS 生成。业务侧显式传 `id` 时以传入值为准。

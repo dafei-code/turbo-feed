@@ -51,8 +51,8 @@ turbo-feed/
 ## 技术栈
 
 Java 17 · Spring Boot 3.4.3 · Spring Cloud 2024.0.2 + Alibaba 2023.0.3.4（Sentinel 流控、Nacos opt-in 服务发现）· Maven 多模块 ·
-MySQL 8 + ShardingSphere 5.5.3（**15 张分片表**：6×hashMod4 + 9×hashMod128，另 12 张显式登记单表，读写分离规则已配）· Redis 7（Lettuce，时间线/画像/计数权威源）·
-RocketMQ（starter 2.3.5 / client 5.3.2，顺序消息 + DLQ）· MinIO 8.5.7（对象存储 + 行为日志归档）· Redisson 3.27.2 / Caffeine · ArchUnit 1.3.0
+MySQL 8 + ShardingSphere 5.5.3（**16 张分片逻辑表**：7×hashMod4 + 9×hashMod128，另 12 张显式登记单表，读写分离规则已配）· Redis 7（Lettuce，时间线/画像/计数权威源）·
+RocketMQ（starter 2.3.5 / client 5.3.2，顺序消息 + DLQ）· Canal 1.1.7（outbox CDC opt-in）· MinIO 8.5.7（对象存储 + 行为日志归档）· Redisson 3.27.2 / Caffeine · ArchUnit 1.3.0
 
 ---
 
@@ -72,6 +72,7 @@ RocketMQ（starter 2.3.5 / client 5.3.2，顺序消息 + DLQ）· MinIO 8.5.7（
 - **审核与推荐解耦**：`ReviewSignalClient` 直读 `tf:mod:` KV，召回层过滤 INTERCEPT/MONITOR 内容与低健康分作者，排序层懒读降权——不阻塞、不耦合。
 - **A/B 尺子**：`ExperimentBucket` 把 userId 稳定映射 100 桶，可对某一桶覆写召回配比做对照实验。
 - **训练闭环**：行为事件（含 `requestId`/`position`，专为负样本判定与 position bias 校正留的字段）落本地 JSONL → gzip 归档 MinIO → 离线训练向量回灌 Redis。
+- **关注流大 V 治理**：关注流本来就是读扩散（写作者索引、读关注列表），缺口不是「推不动大 V」而是热 key 与扫描窗口截断。现已落地大 V 优先扫描 + 动态 per-author 配额、作者索引分片副本、viewer hash 读分片与 5s 本地 L1 缓存；默认保持旧行为，按配置 opt-in 灰度。
 
 > 诚实标注：DEEPFM 当前是本地确定性 FM 实现（交叉项默认权重很小，权重为 0 时 ≡ 线性模型），真实远程 serving 走 `RankModelClient` 缝接，尚未接入训练好的线上模型；MULTI_TARGET 同理。
 
@@ -88,6 +89,8 @@ RocketMQ（starter 2.3.5 / client 5.3.2，顺序消息 + DLQ）· MinIO 8.5.7（
 ![事务性事件总线 ADR-0016](docs/images/event-bus.png)
 
 配套：**契约版本协商**（`ContractVersion`：缺版本容忍、高版本抛异常，发布顺序「先消费者后生产者」）、**FeatureFlagGuard 启动期组合校验**（非法开关组合 fail-fast）、**雪花 workerId 租约**（多实例不撞号）。
+
+**规模化演进（已实现、默认 opt-in）**：`outbox_event` 已由单表切成 **128 分片**，分片键选雪花 `id`（不是 `aggregate_id`），让 `findById/claim/markSent/markFailed/reDeadLetter` 全部单分片命中；`OutboxSentCleaner` 先清 SENT 终态冷行，控制广播扫描体积。CDC 旁路为 `MySQL binlog → Canal → CanalCdcForwarder → RocketMQ turbofeed-outbox-cdc → OutboxCdcConsumer → tryDeliver`，消息只带 `eventId + traceId`，payload 仍以 DB 行为唯一事实源；幂等靠 `claim` CAS，不靠 MQ 去重。Canal Server、转发器、Topic 与端到端链路已在本机真启动验证，生产灰度见 [outbox-cdc-rollout.md](docs/ops/outbox-cdc-rollout.md)；分片迁移与路由实证见 [outbox-sharding-rollout.md](docs/ops/outbox-sharding-rollout.md)。CDC 默认关闭，Relay 永不关。
 
 ## 亮点三：教科书级的内容安全模块
 
@@ -111,7 +114,7 @@ RocketMQ（starter 2.3.5 / client 5.3.2，顺序消息 + DLQ）· MinIO 8.5.7（
 
 ## 亮点四：数据层与分布式计数
 
-- **15 张分片表 + 12 张单表**：`HASH_MOD`（`abs(hashCode) % N`，不是 `id % N`）混合分片；同键组设计让「某内容下所有评论/点赞/举报」单分片命中；读写分离规则已配好，副本 URL 由 compose 参数化注入（未配则回落主库，读路径照常可用）。
+- **16 张分片逻辑表 + 12 张单表**：`HASH_MOD`（`abs(hashCode) % N`，不是 `id % N`）混合分片；同键组设计让「某内容下所有评论/点赞/举报」单分片命中；`outbox_event` 按雪花 `id` 分片，避免投递主链路 CAS 广播。读写分离规则已配好，副本 URL 由 compose 参数化注入（未配则回落主库，读路径照常可用）。
 - **计数服务独立部署**：Redis 分桶缓冲原子 `INCRBY` → MQ 削峰 → 批量 UPSERT；`counter_flush_dedup` 批次幂等 + `counter_flush_pending` 失败暂存重放；prod 切共享 MySQL + ShedLock 抢锁，多副本不再各持一份 H2。
 - **三级读缓存**：L1 Caffeine → L2 Redis → L3 DB；热点 Key 滑动窗口探测（`tf-hotspot`）。
 - **可观测性闭环**：全链路失败模式台账（`docs/architecture/failure-mode-ledger.md`）、Outbox 水位指标、墓碑拦截指标、召回/排序/重排逐层 `tf_feed_*` Prometheus 指标——**每个 fail-open 兜底都必须埋点**是仓库的硬规矩。
@@ -163,6 +166,9 @@ java -cp tf-benchmark/target/classes:<deps> com.turbofeed.benchmark.BenchmarkMai
 | `TURBOFEED_DB_USERNAME` / `TURBOFEED_DB_PASSWORD` | MySQL 账号密码（经 ShardingSphere 逻辑库数据源注入） |
 | `TURBOFEED_MINIO_ENDPOINT` / `ACCESS_KEY` / `SECRET_KEY` | 对象存储地址与凭据 |
 | `TURBOFEED_MQ_ENABLED` | 是否启用 RocketMQ 投递（默认 false，克隆即跑） |
+| `TURBOFEED_OUTBOX_CDC_CONSUMER_ENABLED` / `_FORWARDER_ENABLED` | outbox CDC 消费端 / Canal 转发器开关，默认 false；转发器只应开一个实例 |
+| `TURBOFEED_OUTBOX_CDC_TOPIC` / `_CONSUMER_GROUP` / `_CANAL_HOST` / `_CANAL_PORT` / `_CANAL_DESTINATION` | CDC Topic、消费组与 Canal 连接参数，默认值见 `application.yml` |
+| `TURBOFEED_FEED_FOLLOW_BIGV_FIRST_ENABLED` / `_AUTHOR_INDEX_SHARDS` / `_AUTHOR_CACHE_ENABLED` | 关注流大 V 治理：优先扫描、作者索引分片数、L1 缓存；默认保持旧行为或 1 分片 |
 
 常用开关：`--spring.profiles.active=mq` 启用 MQ 投递 · `turbofeed.media.storage=minio|local` ·
 `turbofeed.feed.degraded-mode=empty|local-scan` · `turbofeed.review.moderation-mode=rule|pass|ai`。
@@ -193,7 +199,7 @@ Redis 在本项目**不只是缓存**，而是多项能力的权威数据源：
 | [docs/architecture/c4-model.md](docs/architecture/c4-model.md) | C4 架构模型：上下文 / 容器 / 组件三层 |
 | [docs/adr/](docs/adr/README.md) | **17 篇架构决策记录**（0001~0016 + 实施计划），每份写清代价与否决过的方案；0016 为分布式事务重构合并版 |
 | [docs/architecture/failure-mode-ledger.md](docs/architecture/failure-mode-ledger.md) | 全链路失败模式对账：投递语义 / 降级口径 / 指标与告警 |
-| [docs/ops/](docs/ops/) | 运维手册：时间线墓碑、Outbox 水位、多节点开关、评论读扩展、内容安全 SLO 等 12 篇 |
+| [docs/ops/](docs/ops/) | 运维手册：时间线墓碑、Outbox 水位、发件箱分片/CDC 灰度、多节点开关、评论读扩展、内容安全 SLO 等 13 篇 |
 | [docs/modules/](docs/modules/) | 模块级技术文档（与 Maven 模块一一对应） |
 | [docs/ops/deployment.md](docs/ops/deployment.md) | 构建部署 / 环境开关 / 生产前必改清单 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献指南：环境 / 构建 / 提交规范 / 提交前自检清单 |
