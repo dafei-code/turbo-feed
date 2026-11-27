@@ -183,6 +183,30 @@ public class OutboxEventRepository {
     }
 
     /**
+     * 分批删除已成功投递的终态行（{@code SENT}），只删 {@code created_at < before} 的冷数据。
+     *
+     * <p><b>为什么必须先清理再分片</b>：{@code SENT} 只增不减，是 outbox_event 体积的绝对主体。
+     * 不清理就分片等于把「一张无限增长的大表」拆成「128 张仍在增长的表」，而扫描类查询
+     * （{@link #findDueIds}/{@link #reapStuck}/{@link #findDeadIds}/{@link #backlog}）在分片后
+     * 全部广播——广播代价会抵消分片收益。先清掉无价值的终态行，活跃表常年只有极少非终态行，
+     * 分片才真正换来写入分散而非查询放大。</p>
+     *
+     * <p><b>为什么带 LIMIT</b>：避免一次事务删掉海量行造成长事务 / binlog 堆积；每轮每片最多删
+     * {@code batchSize} 条，多轮收敛。在 autoTables 分片下该 DELETE 会广播到各分片，
+     * {@code LIMIT} 作用于每个分片，因此单轮实际删除量上限 = 分片数 × batchSize。</p>
+     *
+     * <p>保留窗口由调用方（{@code OutboxSentCleaner}）控制；此类不自行取 {@code now}，
+     * 保持纯数据访问语义、便于单测。</p>
+     *
+     * @return 本轮删除的行数（各分片归并后的合计）
+     */
+    public int purgeSent(int batchSize, Instant before) {
+        return jdbcTemplate.update(
+                "DELETE FROM outbox_event WHERE status = ? AND created_at < ? LIMIT ?",
+                STATUS_SENT, Timestamp.from(before), batchSize);
+    }
+
+    /**
      * 非终态积压统计（按状态分组，附每组最老一行的创建时间）。
      *
      * <p><b>为什么需要它</b>：{@code OutboxRelay} 每轮只打印 {@code due/成功/失败} 三个数，

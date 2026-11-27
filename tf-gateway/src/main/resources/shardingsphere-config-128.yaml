@@ -270,6 +270,18 @@ rules:
         keyGenerateStrategy:
           column: id
           keyGeneratorName: snowflake
+      # P3 分片改造：事务发件箱由 !SINGLE 单表改为 autoTables（分片键 id，hashMod128）。
+      # ⚠️ 分片键必须是 id 而非 aggregate_id：投递主链路 findById/claim/markSent/markFailed/
+      #    reDeadLetter 全部只有 eventId（快路径 afterCommit(eventId)、CDC 消费者 tryDeliver(eventId)），
+      #    按 aggregate_id 分片会让这 5 个 CAS 操作广播到 128 片（每投一条 4 次跨片 UPDATE）。
+      # 雪花 id 天然分散、无 user_id 那样的热点；物理表 outbox_event_0..127 由 deploy/mysql/outbox_event_128.sql 建。
+      # 前置：先跑 OutboxSentCleaner 清 SENT 冷数据 + 只迁移非终态行，见 docs/ops/outbox-sharding-rollout.md。
+      outbox_event:
+        actualDataSources: ds_0, ds_1
+        shardingStrategy:
+          standard:
+            shardingColumn: id
+            shardingAlgorithmName: hashMod128
 
     shardingAlgorithms:
       # 分片数 4：user / account_credit / violation_record / account_penalty / report / appeal / comment
@@ -296,8 +308,8 @@ rules:
       - ds_0.sensitive_word
       - ds_0.sensitive_whitelist
       - ds_0.user_phone_router
-      - ds_0.outbox_event
-      # 复审任务队列（抖音式「举报累计→人工复审」，changelog 0065）：单表落 ds_0（仿 outbox_event）。
+      # outbox_event 已于 P3 从单表改为 autoTables(hashMod128, 分片键 id)，见上方 autoTables 段。
+      # 复审任务队列（抖音式「举报累计→人工复审」，changelog 0065）：单表落 ds_0。
       - ds_0.review_task
       - ds_0.account_health
       - ds_0.reporter_credit
