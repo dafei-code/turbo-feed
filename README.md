@@ -1,7 +1,7 @@
 # turbo-feed
 
 > **一个把「上线后才会暴雷」的问题提前写好答案的短视频 Feed 后端参考实现。**
-> Java 17 / Spring Boot 3.4.3 多模块工程：抖音式推荐漏斗 · 事务性事件总线 · 分布式计数 · 内容安全词库 · 128 分片数据层。
+> Java 17 / Spring Boot 3.4.3 多模块工程：抖音式推荐漏斗 · 事务性事件总线 + binlog CDC · 分享短链 · 分布式计数 · 内容安全词库 · 128 分片数据层。
 
 ![Java](https://img.shields.io/badge/Java-17-orange)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.3-green)
@@ -20,16 +20,18 @@
 
 - 推荐页怎么做到**只读 Redis、不碰数据库**，还能精确下架任意一条内容？—— 写时物化 ZSET 时间线 + 反查索引 + 作者索引 + **Lua 单调墓碑**，一条迟到的 MQ 旧消息也无法把已下架内容「复活」。
 - MQ 挂了 Feed 断流？—— **Outbox 同事务落事件** + afterCommit 快投 + Relay 退避补偿 + DEAD 告警；未启用 MQ 时自动降级进程内投递，克隆即跑。
+- 发件箱堆到千万行、Relay 轮询越来越慢？—— **SENT 清理 → `outbox_event` 128 分片（按雪花 `id`）→ binlog CDC 流式发现**：`Canal → 转发器 → RocketMQ → OutboxCdcConsumer`，消息只带 `eventId + traceId`，payload 仍以 DB 行为唯一事实源；幂等靠 `claim` CAS。已端到端真启动验证、默认关闭，Relay 永不关。
 - 推荐排序想换模型，要改多少代码？—— 一个配置项。精排做成**可插拔模型族**（LINEAR / DEEPFM / MULTI_TARGET），五路召回、三层重排都是 Spring Bean，加一路不用动主编排。
 - 一个服务挂了，整页推荐开天窗？—— **全链路 fail-open 有明确分界线**：主数据写入 strict 抛异常进 DLQ，一切增强信号（画像/召回/重排/缓存）静默降级且**每处都有 Prometheus 指标**。
 - 敏感词库热更新会不会卡住线上请求？—— `AtomicReference` 整快照 CAS 切换，**读路径零锁**；AC 自动机一次扫描收集全部命中，逐命中查白名单后按严重度取最严重动作。
 - 128 分片下点赞计数扛得住突发流量吗？—— 独立计数服务：Redis 分桶缓冲原子累加 → MQ 削峰 → 批量 UPSERT，读侧 L1 Caffeine / L2 Redis / L3 DB 三级缓存。
+- 分享短链会不会把内容复制一堆、原帖删了还能跳？—— **分享是引用式动作 + 快照**：短码由雪花 ID 经 8 轮 Feistel 混淆成 11 位 Base62（不可枚举），`share_record` 按 `code` 128 分片；短链跳转**每次回源校验内容仍为 APPROVED**，下架即返回不可用页；可选 Bloom 前置闸门挡穿透。
 
 ## 模块结构（按真实代码统计）
 
 ```
 turbo-feed/
-├── tf-gateway/      :8080  接入层（42.8k 行）：认证/RBAC · 媒体上传(一帖多图) · 审核状态机 · 内容安全 · 评论/点赞/收藏 · 通知中心 · 搜索 · Sentinel
+├── tf-gateway/      :8080  接入层（42.8k 行）：认证/RBAC · 媒体上传(一帖多图) · 审核状态机 · 内容安全 · 评论/点赞/收藏 · 通知中心 · 搜索 · 分享短链 · Sentinel
 ├── tf-feed-engine/  :8083  Feed 引擎（17.0k 行）：推荐漏斗(五路召回/粗排/精排/三层重排) + 三级流量池赛马 + 多池 ZSET 时间线 + 墓碑防旧 + 实验分桶
 ├── tf-counter/      :8081  计数服务（2.2k 行）：Redis 分桶 + MQ 削峰 + 批量落库 + 三级读缓存 + ShedLock 多副本
 ├── tf-shared/              契约库（2.6k 行）：跨服务传输模型 + Redis Key 门面 + 开关常量 + 契约版本协商，零第三方依赖
@@ -76,7 +78,7 @@ RocketMQ（starter 2.3.5 / client 5.3.2，顺序消息 + DLQ）· Canal 1.1.7（
 
 > 诚实标注：DEEPFM 当前是本地确定性 FM 实现（交叉项默认权重很小，权重为 0 时 ≡ 线性模型），真实远程 serving 走 `RankModelClient` 缝接，尚未接入训练好的线上模型；MULTI_TARGET 同理。
 
-## 亮点二：事务性事件总线与可靠性（ADR-0016）
+## 亮点二：事务性事件总线、CDC 流式投递与可靠性（ADR-0016）
 
 发件箱不是贴个表就完事，这里把它做成了**有严格语义保证的事件总线**：
 
@@ -120,6 +122,18 @@ RocketMQ（starter 2.3.5 / client 5.3.2，顺序消息 + DLQ）· Canal 1.1.7（
 - **可观测性闭环**：全链路失败模式台账（`docs/architecture/failure-mode-ledger.md`）、Outbox 水位指标、墓碑拦截指标、召回/排序/重排逐层 `tf_feed_*` Prometheus 指标——**每个 fail-open 兜底都必须埋点**是仓库的硬规矩。
 
 ![数据层：分片、计数与缓存](docs/images/data-layer.png)
+
+## 亮点五：短链分享（引用式，不复制内容主体）
+
+分享链路已接通：`POST /api/v1/share/create` 生成短链，`GET /s/{code}` 公开跳转，`GET /api/v1/share/my` 看我的分享，运营侧 `/api/v1/admin/share/list` 盘点、`/{code}/invalidate` 作废。规则和边界写在 [ADR-0010](docs/adr/0010-share-forward.md)。
+
+- **短码不可枚举**：雪花 ID → 8 轮 Feistel 可逆混淆 → 定长 11 位 Base62；不是直接 `Base62(id)`，避免从一个短码推出相邻短码遍历全站。Redis `SETNX` 预占 + `share_record.uk_code` 兜底，冲突换码最多 3 次。
+- **快照 ≠ 内容副本**：`share_record` 按 `code` 128 分片，只固化 `{postId, mediaId, 作者, 文案}` 快照和映射；真实内容状态仍以 `media` 为准。跳转每次回源校验 `APPROVED`，已删除/下架的内容返回「内容不可用」页，**旧短链不能让下架内容复活**。
+- **跳转节流与防穿透**：本地 L1 映射缓存 + Redis 7 天 TTL + 可选 Redis 位图 Bloom 前置闸门（默认关闭，先 shadow 观测再 enforce）；BF 挂掉 fail-open，绝不因增强组件故障阻断正常短链。
+- **副作用不污染主链路**：只有创建成功的短链才发一次分享计数（跳转不重复计数）；互关好友通知、计数、BF add 都是 fail-open，失败只记日志/打点，不回滚已创建的短链。
+- **归因与治理**：302 带 `post` / `from=share` / `trace` / `sharer`，可回灌行为日志；运营端按 code 游标分页盘点、失效后同步清 L1/L2 缓存。
+
+> 诚实标注：当前落地的是**分享短链 + 好友通知 + 运营治理**；ADR-0010 里的「站内转发 = 新帖 `ref_post_id` 引用」仍是规划，未伪装成已实现。
 
 ---
 
@@ -169,6 +183,7 @@ java -cp tf-benchmark/target/classes:<deps> com.turbofeed.benchmark.BenchmarkMai
 | `TURBOFEED_OUTBOX_CDC_CONSUMER_ENABLED` / `_FORWARDER_ENABLED` | outbox CDC 消费端 / Canal 转发器开关，默认 false；转发器只应开一个实例 |
 | `TURBOFEED_OUTBOX_CDC_TOPIC` / `_CONSUMER_GROUP` / `_CANAL_HOST` / `_CANAL_PORT` / `_CANAL_DESTINATION` | CDC Topic、消费组与 Canal 连接参数，默认值见 `application.yml` |
 | `TURBOFEED_FEED_FOLLOW_BIGV_FIRST_ENABLED` / `_AUTHOR_INDEX_SHARDS` / `_AUTHOR_CACHE_ENABLED` | 关注流大 V 治理：优先扫描、作者索引分片数、L1 缓存；默认保持旧行为或 1 分片 |
+| `TURBOFEED_SHARE_CODE_SECRET` / `TURBOFEED_SHARE_FRONTEND_URL` | 短链混淆密钥（生产必须显式配置，多实例一致）与落地页完整 URL（前端独立域名部署必填） |
 
 常用开关：`--spring.profiles.active=mq` 启用 MQ 投递 · `turbofeed.media.storage=minio|local` ·
 `turbofeed.feed.degraded-mode=empty|local-scan` · `turbofeed.review.moderation-mode=rule|pass|ai`。
