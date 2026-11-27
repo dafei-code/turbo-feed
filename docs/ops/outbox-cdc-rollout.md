@@ -1,6 +1,7 @@
 # Outbox CDC 流式投递灰度说明（P2）
 
-> 状态：**代码已实施，默认关闭**；Canal / 转发器 / MQ Topic 属于外部基建，**尚未部署**。
+> 状态：**代码已实施，默认关闭**；Canal Server 已部署并验证可捕获 `outbox_event` INSERT（2026-11-27），
+> 但**转发器未实现、MQ Topic 未创建**，整条 CDC 链路尚未端到端打通。
 > 关联：`docs/adr/0011-cdc-clickhouse.md`（CDC 选型 Canal，当前仍是 Proposed）、
 > `docs/ops/outbox-watermark-metrics.md`（可观测口径）、
 > `docs/ops/upload-outbox-rollout.md`（发件箱通道灰度）。
@@ -31,7 +32,7 @@ MySQL binlog (3307 只读副本)
 
 | 组件 | 作用 | 状态 |
 | --- | --- | --- |
-| Canal Server | 订阅只读副本 binlog，过滤 `outbox_event` INSERT | 未部署 |
+| Canal Server | 订阅 MySQL binlog，过滤 `outbox_event` INSERT | **已部署并验证**（2026-11-27，见 §6） |
 | 转发器 | 把 Canal entry 转成一个 `{eventId, traceId}` 消息，分区键=`aggregate_id` | 未实现（见 §5） |
 | RocketMQ Topic | `turbofeed-outbox-cdc`（按帖分区有序） | 未创建 |
 | `OutboxCdcConsumer` | 网关侧消费者，只取 eventId 交给 `tryDeliver` | 已实现，默认关闭 |
@@ -80,3 +81,23 @@ CAS（PENDING/FAILED → SENDING）保证同一行只被一个投递者领走。
 **本地通道的进程内崩溃窗口依然存在**：CDC 保证的是「事件行至少被投递一次到传输层」，
 不是「审核一定完成」。LOCAL 通道下 Handler 把事件交给应用内总线即视为成功；
 要端到端严格可靠需用 mq 通道（见 `docs/ops/upload-outbox-rollout.md` §5.3）。
+
+## 六、Canal Server 部署记录（2026-11-27）
+
+已在本机 Docker 部署 Canal Server 并验证可捕获 `outbox_event` 分片表的 INSERT：
+
+- **编排**：`deploy/canal/docker-compose.yml`（镜像 `docker.m.daocloud.io/canal/canal-server:v1.1.7`，
+  docker.io 国内不可达走 daocloud；端口 11111/11112，`host.docker.internal` 连宿主机 MySQL）。
+- **实例配置**：`deploy/canal/conf/example/instance.properties`
+  - 复制账号 `canal@'%'`（REPLICATION SLAVE/CLIENT + SELECT，本机 MySQL 9.3 密码策略要求强密码）。
+  - 过滤正则 `turbo_feed_1\.outbox_event.*,turbo_feed_2\.outbox_event.*`，黑名单排除 `_backup`。
+  - 起始位点 `binlog.000286:288147`（存量已迁移、无需回放历史）。
+- **验证结果**：
+  - 容器 healthy（healthcheck 用 curl 探 `/metrics`，镜像无 netstat）。
+  - 实例日志：表过滤规则生效、连上 `host.docker.internal:3306`、find start position 成功、进入 binlog dump。
+  - 插入一条 `outbox_event_4` 的 PENDING 行后，`curl :11112/metrics` 显示
+    `canal_instance_store_produce_seq=2`、`canal_instance_put_rows=1`、`received_binlog_bytes>0`，
+    证明 binlog 中该 INSERT 被解析为 entry 进入 store。探针行已删。
+- **健康约束**：Canal 是拉取模型，无 client 连接时 `consume_seq=-1 / get_rows=0` 属正常——
+  转发器实现前 entry 只堆积不消费；store 容量有限，长期不接转发器需监控堆积。
+- **启动命令**：`docker compose -p canal -f deploy/canal/docker-compose.yml up -d`

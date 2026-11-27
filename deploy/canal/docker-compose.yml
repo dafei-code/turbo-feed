@@ -1,0 +1,27 @@
+# Canal Server（outbox_event CDC 的 binlog 订阅端）
+# 启动：docker compose -p canal -f deploy/canal/docker-compose.yml up -d
+# 前置：本机 MySQL 3306 已开 binlog(ROW)，canal 复制账号已建（见 instance.properties）。
+# 说明：macOS Docker Desktop 用 host.docker.internal 连宿主机 MySQL；
+#       Linux 部署需改 extra_hosts 为 "host.docker.internal:host-gateway"。
+# 镜像源：docker.io 在国内不可达，走 daocloud 加速。
+services:
+  canal-server:
+    image: docker.m.daocloud.io/canal/canal-server:v1.1.7
+    container_name: canal-server
+    restart: unless-stopped
+    ports:
+      - "11111:11111"   # canal client 端口（转发器连接）
+      - "11112:11112"   # admin 端口
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./conf/example/instance.properties:/home/admin/canal-server/conf/example/instance.properties:ro
+    environment:
+      - TZ=Asia/Shanghai
+    healthcheck:
+      # 镜像内无 netstat/ss，但有 curl；用 admin 的 /metrics 端点探活（返回 200 即实例进程在跑）
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:11112/metrics >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s

@@ -91,3 +91,21 @@
   替代 Relay 轮询，而非退回首表。
 - `backlog()` 在分片下由 ShardingSphere 归并 COUNT/MIN，语义与单表一致，指标可信。
 - `purgeSent` 的 `DELETE ... LIMIT ?` 在分片下广播到各片、每片独立 LIMIT，单轮删除上限 = 128 × batch-size。
+
+## 7. 本地真实验证记录（2026-11-27）
+
+在本机 MySQL 3306 + ShardingSphere JDBC driver 5.5.3 + `shardingsphere-config-local.yml` 实跑：
+
+| 验证项 | 方法 | 结果 |
+|---|---|---|
+| 分片表分布 | `information_schema` 精确计数 | turbo_feed_1=64、turbo_feed_2=64，共 128，偶 ds_0/奇 ds_1 ✅ |
+| 迁移分片号算法 | Java `Math.abs(Long.hashCode(id)) % 128` vs `id % 128` | **必须前者**：`id=1789889422631777` 真实 shard=4，而 `id%128=97`；用后者会路由错乱 ✅ |
+| `findById` 路由 | ShardingSphere JDBC 探针 + `sql-show` | id=1789889422631777 → `ds_0_read ::: outbox_event_4` 命中；id=401232572132233216 → `outbox_event_102` 命中 ✅ |
+| `insert` 路由 | 插入探针行查路由 | id=1234567890123456789 → `ds_1_primary ::: outbox_event_97`（奇数落 ds_1），findById 查回 PENDING ✅ |
+| `findDueIds`（参数版，与 Repository 逐字一致） | `status IN(?,?) AND next_attempt_at<=? ORDER BY id LIMIT ?` | 广播 128 片归并，命中到期行 ✅ |
+| `backlog` 聚合 | `GROUP BY status` 广播 | `DEAD=2, PENDING=1`，与物理表一致 ✅ |
+
+- 存量迁移实跑：旧单表 55 行（53 SENT + 2 DEAD），备份为 `outbox_event_backup` 后，
+  2 条 DEAD 按真实 shard（4 / 102）迁入分片表并校验命中；SENT 冷行未迁移（终态、无投递价值）。
+- 探针行已删除；备份表 `turbo_feed_1.outbox_event_backup` 暂留供回滚，观察 30 分钟无异常后按 §5 清理。
+- ⚠️ 本机 Redis/MinIO/3307 副本未起，未做网关完整真启动（无依赖）；以上为 JDBC 层直连 ShardingSphere 的路由实证。
