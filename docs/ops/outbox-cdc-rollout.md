@@ -137,5 +137,25 @@ CAS（PENDING/FAILED → SENDING）保证同一行只被一个投递者领走。
 
 - 全量单测：520 tests / 0 failures / 0 errors / 8 skipped（新增 6 项转发器单测）。
 - 探针行已删；Topic 内的验证消息保留（本地验证 topic，无业务影响）。
-- ⚠️ 未做网关完整真启动（本机 Redis/MinIO 未起）；CDC 消费侧 `OutboxCdcConsumer → tryDeliver` 由单测覆盖，
-  灰度时需按 §4 真启动验证事件行变 SENT。
+
+### 网关完整真启动验证（2026-11-27 11:26）
+
+拉起全部依赖（Redis cluster 7000-7005 / MinIO / RocketMQ / Canal / MySQL 均在线）后，用
+`--spring.profiles.active=mq --spring.profiles.include=ss-local
+--turbofeed.outbox.cdc-forwarder-enabled=true --turbofeed.outbox.cdc-consumer-enabled=true`
+真启动 gateway（10s 启动成功、8080 就绪），完整链路验证：
+
+| 环节 | 证据 | 结果 |
+|---|---|---|
+| CDC Bean 装配 | 日志 `Register the listener to container, listenerBeanName:outboxCdcConsumer` + `running container ... topic=turbofeed-outbox-cdc, consumeMode=ORDERLY` | ✅ |
+| 转发器实时消费 Canal | metrics `consume_seq == produce_seq`、`get_rows == put_rows`（位点追平） | ✅ |
+| INSERT → 转发 → MQ → 消费 → 投递 | 插入 `STORAGE_DELETE` 事件（id=6677889900112233445，正确分片 98），日志 `CDC 转发一轮: forwarded=1` → `OutboxService: 发件箱投递成功: id=6677889900112233445`，traceId=`cdc-e2e-full-001` 贯通消费侧 | ✅ |
+| 事件终态 | DB 中该行 `status=SENT, attempt_count=1`（只投一次，幂等生效） | ✅ |
+| 按 id 精准路由 | 故意插错表的事件，消费侧 `tryDeliver` 仍按 id 路由到 `outbox_event_119`（ds_1），证明路由只认 id 不认插入位置 | ✅ |
+
+> ⚠️ 启动方式坑：长驻进程必须用后台任务方式启动，普通 `nohup ... &` 在 Bash 会话结束时会被回收
+> （本次第一次启动即因此中途退出，改后台任务后正常）。验证完用 TaskStop 停止，中间件容器保留。
+
+- 测试数据已删；`OutboxDeadLetterSweeper` 在网关运行期把迁移的 1 条 DEAD 自动重投成 PENDING（设计内行为）。
+- **结论**：CDC 链路（binlog→Canal→转发器→MQ→消费者→tryDeliver→SENT）端到端打通，traceId 贯通，
+  可按 §4 进入单实例灰度。灰度时仍需观察一周水位指标再全量。
