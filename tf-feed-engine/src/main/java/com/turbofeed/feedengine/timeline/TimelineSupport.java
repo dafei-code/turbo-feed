@@ -45,6 +45,32 @@ final class TimelineSupport {
 
     /** 作者内容索引前缀（关注流 G6 召回用）：authorId -&gt; ZSET(成员串 → 入流时刻毫秒)。 */
     static final String AUTHOR_PREFIX = "tf:feed:author:";
+    /** 作者索引分片后缀（P1）：shard&gt;1 时 key = tf:feed:author:{authorId}:shard:{n}；shard=1 退化为无后缀单 key。 */
+    static final String AUTHOR_SHARD_SUFFIX = ":shard:";
+    /**
+     * 作者索引分片数（P1 默认值，实际由配置覆盖）：默认 1 = 不分片，保持原 key 格式与单测零回归。
+     * 大 V 热 key 治理时调大（建议 8~16），写入写 N 份、读取按 viewer 选 1 份、删除删全部 N 份。
+     */
+    static final int DEFAULT_AUTHOR_INDEX_SHARDS = 1;
+    /**
+     * 作者索引 key：shards&lt;=1 时为历史单 key {@code tf:feed:author:{authorId}}，
+     * 否则为 {@code tf:feed:author:{authorId}:shard:{n}}。格式唯一出口，读写删三处共用。
+     */
+    static String authorIndexKey(String authorId, int shard, int shards) {
+        return shards <= 1 ? AUTHOR_PREFIX + authorId
+                : AUTHOR_PREFIX + authorId + AUTHOR_SHARD_SUFFIX + shard;
+    }
+
+    /** 按 viewer 选择读分片：viewerId 为空时固定读 shard 0（匿名/降级路径）。 */
+    static int authorIndexShardFor(String viewerId, int shards) {
+        if (shards <= 1) {
+            return 0;
+        }
+        if (viewerId == null || viewerId.isEmpty()) {
+            return 0;
+        }
+        return Math.floorMod(viewerId.hashCode(), shards);
+    }
 
     /** 反查索引值里「桶 key」与「成员串」的分隔符（SOH 不可打印字符，不会出现在 key 与 JSON 中）。 */
     static final String IDX_SEP = "\u0001";

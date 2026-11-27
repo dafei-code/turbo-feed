@@ -3,6 +3,7 @@ package com.turbofeed.feedengine.timeline;
 import com.turbofeed.shared.model.FeedItemView;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -28,6 +29,10 @@ public class FollowRecallChannel implements RecallChannel {
 
     private final RecallSupport recallSupport;
 
+    /** 大 V 每位作者的单页取条数：默认 1，防高频发帖霸占关注流槽位。 */
+    @Value("${turbofeed.feed.follow.bigv-per-author-cap:1}")
+    private int bigvPerAuthorCap;
+
     @Override
     public RecallType type() {
         return RecallType.FOLLOW;
@@ -49,7 +54,10 @@ public class FollowRecallChannel implements RecallChannel {
             if (part.size() >= slots) {
                 break;
             }
-            for (FeedItemView it : recallSupport.authorRecentItems(aid, FOLLOW_PER_AUTHOR, ctx.cursor)) {
+            // P0 动态配额：大 V 默认每人 1 条，普通作者仍 3 条；ctx.bigVAuthors 为空即完全退化为原行为。
+            int cap = ctx.bigVAuthors.contains(aid) ? Math.max(1, bigvPerAuthorCap) : FOLLOW_PER_AUTHOR;
+            // P1 分片读：按 viewerId 选分片；shards=1 时等价于原单 key 读取。
+            for (FeedItemView it : recallSupport.authorRecentItems(aid, ctx.userId, cap, ctx.cursor)) {
                 if (part.size() >= slots) {
                     break;
                 }

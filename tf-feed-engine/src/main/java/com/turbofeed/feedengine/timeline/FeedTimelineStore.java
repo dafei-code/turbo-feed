@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static com.turbofeed.feedengine.timeline.TimelineSupport.AUTHOR_PREFIX;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.authorIndexKey;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.BUCKET_TTL;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.IndexEntry;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.MAX_POOL_LEVELS;
@@ -92,6 +92,37 @@ public class FeedTimelineStore {
     private boolean poolReadWeightEnabled;
 
     /**
+     * 关注流作者索引 TTL（小时，默认 24）：原实现与公域桶共用 {@link #BUCKET_TTL}（7 天），
+     * 导致用户翻 7 天前的内容仍会命中作者索引。关注流语义是「近期动态」，缩短到 1 天；
+     * 与公域发现流解耦，两边各自调 TTL 不再互相影响。
+     */
+    @Value("${turbofeed.feed.follow.author-index-ttl-hours:24}")
+    private long authorIndexTtlHours;
+
+    /**
+     * 作者索引分片数（P1，默认 1 不分片）：&gt;1 时写入写 N 份副本，读侧按 viewer hash 选 1 份，
+     * 把大 V 热 key 的读压力摊到 N 个 key。删除必须删全部 N 份（见 {@link #detach}）。
+     */
+    @Value("${turbofeed.feed.follow.author-index-shards:1}")
+    private int authorIndexShards;
+
+    /** 作者索引 L1 缓存（可选注入，保持构造器签名供既有单测直接 new）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AuthorRecentCache authorRecentCache;
+
+    /** 写路径变更后失效作者索引的所有分片缓存（写侧不知道 viewer，按分片全失效最稳妥）。 */
+    private void invalidateAuthorCache(String authorId) {
+        AuthorRecentCache cache = this.authorRecentCache;
+        if (cache == null || authorId == null) {
+            return;
+        }
+        int shards = Math.max(1, authorIndexShards);
+        for (int s = 0; s < shards; s++) {
+            cache.invalidate(authorId, s);
+        }
+    }
+
+    /**
      * 推荐漏斗编排（A7）：本类取好池候选后交给它组织成页。
      * 放在最后注入是因为它是"策略层"，依赖本类不持有的召回/排序/重排服务。
      */
@@ -146,8 +177,16 @@ public class FeedTimelineStore {
         // 关注流作者索引（G6）：denormalized 同成员串，score = 入流时刻；关注召回依此取作者近期内容。
         String authorId = authorIdOf(item);
         if (authorId != null) {
-            redisTemplate.opsForZSet().add(AUTHOR_PREFIX + authorId, member, approvedAt.toEpochMilli());
-            redisTemplate.expire(AUTHOR_PREFIX + authorId, BUCKET_TTL);
+            // 关注流作者索引独立 TTL（默认 24h）：与公域桶 7d 解耦；<=0 时回落到 24h 防误配清空索引。
+            long ttlHours = authorIndexTtlHours <= 0 ? 24 : authorIndexTtlHours;
+            java.time.Duration ttl = java.time.Duration.ofHours(ttlHours);
+            int shards = Math.max(1, authorIndexShards);
+            for (int s = 0; s < shards; s++) {
+                String authorKey = authorIndexKey(authorId, s, shards);
+                redisTemplate.opsForZSet().add(authorKey, member, approvedAt.toEpochMilli());
+                redisTemplate.expire(authorKey, ttl);
+            }
+            invalidateAuthorCache(authorId);
         }
     }
 
@@ -502,10 +541,15 @@ public class FeedTimelineStore {
             return false;
         }
         redisTemplate.opsForZSet().remove(entry.bucketKey(), entry.member());
-        // 同步摘除关注流作者索引（G6）：同成员串，避免已下架内容仍出现在关注流
+        // 同步摘除关注流作者索引（G6）：同成员串，避免已下架内容仍出现在关注流。
+        // 分片模式必须删全部 N 份副本，漏一份 = 该分片的 viewer 仍能看到已下架内容（合规事故）。
         String aid = authorIdFromKey(timelineKey);
         if (aid != null) {
-            redisTemplate.opsForZSet().remove(AUTHOR_PREFIX + aid, entry.member());
+            int shards = Math.max(1, authorIndexShards);
+            for (int s = 0; s < shards; s++) {
+                redisTemplate.opsForZSet().remove(authorIndexKey(aid, s, shards), entry.member());
+            }
+            invalidateAuthorCache(aid);
         }
         if (idxKeyToDelete != null) {
             redisTemplate.delete(idxKeyToDelete);

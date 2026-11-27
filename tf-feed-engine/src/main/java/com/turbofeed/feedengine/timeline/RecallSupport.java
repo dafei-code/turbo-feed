@@ -13,6 +13,7 @@ import com.turbofeed.feedengine.ranking.UserRealtimeProfile;
 import com.turbofeed.shared.model.FeedItemView;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Component;
@@ -25,7 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static com.turbofeed.feedengine.timeline.TimelineSupport.AUTHOR_PREFIX;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.authorIndexKey;
+import static com.turbofeed.feedengine.timeline.TimelineSupport.authorIndexShardFor;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.MAX_POOL_LEVELS;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.MERGE_BUCKETS;
 import static com.turbofeed.feedengine.timeline.TimelineSupport.authorIdOf;
@@ -56,6 +58,17 @@ public class RecallSupport {
     private final FeedModerationProperties moderationProperties;
     private final FeedFilterChain feedFilterChain;
 
+    /** 作者索引分片数（P1）：必须与写入侧 FeedTimelineStore 的同一个配置键保持一致。 */
+    @Value("${turbofeed.feed.follow.author-index-shards:1}")
+    private int authorIndexShards;
+
+    /**
+     * 作者近期内容 L1 缓存（P1）：短 TTL，降低大 V 热 key 的读压力。
+     * 可选注入而非构造器参数：保持既有构造器签名（3 处单测直接 new），缺失时退化为直读 Redis。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private AuthorRecentCache authorRecentCache;
+
     // ===== 解析 / 还原 =====
 
     FeedItemView parseMember(String json) {
@@ -81,12 +94,33 @@ public class RecallSupport {
 
     /** 关注作者近期已审内容（关注流 G6 召回用）；fail-open 返回空集。 */
     List<FeedItemView> authorRecentItems(String authorId, int cap, FeedCursor cursor) {
+        return authorRecentItems(authorId, null, cap, cursor);
+    }
+
+    /**
+     * 带 viewer 的作者近期内容（P1 分片）：按 viewerId hash 选 1 个分片读，把大 V 热 key 压力摊开。
+     * viewerId 为空 / shards&lt;=1 时退化为原单 key 读取（零回归）。
+     */
+    List<FeedItemView> authorRecentItems(String authorId, String viewerId, int cap, FeedCursor cursor) {
         if (authorId == null || authorId.isEmpty() || cap <= 0) {
             return List.of();
         }
+        int shards = Math.max(1, authorIndexShards);
+        int shard = authorIndexShardFor(viewerId, shards);
+        String key = authorIndexKey(authorId, shard, shards);
+        // L1 缓存：loader 内才真正读 Redis；缓存组件缺失（老单测直调）时退化为直读。
+        AuthorRecentCache cache = this.authorRecentCache;
+        if (cache == null) {
+            return loadAuthorRecent(key, authorId, cap, cursor);
+        }
+        return cache.getOrLoad(authorId, shard, () -> loadAuthorRecent(key, authorId, cap, cursor));
+    }
+
+    /** 真正读 Redis + 解析作者索引（L1 loader）；fail-open 返回空集。 */
+    private List<FeedItemView> loadAuthorRecent(String key, String authorId, int cap, FeedCursor cursor) {
         try {
             Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet()
-                    .reverseRangeByScoreWithScores(AUTHOR_PREFIX + authorId,
+                    .reverseRangeByScoreWithScores(key,
                             Double.NEGATIVE_INFINITY,
                             (cursor == null) ? Double.POSITIVE_INFINITY : cursor.score(), 0, cap);
             if (tuples == null) {

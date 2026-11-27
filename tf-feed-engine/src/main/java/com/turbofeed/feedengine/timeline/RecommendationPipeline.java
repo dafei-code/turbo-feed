@@ -209,14 +209,23 @@ public class RecommendationPipeline {
         // 空集合必须用可变 HashSet：authorIdFromKey 对契约外 timelineKey 返回 null（契约明确的 fail-open），
         // 而 JDK 不可变 Set.of() 的 contains(null) 会抛 NPE —— 一条脏 postId 就能打挂整页推荐，
         // 网关 degradedMode=EMPTY 还会把它静默成「无内容」。全仓 8 处 followeeAuthors.contains(...) 共用此集合。
-        Set<String> followeeAuthors = (userId != null && followService.hasFollows(userId))
-                ? new HashSet<>(followService.followedAuthors(userId, FOLLOW_SCAN_LIMIT))
-                : new HashSet<>();
+        // P0 大 V 优先：rankedFollowees 在开关关闭时等价于原 followedAuthors（零回归），
+        // 开启时把大 V 排到扫描窗口前部并给出大 V 集合（供关注召回动态配额用）。
+        FollowService.RankedFollowees ranked = (userId != null && followService.hasFollows(userId))
+                ? followService.rankedFollowees(userId, FOLLOW_SCAN_LIMIT)
+                : new FollowService.RankedFollowees(List.of(), Set.of());
+        // null 防护：兼容只 stub 了旧方法的测试替身与老实现；真实服务永不返回 null。
+        if (ranked == null) {
+            ranked = new FollowService.RankedFollowees(
+                    followService.followedAuthors(userId, FOLLOW_SCAN_LIMIT), Set.of());
+        }
+        Set<String> followeeAuthors = new HashSet<>(ranked.authors());
 
         double[] weights = parsePoolWeights();
 
         RecallContext ctx = new RecallContext(userId, page, limit, cursor, interest, shortInterest,
                 session, negative, realtimeProfile, followeeAuthors, new LinkedHashMap<>(), recallSupport);
+        ctx.bigVAuthors = ranked.bigVAuthors();
 
         // P0-1a 召回归因：按 timelineKey 记录每条内容的召回通道与流量池层级，供 A/B 尺子按「通道 × 实验桶」做效果对照。
         // 冷启动探索池(G7)注入的新鲜内容无显式通道标注 → 末尾映射为 COLD。

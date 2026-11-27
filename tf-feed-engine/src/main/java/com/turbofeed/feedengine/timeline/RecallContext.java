@@ -31,6 +31,12 @@ public class RecallContext {
     public final Set<String> negative;
     public final UserRealtimeProfile realtimeProfile;
     public final Set<String> followeeAuthors;
+    /**
+     * 关注作者中的大 V 集合（P0）：由 pipeline 在读社交图时一并算出，
+     * 供 {@code FollowRecallChannel} 做动态 per-author 配额（大 V 少取、普通作者多取）。
+     * 与 {@link #parsed} 同样在构造后写入，保持构造器签名不变（既有单测零回归）。
+     */
+    public Set<String> bigVAuthors = Set.of();
     /** 池解析后的候选（FeedItemView，已按池压缩），供向量召回取全量候选。构造时为空，池解析后写入。 */
     public Map<Integer, List<FeedItemView>> parsed;
     public final RecallSupport support;

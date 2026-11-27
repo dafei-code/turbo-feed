@@ -111,6 +111,25 @@ turbofeed:
     interest-recall-ratio: ${TURBOFEED_FEED_INTEREST_RECALL_RATIO:0.15}
     # 关注流召回占每页槽位比例（抖音式「关注流 / 社交分发」G6）：关注作者近期已审内容混入发现流
     follow-recall-ratio: ${TURBOFEED_FEED_FOLLOW_RECALL_RATIO:0.1}
+    # 关注流大 V 治理（P0）：
+    #   bigv-first-enabled  默认 false，开启后按粉丝数把大 V 排到扫描窗口前部（解决"大 V 排在 50 名外被截断"）
+    #   bigv-follower-threshold 粉丝数阈值，>= 该值视为大 V
+    #   bigv-scan-window    扫描窗口上限（一次 pipeline 读多少个作者的粉丝数，封顶 1000）
+    #   bigv-per-author-cap 大 V 每位作者单页取几条（普通作者仍 FOLLOW_PER_AUTHOR=3）
+    #   author-index-ttl-hours 作者近期内容索引 TTL（与公域桶 7d 解耦，关注流只看近期）
+    follow:
+      bigv-first-enabled: ${TURBOFEED_FEED_FOLLOW_BIGV_FIRST_ENABLED:false}
+      bigv-follower-threshold: ${TURBOFEED_FEED_FOLLOW_BIGV_THRESHOLD:100000}
+      bigv-scan-window: ${TURBOFEED_FEED_FOLLOW_BIGV_SCAN_WINDOW:200}
+      bigv-per-author-cap: ${TURBOFEED_FEED_FOLLOW_BIGV_PER_AUTHOR_CAP:1}
+      author-index-ttl-hours: ${TURBOFEED_FEED_FOLLOW_AUTHOR_INDEX_TTL_HOURS:24}
+      # 作者索引分片数（P1）：默认 1 = 原单 key；调大（建议 8~16）时写入写 N 份、读按 viewer 选 1 份、
+      # 删除删全部 N 份。⚠️ 改这个值前必须先对存量 key 做一次双写/回填，否则旧数据只在 shard 无后缀的 key 上。
+      author-index-shards: ${TURBOFEED_FEED_FOLLOW_AUTHOR_INDEX_SHARDS:1}
+      # 作者近期内容 L1 缓存（P1）：默认开启，5s TTL-only 失效（关注流是近似信号，短延迟可接受）。
+      # 要求下架即刻从所有实例缓存消失时，可后续打开广播失效（SDK version stamp 已支持乱序消息）。
+      author-cache-enabled: ${TURBOFEED_FEED_FOLLOW_AUTHOR_CACHE_ENABLED:true}
+      author-cache-ttl-seconds: ${TURBOFEED_FEED_FOLLOW_AUTHOR_CACHE_TTL_SECONDS:5}
     # 热点榜 L1 本地缓存（复用 tf-hotspot LocalCacheWithBroadcast，P2-6 第二消费者）：
     # 热点榜 ZSET 在每次行为事件都更新，照搬「每次变更广播」会淹没 pub/sub，
     # 故按设计关闭广播、仅用短 TTL 失效——热点榜 5s 延迟对「热门」召回通道完全可接受。
